@@ -270,6 +270,27 @@ def _write_title_to_grail(studio, scene_num, title):
         return False, f"Error: {e}"
 
 
+def _write_grail_cell(grail_tab, grail_row, column_1based, value):
+    """Write a single cell to the Grail sheet by tab name and row number.
+    grail_tab/grail_row come from asset_tracker scene data.
+    Column mapping: Title=4, Categories=6, Tags=7 (1-based)."""
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        creds = Credentials.from_service_account_file(
+            os.path.join(os.path.dirname(__file__), "service_account.json"),
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        gc = gspread.authorize(creds)
+        _GRAIL_ID = "1Eq5G5FU6A8EqeFZCnZjrEaMYS8F1DiK5vP5tCSINeJk"
+        sh = gc.open_by_key(_GRAIL_ID)
+        ws = sh.worksheet(grail_tab)
+        ws.update_cell(grail_row, column_1based, value)
+        return True, f"Saved to {grail_tab} row {grail_row} col {column_1based}"
+    except Exception as e:
+        return False, f"Error: {e}"
+
+
 def _write_title_to_scripts_sheet(ws_title, row_idx, title):
     """Write a generated title to the Scripts sheet (col K)."""
     try:
@@ -326,43 +347,79 @@ def _checkerboard_bg(w: int, h: int, sq: int = 16):
 st.set_page_config(page_title="Eclatech Hub", page_icon="🎬", layout="wide")
 
 
-# ── Global CSS (cached — avoids re-rendering on every rerun) ─────────────────
-@st.cache_data
-def _global_css():
-    return """<style>
-section[data-testid="stSidebar"] { display: none !important; }
-[data-testid="collapsedControl"]  { display: none !important; }
-.main .block-container {
-    max-width: 100% !important;
-    padding-top: 0.6rem !important;
-    padding-bottom: 1rem !important;
-    padding-left: 2rem !important;
-    padding-right: 2rem !important;
-}
-div[data-testid="stVerticalBlock"] > div { gap: 0.35rem; }
-[data-testid="stHorizontalBlock"] { gap: 0.6rem !important; }
-.stCaptionContainer p { color: #aaa !important; }
-.sh { font-size:0.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
-      color:#6b7280; border-bottom:1px solid #1f293744; padding-bottom:3px; margin:12px 0 6px; }
-</style>"""
-st.markdown(_global_css(), unsafe_allow_html=True)
+# ── Design System ─────────────────────────────────────────────────────────────
+import hub_ui
+st.markdown(hub_ui.global_css(), unsafe_allow_html=True)
+_C = hub_ui.COLORS  # shorthand for inline style references
+
+# ── Globally cached data loaders (shared across all sessions) ────────────────
+# Data loads once, serves everyone for 30 min. Refresh button clears on demand.
+
+@st.cache_data(ttl=1800, show_spinner="Loading asset data...")
+def _cached_load_assets(_studios_tuple, limit):
+    import asset_tracker as _at_inner
+    studios = list(_studios_tuple) if _studios_tuple else None
+    return _at_inner.load_asset_status(studios=studios, limit_per_studio=limit)
+
+
+@st.cache_data(ttl=1800, show_spinner="Loading approvals...")
+def _cached_load_approvals():
+    import approval_tools as _apr_inner
+    return _apr_inner.load_approvals()
+
+
+@st.cache_data(ttl=1800, show_spinner="Loading tickets...")
+def _cached_load_tickets():
+    import ticket_tools as _tkt_inner
+    return _tkt_inner.load_tickets()
+
+
+# ── Ticket linking helper ────────────────────────────────────────────────────
+def _ticket_linker(tab_key):
+    """Show a ticket linking dropdown. Returns the linked ticket ID or None."""
+    _lk_key = f"linked_ticket_{tab_key}"
+    # Derive open tickets from global cache if available, otherwise quick load
+    _all = _cached_load_tickets()
+    _open = [t for t in _all if t["status"] not in ("Closed", "Rejected")]
+    if not _open:
+        return None
+    _opts = ["None"] + [f"{t['id']} — {t['title'][:40]}" for t in _open]
+    _sel = st.selectbox("🔗 Link to ticket", _opts, key=_lk_key, label_visibility="collapsed")
+    if _sel and _sel != "None":
+        _tid = _sel.split(" — ")[0]
+        _match = next((t for t in _open if t["id"] == _tid), None)
+        if _match:
+            _sc = {"New": _C["blue"], "Approved": _C["green"], "In Progress": _C["amber"],
+                   "In Review": _C["accent"]}.get(_match["status"], _C["muted"])
+            st.markdown(
+                f"<div style='font-size:0.7rem;color:{_sc}'>● Linked: {_match['status']}</div>",
+                unsafe_allow_html=True
+            )
+        return _tid
+    return None
+
+
+def _ticket_progress(ticket_id, notes="", by=""):
+    """Progress a linked ticket and clear cache."""
+    if not ticket_id:
+        return
+    try:
+        import ticket_tools as _tkt_p
+        _tkt_p.progress_ticket(ticket_id, new_status="In Progress", notes=notes, by=by)
+        st.session_state.pop("_open_tickets_cache", None)
+        _cached_load_tickets.clear()
+    except Exception:
+        pass
 
 # ── Authentication Gate ───────────────────────────────────────────────────────
+import auth_config
 from auth_config import get_user_permissions, get_allowed_tabs, is_admin
 
 if not st.user.is_logged_in:
-    st.markdown(
-        "<div style='text-align:center; margin-top:120px'>"
-        "<span style='font-size:2.2rem;font-weight:800;letter-spacing:-.02em;"
-        "color:#f3f4f6'>Eclatech Hub</span>"
-        "<p style='color:#9ca3af; margin:24px 0 32px; font-size:1rem'>"
-        "Sign in with your Google account to continue.</p>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    hub_ui.login_page()
     _lc1, _lc2, _lc3 = st.columns([1, 1, 1])
     with _lc2:
-        if st.button("🔑 Sign in with Google", use_container_width=True):
+        if st.button("Sign in with Google", use_container_width=True):
             st.login()
     st.stop()
 
@@ -370,14 +427,7 @@ _auth_email = st.user.email.lower()
 _auth_user = get_user_permissions(_auth_email)
 
 if _auth_user is None:
-    st.markdown(
-        "<div style='text-align:center; margin-top:120px'>"
-        "<span style='font-size:1.5rem;font-weight:700;color:#ef4444'>Access Denied</span>"
-        f"<p style='color:#9ca3af; margin:20px 0'>{st.user.email} is not authorized.</p>"
-        "<p style='color:#6b7280'>Contact Drew for access.</p>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    hub_ui.denied_page(st.user.email)
     _dc1, _dc2, _dc3 = st.columns([1, 1, 1])
     with _dc2:
         if st.button("Sign out", use_container_width=True):
@@ -386,18 +436,14 @@ if _auth_user is None:
 
 _user_name = _auth_user["name"]
 _user_is_admin = is_admin(_auth_user)
+_user_can_write_grail = auth_config.is_grail_writer(_auth_user)
+_user_can_manage_users = auth_config.is_user_manager(_auth_user)
 _user_allowed_tabs = get_allowed_tabs(_auth_user)
 
-# ── Header with user info ─────────────────────────────────────────────────────
+# ── Header ────────────────────────────────────────────────────────────────────
 _hdr1, _hdr2 = st.columns([5, 1])
 with _hdr1:
-    st.markdown(
-        "<div style='margin:0 0 10px'>"
-        "<span style='font-size:1.3rem;font-weight:800;letter-spacing:-.02em;"
-        f"color:#f3f4f6'>Eclatech Hub</span>"
-        f"<span style='font-size:0.8rem;color:#6b7280;margin-left:12px'>Hi, {_user_name}</span>"
-        "</div>",
-        unsafe_allow_html=True)
+    hub_ui.logo_header(_user_name)
 with _hdr2:
     if st.button("Sign out", key="logout_btn"):
         st.logout()
@@ -967,7 +1013,6 @@ else:
 # Use a no-op container for tabs the user can't see — the `with` block still
 # executes syntactically but we immediately skip its body with a flag check.
 _noop = st.container()
-tab_missing = _tab_map.get("Missing", _noop)
 tab_tickets = _tab_map.get("Tickets", _noop)
 tab_research = _tab_map.get("Model Research", _noop)
 tab_scripts = _tab_map.get("Scripts", _noop)
@@ -980,6 +1025,9 @@ _has_tab = _tab_map.__contains__
 # ── TAB 1: Scripts (Manual + From Sheet, single + batch) ─────────────────────
 with tab_scripts:
     if _has_tab("Scripts"):
+        # ── Ticket linking ────────────────────────────────────────────────────────
+        _scripts_linked_ticket = _ticket_linker("scripts")
+
         # ── Mode toggle ───────────────────────────────────────────────────────────
         mode = st.segmented_control("", ["✏️ Manual", "📋 From Sheet"], default="✏️ Manual",
                                     key="sc_mode", label_visibility="collapsed")
@@ -1067,20 +1115,20 @@ with tab_scripts:
                 st.success("All rules passed", icon="✅")
 
             # ── Script summary card ───────────────────────────────────────────────
-            _dest_line = (f"<tr><td style='color:#888;padding:2px 12px 2px 0;font-size:0.82rem'>✈️ Destination</td>"
+            _dest_line = (f"<tr><td style='color:{_C['muted']};padding:2px 12px 2px 0;font-size:0.82rem'>✈️ Destination</td>"
                           f"<td style='font-size:0.88rem'>{fields['destination']}</td></tr>"
                           if fields.get("destination") else "")
             _male_w    = fields.get("wardrobe_male", "")
-            _male_line = (f"<tr><td style='color:#888;padding:2px 12px 2px 0;font-size:0.82rem'>👔 Male</td>"
+            _male_line = (f"<tr><td style='color:{_C['muted']};padding:2px 12px 2px 0;font-size:0.82rem'>👔 Male</td>"
                           f"<td style='font-size:0.88rem'>{_male_w}</td></tr>"
                           if _male_w else "")
             st.markdown(
-                f"<div style='background:#111827;border-radius:8px;padding:12px 16px;margin:6px 0'>"
+                f"<div class='hub-card'>"
                 f"<table style='border-collapse:collapse;width:100%'>"
                 f"{_dest_line}"
-                f"<tr><td style='color:#888;padding:2px 12px 2px 0;font-size:0.82rem'>🎭 Theme</td>"
+                f"<tr><td style='color:{_C['muted']};padding:2px 12px 2px 0;font-size:0.82rem'>🎭 Theme</td>"
                 f"<td style='font-size:0.88rem;font-weight:600'>{fields.get('theme','—')}</td></tr>"
-                f"<tr><td style='color:#888;padding:2px 12px 2px 0;font-size:0.82rem'>👗 Female</td>"
+                f"<tr><td style='color:{_C['muted']};padding:2px 12px 2px 0;font-size:0.82rem'>👗 Female</td>"
                 f"<td style='font-size:0.88rem'>{fields.get('wardrobe_female','—')}</td></tr>"
                 f"{_male_line}"
                 f"</table></div>",
@@ -1103,10 +1151,10 @@ with tab_scripts:
             _prop = fields.get("props", "")
             if _set or _prop:
                 _sp_parts = []
-                if _set:  _sp_parts.append(f"<b style='color:#888'>Set</b> {_set}")
-                if _prop: _sp_parts.append(f"<b style='color:#888'>Props</b> {_prop}")
+                if _set:  _sp_parts.append(f"<b style='color:{_C['muted']}'>Set</b> {_set}")
+                if _prop: _sp_parts.append(f"<b style='color:{_C['muted']}'>Props</b> {_prop}")
                 st.markdown(
-                    f"<p style='font-size:0.82rem;color:#bbb;margin:6px 0'>"
+                    f"<p style='font-size:0.82rem;color:{_C['text']};margin:6px 0'>"
                     + " &nbsp;·&nbsp; ".join(_sp_parts) + "</p>",
                     unsafe_allow_html=True)
 
@@ -1146,32 +1194,64 @@ with tab_scripts:
             st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
             _a1, _a2, _a3 = st.columns([2, 2, 3])
             with _a1:
-                if st.button("✅ Accept & Save", use_container_width=True, type="primary", key="sc_accept"):
-                    saved = False
-                    try:
-                        if _saved_ws_title and _saved_row_idx:
-                            _ws = get_spreadsheet().worksheet(_saved_ws_title)
-                            _do_save(_ws, _saved_row_idx, fields)
-                            st.success(f"Saved → {_saved_ws_title}, row {_saved_row_idx}")
-                            saved = True
-                        else:
-                            ws_found, row_idx = find_row_for_shoot(_saved_female, _saved_studio)
-                            if ws_found and row_idx:
-                                _do_save(ws_found, row_idx, fields)
-                                st.success(f"Saved → {ws_found.title}, row {row_idx}")
+                _accept_label = "Accept & Save" if _user_is_admin else "Submit for Approval"
+                if st.button(_accept_label, use_container_width=True, type="primary", key="sc_accept"):
+                    if _user_is_admin:
+                        # Admin: write directly
+                        saved = False
+                        try:
+                            if _saved_ws_title and _saved_row_idx:
+                                _ws = get_spreadsheet().worksheet(_saved_ws_title)
+                                _do_save(_ws, _saved_row_idx, fields)
+                                st.success(f"Saved → {_saved_ws_title}, row {_saved_row_idx}")
                                 saved = True
                             else:
-                                st.info("No matching row — not saved to sheet.")
-                    except Exception as _e:
-                        st.error(f"Save failed: {_e}")
-                    try:
-                        from training_data import save_accepted
-                        save_accepted(_saved_studio, parsed, fields, _saved_research)
-                    except Exception as _te:
-                        st.warning(f"Training data not saved: {_te}")
-                    if saved:
-                        del st.session_state["last_script"]
-                        st.rerun()
+                                ws_found, row_idx = find_row_for_shoot(_saved_female, _saved_studio)
+                                if ws_found and row_idx:
+                                    _do_save(ws_found, row_idx, fields)
+                                    st.success(f"Saved → {ws_found.title}, row {row_idx}")
+                                    saved = True
+                                else:
+                                    st.info("No matching row — not saved to sheet.")
+                        except Exception as _e:
+                            st.error(f"Save failed: {_e}")
+                        try:
+                            from training_data import save_accepted
+                            save_accepted(_saved_studio, parsed, fields, _saved_research)
+                        except Exception as _te:
+                            st.warning(f"Training data not saved: {_te}")
+                        if saved:
+                            del st.session_state["last_script"]
+                            st.rerun()
+                    else:
+                        # Non-admin: submit for approval
+                        try:
+                            import json as _json_mod
+                            _scene_id = f"{_saved_studio}{_saved_scene}"
+                            _target = f"Scripts:{_saved_ws_title}:{_saved_row_idx}" if _saved_ws_title and _saved_row_idx else "Scripts:unknown:0"
+                            _preview = f"Theme: {fields.get('theme','')}\nPlot: {fields.get('plot','')[:150]}"
+                            _linked = st.session_state.get("scripts_linked_ticket", "")
+                            import approval_tools as _apr_sc
+                            _apr_id = _apr_sc.submit_for_approval(
+                                submitted_by=_user_name,
+                                content_type="script",
+                                scene_id=_scene_id,
+                                studio=_saved_studio,
+                                content_preview=_preview,
+                                content_json=_json_mod.dumps(fields),
+                                target_sheet=_target,
+                                linked_ticket=_linked,
+                            )
+                            st.success(f"Submitted for approval: **{_apr_id}**")
+                            try:
+                                from training_data import save_accepted
+                                save_accepted(_saved_studio, parsed, fields, _saved_research)
+                            except Exception:
+                                pass
+                            del st.session_state["last_script"]
+                            st.rerun()
+                        except Exception as _e:
+                            st.error(f"Approval submission failed: {_e}")
             with _a2:
                 feedback = st.text_input("Director's note", placeholder="What to change…",
                                          key="sc_regen_feedback", label_visibility="collapsed")
@@ -1582,12 +1662,12 @@ with tab_scripts:
                         _sb1, _sb2 = st.columns([5, 1])
                         with _sb1:
                             st.markdown(
-                                f"<div style='background:#111827;border-radius:6px;padding:6px 12px;margin:4px 0;"
+                                f"<div style='background:{_C['surface']};border-radius:6px;padding:6px 12px;margin:4px 0;"
                                 f"display:flex;align-items:center;gap:14px'>"
-                                f"<div style='flex:1;height:4px;background:#1f2937;border-radius:2px;overflow:hidden'>"
-                                f"<div style='width:{_pct}%;height:100%;background:#4caf50;border-radius:2px'></div></div>"
-                                f"<span style='color:#ddd;font-size:0.8rem;white-space:nowrap'>"
-                                f"<b>{_done}</b><span style='color:#666'>/{_total}</span> scripted"
+                                f"<div style='flex:1;height:4px;background:{_C['elevated']};border-radius:2px;overflow:hidden'>"
+                                f"<div style='width:{_pct}%;height:100%;background:{_C['green']};border-radius:2px'></div></div>"
+                                f"<span style='color:{_C['text']};font-size:0.8rem;white-space:nowrap'>"
+                                f"<b>{_done}</b><span style='color:{_C['subtle']}'>/{_total}</span> scripted"
                                 f"</span></div>",
                                 unsafe_allow_html=True
                             )
@@ -1608,22 +1688,22 @@ with tab_scripts:
 
                         for _ci, _opt in enumerate(_scene_opts):
                             _is_sel  = (_sel_idx == _ci)
-                            _card_bg = "#1c2e1c" if _opt["_hp"] else "#2a2314"
-                            _border  = "#4caf50" if _opt["_hp"] else "#ff9800"
-                            _sel_bg  = "#1a2a3a"
+                            _card_bg = _C["green_dim"] if _opt["_hp"] else _C["amber_dim"]
+                            _border  = _C["green"] if _opt["_hp"] else _C["amber"]
+                            _sel_bg  = _C["blue_dim"]
                             if _is_sel:
-                                _card_bg, _border = _sel_bg, "#4a9eff"
+                                _card_bg, _border = _sel_bg, _C["blue"]
 
-                            _male_part  = (f"<span style='color:#888;font-size:0.85rem'> · {_opt['Male']}</span>"
+                            _male_part  = (f"<span style='color:{_C['muted']};font-size:0.85rem'> · {_opt['Male']}</span>"
                                            if _opt.get("Male") else "")
-                            _scene_part = (f"<span style='background:#1e2d40;border-radius:3px;"
+                            _scene_part = (f"<span style='background:{_C['blue_dim']};border-radius:3px;"
                                            f"padding:1px 7px;font-size:0.78rem;margin-left:6px'>{_opt['Scene']}</span>"
                                            if _opt.get("Scene") else "")
-                            _done_badge      = "&nbsp;&nbsp;<span style='color:#4caf50;font-size:0.8rem'>✓ scripted</span>" if _opt["_hp"] else ""
-                            _done_badge_mini = "&nbsp;&nbsp;<span style='color:#4caf50;font-size:0.8rem'>✓</span>" if _opt["_hp"] else ""
-                            _studio_pill = (f"<span style='background:#1e3a5f;border-radius:3px;padding:1px 7px;"
+                            _done_badge      = f"&nbsp;&nbsp;<span style='color:{_C['green']};font-size:0.8rem'>✓ scripted</span>" if _opt["_hp"] else ""
+                            _done_badge_mini = f"&nbsp;&nbsp;<span style='color:{_C['green']};font-size:0.8rem'>✓</span>" if _opt["_hp"] else ""
+                            _studio_pill = (f"<span style='background:{_C['blue_dim']};border-radius:3px;padding:1px 7px;"
                                             f"font-size:0.78rem;margin-left:8px'>{_opt['Studio']}</span>")
-                            _date_span   = (f"<span style='color:#999;font-size:0.78rem;width:55px;"
+                            _date_span   = (f"<span style='color:{_C['muted']};font-size:0.78rem;width:55px;"
                                             f"display:inline-block'>{_opt['Date']}</span>")
                             _name_span   = f"<b style='font-size:0.95rem'>{_opt['Female']}</b>"
                             _card_inner  = f"{_date_span}{_name_span}{_male_part}{_studio_pill}{_scene_part}"
@@ -1633,8 +1713,8 @@ with tab_scripts:
                                 _th = _opt.get("_theme", "")
                                 _ti = _opt.get("_title", "")
                                 _parts2 = []
-                                if _th: _parts2.append(f"<span style='color:#6ee7b7'>{_th}</span>")
-                                if _ti: _parts2.append(f"<span style='color:#9ca3af;font-style:italic'>{_ti}</span>")
+                                if _th: _parts2.append(f"<span style='color:{_C['green']}'>{_th}</span>")
+                                if _ti: _parts2.append(f"<span style='color:{_C['muted']};font-style:italic'>{_ti}</span>")
                                 if _parts2:
                                     _theme_line = f"<div style='font-size:0.72rem;margin-top:3px;padding-left:55px'>{'&nbsp;·&nbsp;'.join(_parts2)}</div>"
 
@@ -1781,6 +1861,7 @@ with tab_scripts:
                                     _results.append({
                                         "label": f"{_bfemale} — {_bstudio}",
                                         "ws": _ws, "row_idx": _row["_row_idx"],
+                                        "studio": _bstudio, "scene": _bscene,
                                         "parsed": _bparsed, "fields": _bfields,
                                         "full_text": _btext, "research": "",
                                         "violations": _bviols,
@@ -1813,17 +1894,17 @@ with tab_scripts:
                                 _dot = lambda c: f"<span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:{c};margin:0 2px'></span>"
                                 _prog_dots = ""
                                 for _pi, _pr in enumerate(_bresults):
-                                    if _pr.get("auto_saved"):  _prog_dots += _dot("#22c55e")
-                                    elif _pr.get("dry_run"):   _prog_dots += _dot("#374151")
+                                    if _pr.get("auto_saved"):  _prog_dots += _dot(_C["green"])
+                                    elif _pr.get("dry_run"):   _prog_dots += _dot(_C["subtle"])
                                     elif _pi in _bdecisions:
-                                        _prog_dots += _dot("#22c55e" if _bdecisions[_pi] == "accepted" else "#ef4444")
-                                    elif _pi == _next_idx:     _prog_dots += _dot("#3b82f6")
-                                    else:                      _prog_dots += _dot("#1f2937")
+                                        _prog_dots += _dot(_C["green"] if _bdecisions[_pi] == "accepted" else _C["red"])
+                                    elif _pi == _next_idx:     _prog_dots += _dot(_C["blue"])
+                                    else:                      _prog_dots += _dot(_C["elevated"])
                                 st.markdown(
                                     f"<div style='display:flex;align-items:center;gap:8px;margin:0 0 8px'>"
                                     f"<div>{_prog_dots}</div>"
-                                    f"<span style='font-size:0.8rem;color:#aaa'>"
-                                    f"<b style='color:#ddd'>{_reviewed}</b>/{_total_reviewable} reviewed</span></div>",
+                                    f"<span style='font-size:0.8rem;color:{_C['muted']}'>"
+                                    f"<b style='color:{_C['text']}'>{_reviewed}</b>/{_total_reviewable} reviewed</span></div>",
                                     unsafe_allow_html=True)
 
                                 if _next_idx is None:
@@ -1840,15 +1921,14 @@ with tab_scripts:
 
                                     # Compact script card
                                     st.markdown(
-                                        f"<div style='background:#111827;border-radius:8px;"
-                                        f"padding:12px 16px;border-left:3px solid "
-                                        f"{'#f59e0b' if _bv else '#22c55e'}'>"
+                                        f"<div class='hub-card hub-card-accent' style='border-left-color:"
+                                        f"{_C['amber'] if _bv else _C['green']}'>"
                                         f"<span style='font-size:1.05rem;font-weight:700'>{_bres['label']}</span>"
-                                        f"<span style='color:#888;margin-left:10px;font-size:0.85rem'>"
+                                        f"<span style='color:{_C['muted']};margin-left:10px;font-size:0.85rem'>"
                                         f"{_bf.get('theme','')}</span><br>"
-                                        f"<span style='color:#aaa;font-size:0.82rem'>"
+                                        f"<span style='color:{_C['muted']};font-size:0.82rem'>"
                                         f"👗 {_bf.get('wardrobe_female','—')}</span>"
-                                        + (f"&emsp;<span style='color:#aaa;font-size:0.82rem'>"
+                                        + (f"&emsp;<span style='color:{_C['muted']};font-size:0.82rem'>"
                                            f"👔 {_bf.get('wardrobe_male','')}</span>"
                                            if _bf.get('wardrobe_male') else "")
                                         + f"</div>",
@@ -1862,21 +1942,46 @@ with tab_scripts:
 
                                     _bca, _bcb = st.columns(2)
                                     with _bca:
-                                        if st.button("👍 Accept & Save", key=f"sc_acc_{_bi2}",
+                                        _b_acc_label = "Accept & Save" if _user_is_admin else "Submit for Approval"
+                                        if st.button(_b_acc_label, key=f"sc_acc_{_bi2}",
                                                      use_container_width=True, type="primary"):
-                                            try:
-                                                _do_save(_bres["ws"], _bres["row_idx"], _bf)
+                                            if _user_is_admin:
                                                 try:
-                                                    from training_data import save_accepted
-                                                    save_accepted(_bres["parsed"]["studio"],
-                                                                  _bres["parsed"], _bf, _bres["research"])
-                                                except Exception as _te:
-                                                    st.warning(f"Training data not saved: {_te}")
-                                                _bdecisions[_bi2] = "accepted"
-                                                st.session_state["batch_decisions"] = _bdecisions
-                                                st.rerun()
-                                            except Exception as _e:
-                                                st.error(f"Save failed: {_e}")
+                                                    _do_save(_bres["ws"], _bres["row_idx"], _bf)
+                                                    try:
+                                                        from training_data import save_accepted
+                                                        save_accepted(_bres["parsed"]["studio"],
+                                                                      _bres["parsed"], _bf, _bres["research"])
+                                                    except Exception as _te:
+                                                        st.warning(f"Training data not saved: {_te}")
+                                                    _bdecisions[_bi2] = "accepted"
+                                                    st.session_state["batch_decisions"] = _bdecisions
+                                                    st.rerun()
+                                                except Exception as _e:
+                                                    st.error(f"Save failed: {_e}")
+                                            else:
+                                                try:
+                                                    import json as _json_mod
+                                                    _b_studio = _bres.get("studio", _bres["parsed"].get("studio", ""))
+                                                    _b_scene = _bres.get("scene", "")
+                                                    _b_sid = f"{_b_studio}{_b_scene}" if _b_scene else _b_studio
+                                                    _b_target = f"Scripts:{_bres['ws'].title}:{_bres['row_idx']}"
+                                                    _b_preview = f"Theme: {_bf.get('theme','')}\nPlot: {_bf.get('plot','')[:150]}"
+                                                    import approval_tools as _apr_b
+                                                    _apr_b.submit_for_approval(
+                                                        submitted_by=_user_name,
+                                                        content_type="script",
+                                                        scene_id=_b_sid,
+                                                        studio=_b_studio,
+                                                        content_preview=_b_preview,
+                                                        content_json=_json_mod.dumps(_bf),
+                                                        target_sheet=_b_target,
+                                                    )
+                                                    _bdecisions[_bi2] = "accepted"
+                                                    st.session_state["batch_decisions"] = _bdecisions
+                                                    st.rerun()
+                                                except Exception as _e:
+                                                    st.error(f"Approval failed: {_e}")
                                     with _bcb:
                                         if st.button("👎 Skip", key=f"sc_skip_{_bi2}",
                                                      use_container_width=True):
@@ -2267,588 +2372,7 @@ with tab_titles:
                 use_container_width=True,
             )
 
-    # ── TAB 5: Missing Items ─────────────────────────────────────────────────────
-with tab_missing:
-    if _has_tab("Missing"):
-        st.subheader("⚠️ Missing Items")
-
-        _GRAIL_ID_M = "1Eq5G5FU6A8EqeFZCnZjrEaMYS8F1DiK5vP5tCSINeJk"
-        _STUDIO_TABS_M = {"VRH": "VRHush", "FPVR": "FuckPassVR", "VRA": "VRAllure", "NNJOI": "NaughtyJOI"}
-
-        _STUDIO_CONFIG_M = {
-            "VRH": {"name": "VRHush", "cta": "Taste {pronoun} on VRHush now."},
-            "FPVR": {"name": "FuckPassVR", "cta": "Watch {pronoun} on FuckPassVR now."},
-            "VRA": {"name": "VRAllure", "cta": "Watch {pronoun} on VRAllure now."},
-            "NNJOI": {"name": "NJOI", "cta": "Watch {pronoun} on NJOI now."},
-        }
-
-        def _check_missing():
-            """Pull last 5 scenes per studio from Grail + Scripts + MEGA scan."""
-            _ck = "_missing_data"
-            _tsk = "_missing_data_ts"
-            _now = time.time()
-            if _ck in st.session_state and _now - st.session_state.get(_tsk, 0) < 600:
-                return st.session_state[_ck]
-            import gspread as _gs, json as _json
-            from google.oauth2.service_account import Credentials as _Creds
-            from datetime import date as _date
-            _creds = _Creds.from_service_account_file(
-                os.path.join(os.path.dirname(__file__), "service_account.json"),
-                scopes=["https://www.googleapis.com/auth/spreadsheets"]
-            )
-            _gc = _gs.authorize(_creds)
-            _grail = _gc.open_by_key(_GRAIL_ID_M)
-            _scripts_sh = _gc.open_by_key("1cY-8zNHLmD-oWdyEa2Mt3VY3nsFXHLEeZx0n42uf3ZQ")
-
-            # Build lookup of (studio_lower, female_lower) → {plot, theme, script_title}
-            # Build lookup of (studio_lower, female_lower) → {plot, theme, script_title}
-            # Check current month + previous month to catch recent shoots
-            _plot_lookup = {}
-            _studio_map_scripts = {
-                "FuckPassVR": "FPVR", "FuckpassVR": "FPVR", "fuckpassvr": "FPVR",
-                "VRHush": "VRH", "vrhush": "VRH",
-                "VRAllure": "VRA", "vrallure": "VRA",
-                "NaughtyJOI": "NJOI", "naughtyjoi": "NJOI",
-            }
-            try:
-                _today = _date.today()
-                _months_to_check = [_today.strftime("%B %Y")]
-                _prev = _today.replace(day=1) - __import__('datetime').timedelta(days=1)
-                _months_to_check.append(_prev.strftime("%B %Y"))
-
-                for _month_name in _months_to_check:
-                    try:
-                        _scripts_ws = _scripts_sh.worksheet(_month_name)
-                        _script_rows = _scripts_ws.get_all_values()
-                        for _sr in _script_rows[1:]:
-                            _studio_raw = _sr[1].strip() if len(_sr) > 1 else ""
-                            _fem = _sr[4].strip() if len(_sr) > 4 else ""
-                            _theme = _sr[6].strip() if len(_sr) > 6 else ""
-                            _plot = _sr[9].strip() if len(_sr) > 9 else ""
-                            _stitle = _sr[10].strip() if len(_sr) > 10 else ""
-                            if _fem:
-                                _scode = _studio_map_scripts.get(_studio_raw, _studio_raw.upper())
-                                _key = f"{_scode}|{_fem.lower()}"
-                                _data = {"plot": _plot, "theme": _theme, "script_title": _stitle}
-                                if _plot:
-                                    _plot_lookup[_key] = _data
-                                _plot_lookup[_fem.lower()] = _data
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            # Load MEGA scan for asset checks
-            _mega_lookup = {}
-            _scan_date = ""
-            try:
-                _scan_path = os.path.join(os.path.dirname(__file__), "mega_scan.json")
-                if os.path.exists(_scan_path):
-                    with open(_scan_path) as _f:
-                        _scan = _json.load(_f)
-                    _scan_date = _scan.get("scanned_at", "")[:10]
-                    for _s in _scan.get("scenes", []):
-                        _sid = _s.get("scene_id", _s.get("id", ""))
-                        _mega_lookup[_sid] = _s
-            except Exception:
-                pass
-
-            results = {"_plot_lookup": _plot_lookup, "_scan_date": _scan_date}
-            for _tab, _studio_name in _STUDIO_TABS_M.items():
-                try:
-                    _ws = _grail.worksheet(_tab)
-                    _all = _ws.get_all_values()
-                    _data_rows = [(i, r) for i, r in enumerate(_all[1:], start=2)
-                                  if len(r) > 1 and r[1].strip()]
-                    _last5 = _data_rows[-5:]
-
-                    scenes = []
-                    for _row_num, _r in _last5:
-                        _site_code = _r[0].strip().upper() if _r[0] else _tab
-                        _scene_num = _r[1].strip() if len(_r) > 1 else ""
-                        _sid = f"{_site_code}{_scene_num}"
-                        _release_date = _r[2].strip() if len(_r) > 2 else ""
-                        _title = _r[3].strip() if len(_r) > 3 else ""
-                        _performers = _r[4].strip() if len(_r) > 4 else ""
-                        _cats = _r[5].strip() if len(_r) > 5 else ""
-                        _tags = _r[6].strip() if len(_r) > 6 else ""
-                        _female = _performers.split(",")[0].strip() if _performers else ""
-
-                        # Check Scripts sheet — try studio+female first, then female only
-                        _script_data = _plot_lookup.get(f"{_tab}|{_female.lower()}",
-                                       _plot_lookup.get(_female.lower(), {}))
-                        _has_plot = bool(_script_data.get("plot"))
-
-                        # Check MEGA scan for assets
-                        _mega_entry = None
-                        for _try_id in [_sid, _sid.lower(), f"{_tab}{_scene_num}", f"{_tab.lower()}{_scene_num}"]:
-                            if _try_id in _mega_lookup:
-                                _mega_entry = _mega_lookup[_try_id]
-                                break
-                        if _mega_entry is None and _scene_num:
-                            _padded = _scene_num.zfill(4)
-                            for _try_id in [f"{_site_code}{_padded}", f"{_tab}{_padded}",
-                                            f"{_site_code.lower()}{_padded}", f"{_tab.lower()}{_padded}"]:
-                                if _try_id in _mega_lookup:
-                                    _mega_entry = _mega_lookup[_try_id]
-                                    break
-                        _has_desc = _mega_entry.get("has_description", False) if _mega_entry else None
-                        _has_videos = _mega_entry.get("has_videos") if _mega_entry else None
-                        _has_thumbnail = _mega_entry.get("has_thumbnail") if _mega_entry else None
-                        _has_photos = _mega_entry.get("has_photos") if _mega_entry else None
-                        _has_storyboard = _mega_entry.get("has_storyboard") if _mega_entry else None
-                        _video_count = _mega_entry.get("video_count", 0) if _mega_entry else 0
-                        _storyboard_count = _mega_entry.get("storyboard_count", 0) if _mega_entry else 0
-
-                        missing = []
-                        if not _title:
-                            missing.append("title")
-                        if not _cats:
-                            missing.append("categories")
-                        if not _tags:
-                            missing.append("tags")
-                        if _mega_entry is None or _mega_entry.get("no_folder"):
-                            # No MEGA folder found at all
-                            missing.append("folder")
-                        else:
-                            if not _has_desc:
-                                missing.append("description")
-                            if not _has_videos:
-                                missing.append("videos")
-                            if not _has_thumbnail:
-                                missing.append("thumbnail")
-                            if not _has_photos:
-                                missing.append("photos")
-                            if not _has_storyboard:
-                                missing.append("storyboard")
-
-                        scenes.append({
-                            "row": _row_num, "sid": _sid, "scene_num": _scene_num,
-                            "female": _female, "performers": _performers,
-                            "title": _title, "cats": _cats, "tags": _tags,
-                            "release_date": _release_date,
-                            "has_plot": _has_plot, "has_desc": _has_desc,
-                            "has_videos": _has_videos, "has_thumbnail": _has_thumbnail,
-                            "has_photos": _has_photos, "has_storyboard": _has_storyboard,
-                            "video_count": _video_count, "storyboard_count": _storyboard_count,
-                            "theme": _script_data.get("theme", ""),
-                            "plot": _script_data.get("plot", ""),
-                            "missing": missing, "tab": _tab,
-                        })
-                    results[_tab] = {"studio": _studio_name, "scenes": scenes}
-                except Exception as _e:
-                    results[_tab] = {"studio": _studio_name, "scenes": [], "error": str(_e)}
-            st.session_state[_ck] = results
-            st.session_state[_tsk] = _now
-            return results
-
-        # Auto-populate, cached by Streamlit
-        try:
-            _mdata = _check_missing()
-        except Exception as _scan_err:
-            st.error(f"Could not scan: {_scan_err}")
-            _mdata = {}
-        _scan_dt = _mdata.get("_scan_date", "")
-
-        _mr1, _mr2, _mr3 = st.columns([4, 1, 1])
-        with _mr1:
-            if _scan_dt:
-                st.caption(f"_MEGA last scanned: {_scan_dt}_")
-            else:
-                st.caption("_No MEGA scan data — click Refresh MEGA to scan_")
-        with _mr2:
-            if st.button("🔄 Rescan Grail", key="missing_rescan", use_container_width=True,
-                          help="Re-reads Grail + Scripts sheets for title/plot status"):
-                st.session_state.pop("_missing_data", None); st.session_state.pop("_missing_data_ts", None)
-                st.rerun()
-        with _mr3:
-            _mega_refresh = st.button("📡 Refresh MEGA", key="missing_mega_refresh", use_container_width=True,
-                                       help="Scans MEGA folders for assets (Description, Videos, Photos, etc.)")
-
-        if _mega_refresh:
-            import subprocess as _sp_mr
-
-            # Collect all scene IDs shown in the Missing tab
-            _all_sids = []
-            for _tk, _info in _mdata.items():
-                if _tk.startswith("_"):
-                    continue
-                for _sc in _info.get("scenes", []):
-                    _padded = re.sub(r'([A-Za-z]+)(\d+)', lambda m: m.group(1).upper() + m.group(2).zfill(4), _sc["sid"])
-                    _all_sids.append({"studio": _tk, "scene_id": _padded})
-
-            # Write request file for the worker
-            import json as _json_mr
-            _req_path = os.path.join(os.path.dirname(__file__), "mega_scan_request.json")
-            with open(_req_path, "w") as _f_req:
-                _json_mr.dump({"scenes": _all_sids}, _f_req)
-
-            # Trigger pre-registered "MEGAScan" scheduled task (runs as andre user)
-            with st.spinner(f"Scanning {len(_all_sids)} scenes on MEGA…"):
-                try:
-                    _sp_mr.run(["schtasks", "/run", "/tn", "MEGAScan"],
-                               capture_output=True, text=True, timeout=10)
-
-                    # Poll for completion (request file disappears when worker finishes)
-                    _waited = 0
-                    while os.path.exists(_req_path) and _waited < 30:
-                        time.sleep(1)
-                        _waited += 1
-
-                    if not os.path.exists(_req_path):
-                        _scan_path_mr = os.path.join(os.path.dirname(__file__), "mega_scan.json")
-                        with open(_scan_path_mr) as _f_scan:
-                            _updated = _json_mr.load(_f_scan)
-                        st.success(f"✅ MEGA scan updated — {len(_updated.get('scenes', []))} scenes as of {_updated.get('scanned_at', '')[:19]}")
-                    else:
-                        st.warning("Scan still running — click Rescan Grail in a few seconds to see results")
-                except Exception as _te:
-                    st.error(f"Could not run MEGA scan: {_te}")
-
-                st.session_state.pop("_missing_data", None)
-                st.session_state.pop("_missing_data_ts", None)
-                st.rerun()
-
-        # ── Handle pending generation triggers (from previous rerun) ─────────────
-        _gen_title_trigger = st.session_state.pop("_gen_title_trigger", None)
-        if _gen_title_trigger:
-            _gt_sid = _gen_title_trigger["sid"]
-            _gt_studio = _gen_title_trigger["studio"]
-            _gt_female = _gen_title_trigger["female"]
-            _gt_theme = _gen_title_trigger.get("theme", "")
-            _gt_plot = _gen_title_trigger.get("plot", "")
-            with st.spinner(f"Generating title for {_gt_sid}…"):
-                _gen = _generate_title(_gt_studio, _gt_female, _gt_theme, _gt_plot)
-            if _gen:
-                st.session_state[f"tin_{_gt_sid}"] = _gen
-            else:
-                st.session_state[f"tin_{_gt_sid}"] = "⚠️ Generation failed"
-            st.session_state["_expand_sid"] = _gt_sid
-
-        _gen_desc_trigger = st.session_state.pop("_gen_desc_trigger", None)
-        if _gen_desc_trigger:
-            _gd_sid = _gen_desc_trigger["sid"]
-            _gd_tab = _gen_desc_trigger["tab"]
-            _gd_data = _gen_desc_trigger
-            _claude_key = os.environ.get("ANTHROPIC_API_KEY", "")
-            if _claude_key:
-                _desc_key_t = "NJOI" if _gd_tab == "NNJOI" else _gd_tab
-                # Use compilation prompt if title indicates a compilation
-                _gd_title = _gd_data.get("title", "")
-                if _is_compilation(_gd_title):
-                    _desc_sys = _DESC_SYSTEMS_COMPILATION.get(_desc_key_t, _DESC_SYSTEMS_FULL.get(_desc_key_t, ""))
-                else:
-                    _desc_sys = _DESC_SYSTEMS_FULL.get(_desc_key_t, _DESC_SYSTEMS_FULL.get("VRH", ""))
-                _d_cfg = _DESC_STUDIO_CONFIG.get(_desc_key_t, _DESC_STUDIO_CONFIG.get("VRH", {}))
-                _d_prompt = _build_scene_prompt(
-                    _desc_key_t, _d_cfg,
-                    title=_gd_data.get("title", "Untitled"),
-                    female=_gd_data.get("female", ""),
-                    male=_gd_data.get("male", ""),
-                    plot=_gd_data.get("plot", "N/A"),
-                    categories=_gd_data.get("cats", ""),
-                    model_props="", sex_positions="", target_keywords="",
-                    resolution="8K", wardrobe="",
-                )
-                with st.spinner(f"Generating description for {_gd_sid}…"):
-                    try:
-                        import anthropic as _anth_t
-                        _bac = _anth_t.Anthropic(api_key=_claude_key)
-                        _bm = _bac.messages.create(
-                            model="claude-sonnet-4-6", max_tokens=1200,
-                            system=_desc_sys,
-                            messages=[{"role": "user", "content": _d_prompt}])
-                        st.session_state[f"mdesc_{_gd_sid}"] = _bm.content[0].text.strip()
-                    except Exception as _de:
-                        st.session_state[f"mdesc_{_gd_sid}"] = f"⚠️ Failed: {_de}"
-                st.session_state["_expand_sid"] = _gd_sid
-
-        _total_missing = 0
-        _total_scenes = 0
-
-        # Parse release dates for sorting (soonest first = highest priority)
-        from datetime import datetime as _dt_sort
-        def _parse_release(d):
-            if not d:
-                return _dt_sort(2099, 1, 1)
-            for _fmt in ("%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y", "%B %d, %Y", "%b %d, %Y"):
-                try:
-                    return _dt_sort.strptime(d.strip(), _fmt)
-                except ValueError:
-                    continue
-            return _dt_sort(2099, 1, 1)
-
-        def _rel_short(d):
-            if not d:
-                return ""
-            for _fmt in ("%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y", "%B %d, %Y", "%b %d, %Y"):
-                try:
-                    _o = _dt_sort.strptime(d.strip(), _fmt)
-                    return _o.strftime("%b ") + str(_o.day)
-                except ValueError:
-                    continue
-            return d
-
-        def _asset_row(has_desc, has_videos, video_count, has_thumb, has_photos, has_storyboard, storyboard_count):
-            """Single emoji status line for all MEGA assets."""
-            def _icon(val, count=None):
-                if val is True:
-                    return ("✅" + (f" ×{count}" if count else ""))
-                elif val is False:
-                    return "❌"
-                return "—"
-            parts = [
-                f"Desc {_icon(has_desc)}",
-                f"Videos {_icon(has_videos, video_count)}",
-                f"Thumb {_icon(has_thumb)}",
-                f"Photos {_icon(has_photos)}",
-                f"Storyboard {_icon(has_storyboard, storyboard_count)}",
-            ]
-            return "  ·  ".join(parts)
-
-        def _build_docx_common(talent_ln, title_val, tags, cats, desc_text, studio="FPVR"):
-            try:
-                return _build_docx(talent_ln, title_val, tags, cats, desc_text, studio=studio)
-            except Exception:
-                return None
-
-        def _render_desc_section(_sid, _sid_pad, _sc, _tab_key, _is_missing):
-            """Shared description UI for both missing and complete scenes."""
-            _btn_label = "✨ Generate Description" if _is_missing else "✨ Regenerate"
-            _btn_type  = "primary" if _is_missing else "secondary"
-            _desc_key  = f"mdesc_{_sid}"
-
-            def _on_gen(_sid=_sid, _tab_key=_tab_key, _sc=_sc):
-                st.session_state["_gen_desc_trigger"] = {
-                    "sid": _sid, "tab": _tab_key,
-                    "title": _sc['title'] or 'Untitled',
-                    "female": _sc['female'],
-                    "male": _sc['performers'].split(",", 1)[1].strip() if "," in _sc['performers'] else "",
-                    "plot": _sc.get('plot', 'N/A'),
-                    "cats": _sc['cats'],
-                }
-                st.session_state["_expand_sid"] = _sid
-            st.button(_btn_label, key=f"gen_d_{_sid}", use_container_width=True,
-                      type=_btn_type, on_click=_on_gen)
-
-            if _desc_key in st.session_state:
-                _desc_text = st.text_area("desc", value=st.session_state[_desc_key],
-                                          key=f"dta_{_sid}", height=260, label_visibility="collapsed")
-                _female_names = [n.strip() for n in _sc['female'].split(",") if n.strip()]
-                _male_names_d = [n.strip() for n in (_sc['performers'].split(",")[1:]) if n.strip()] if "," in _sc['performers'] else []
-                _talent_ln = ", ".join(_female_names + _male_names_d)
-                _f_slug = _female_names[0].replace(" ", "") if _female_names else "Unknown"
-                _m_slug = ("-" + _male_names_d[0].replace(" ", "")) if _male_names_d else ""
-                _fn_base = f"{_sid_pad}-{_f_slug}{_m_slug}"
-                _title_for_doc = _sc.get('title') or st.session_state.get(f"tin_{_sid}", "") or "Untitled"
-                _m_studio = _tab_key if _tab_key != "NNJOI" else "NJOI"
-                _docx_data = _build_docx_common(_talent_ln, _title_for_doc, _sc.get('tags',''), _sc.get('cats',''), _desc_text, studio=_m_studio)
-
-                # Build .txt with HTML-linked categories and tags
-                _txt_parts_m = [_talent_ln, f"Title: {_title_for_doc}",
-                                f"Tags: {_tags_as_html(_m_studio, _sc.get('tags',''))}",
-                                f"Categories: {_cats_as_html(_m_studio, _sc.get('cats',''))}",
-                                "", _desc_text]
-                _full_txt_m = "\n".join(_txt_parts_m)
-
-                _dd1, _dd2, _dd3 = st.columns(3)
-                with _dd1:
-                    st.download_button("⬇ .txt", data=_full_txt_m, file_name=f"{_fn_base}.txt",
-                                       mime="text/plain", key=f"dl_d_{_sid}", use_container_width=True)
-                with _dd2:
-                    if _docx_data:
-                        st.download_button("⬇ .docx", data=_docx_data, file_name=f"{_fn_base}.docx",
-                                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                           key=f"dl_dx_{_sid}", use_container_width=True)
-                with _dd3:
-                    # MEGA description save disabled — descriptions managed manually
-                    st.caption("_Save to MEGA disabled_")
-
-        # ── Global summary strip ──────────────────────────────────────────────────
-        _all_scenes_flat = [s for k, v in _mdata.items() if not k.startswith("_")
-                            for s in v.get("scenes", [])]
-        _total_scenes = len(_all_scenes_flat)
-        _type_counts = {}
-        for _s in _all_scenes_flat:
-            for _m in _s.get("missing", []):
-                _type_counts[_m] = _type_counts.get(_m, 0) + 1
-        _total_missing = sum(1 for s in _all_scenes_flat if s["missing"])
-
-        if _type_counts:
-            _sm_cols = st.columns(len(_type_counts) + 1)
-            _sm_cols[0].metric("Total Missing", _total_missing)
-            for _i, (_k, _v) in enumerate(sorted(_type_counts.items())):
-                _sm_cols[_i + 1].metric(_k.title(), _v)
-        else:
-            st.success(f"✅ All {_total_scenes} recent scenes complete across all studios")
-        st.divider()
-
-        for _tab_key, _info in _mdata.items():
-            if _tab_key.startswith("_"):
-                continue
-            _studio_nm = _info["studio"]
-            _scenes = _info.get("scenes", [])
-
-            if _info.get("error"):
-                st.error(f"**{_studio_nm}**: {_info['error']}")
-                continue
-
-            # Sort scenes by release date (soonest first)
-            _scenes_sorted = sorted(_scenes, key=lambda s: _parse_release(s.get("release_date", "")))
-            _missing_count = sum(1 for s in _scenes_sorted if s["missing"])
-
-            # Studio section header
-            _sh1, _sh2 = st.columns([5, 1])
-            with _sh1:
-                if _missing_count == 0:
-                    st.markdown(f"#### ✅ {_studio_nm}")
-                else:
-                    _breakdown = "  ·  ".join(f"**{v}** {k}" for k, v in sorted(
-                        {_m: sum(1 for s in _scenes_sorted if _m in s["missing"])
-                         for _m in set(m for s in _scenes_sorted for m in s["missing"])}.items()))
-                    st.markdown(f"#### 🔴 {_studio_nm} — {_missing_count}/{len(_scenes_sorted)} scenes — {_breakdown}")
-            with _sh2:
-                pass
-
-            for _sc in _scenes_sorted:
-                _sid = _sc["sid"]
-                _fem = _sc["female"]
-                _miss = _sc["missing"]
-                _rel = _sc.get("release_date", "")
-                _sid_pad = re.sub(r'([A-Za-z]+)(\d+)', lambda m: m.group(1) + m.group(2).zfill(4), _sid)
-                _is_comp = bool(re.search(r'\bVol\.?\s*\d|\bVolume\b|\bBest\s+Of\b|\bCompilation\b', _sc.get('title', '') or '', re.I))
-                _comp_tag = " · COMP" if _is_comp else ""
-                _expand_this = st.session_state.get("_expand_sid") == _sid
-                _rshort = _rel_short(_rel)
-                _date_str = (f" · {_rshort}" if _rshort else "")
-
-                if _miss:
-                    _miss_str = ", ".join(_miss)
-                    _exp_label = f"🔴 {_sid_pad}{_comp_tag} · {_fem}{_date_str} — {_miss_str}"
-                    with st.expander(_exp_label, expanded=_expand_this):
-                        # ── Performers + date ───────────────────────────────────
-                        _pi1, _pi2 = st.columns([4, 1])
-                        with _pi1:
-                            st.markdown(f"**{_sc['performers']}**")
-                        with _pi2:
-                            if _rel:
-                                st.caption(_rel)
-
-                        # ── MEGA asset grid ─────────────────────────────────────
-                        st.caption(_asset_row(_sc.get('has_desc'), _sc.get('has_videos'), _sc.get('video_count'), _sc.get('has_thumbnail'), _sc.get('has_photos'), _sc.get('has_storyboard'), _sc.get('storyboard_count')))
-
-                        # ── Create MEGA folder if none exists ──────────────────
-                        if "folder" in _miss:
-                            _cf1, _cf2 = st.columns([1, 3])
-                            with _cf1:
-                                def _on_create_folder(_sid=_sid, _tab_key=_tab_key):
-                                    st.session_state[f"_create_mega_{_sid}"] = True
-                                    st.session_state["_expand_sid"] = _sid
-                                st.button("📁 Create MEGA Folder", key=f"mk_mega_{_sid}",
-                                          type="secondary", use_container_width=True,
-                                          on_click=_on_create_folder)
-                            with _cf2:
-                                st.caption(f"Creates {_sid_pad}/ with Description, Legal, Photos, Storyboard, Video Thumbnail, Videos")
-                            if st.session_state.pop(f"_create_mega_{_sid}", False):
-                                _stu_map_create = {"VRH": "VRH", "FPVR": "FPVR", "VRA": "VRA", "NNJOI": "NJOI"}
-                                _create_studio = _stu_map_create.get(_tab_key, _tab_key)
-                                with st.spinner(f"Creating {_sid_pad} on MEGA…"):
-                                    try:
-                                        import comp_tools as _ct_mk
-                                        _mk_path = _ct_mk.create_mega_folder(_sid_pad)
-                                        st.success(f"✅ Created `{_mk_path}`")
-                                        # Invalidate missing cache so next rescan picks it up
-                                        st.session_state.pop("_missing_data", None)
-                                        st.session_state.pop("_missing_data_ts", None)
-                                    except Exception as _mke:
-                                        st.error(f"Failed to create folder: {_mke}")
-
-                        # ── Grail status ────────────────────────────────────────
-                        _gp = []
-                        _title_val = _sc.get('title', '')
-                        _gp.append(f"{'✅' if _title_val else '❌'} Title" + (f": *{_title_val}*" if _title_val else ""))
-                        _gp.append(f"{'✅' if _sc['cats'] else '❌'} Cats")
-                        _gp.append(f"{'✅' if _sc['tags'] else '❌'} Tags")
-                        st.caption("  ·  ".join(_gp))
-
-                        # ── Actions ─────────────────────────────────────────────
-                        if "title" in _miss:
-                            st.divider()
-                            st.markdown("**🏷️ Title**")
-                            _tc1, _tc2, _tc3 = st.columns([2, 4, 1])
-                            with _tc1:
-                                def _on_gen_title(_sid=_sid, _studio=_studio_nm, _fem=_fem, _theme=_sc.get("theme",""), _plot=_sc.get("plot","")):
-                                    st.session_state["_gen_title_trigger"] = {"sid": _sid, "studio": _studio, "female": _fem, "theme": _theme, "plot": _plot}
-                                    st.session_state["_expand_sid"] = _sid
-                                st.button("✨ Generate", key=f"gen_t_{_sid}", use_container_width=True, type="primary", on_click=_on_gen_title)
-                            with _tc2:
-                                _tv = st.text_input("t", key=f"tin_{_sid}", label_visibility="collapsed", placeholder="Generated title appears here…")
-                            with _tc3:
-                                if _tv and st.button("💾", key=f"sv_t_{_sid}", use_container_width=True):
-                                    _ok, _msg = _write_title_to_grail(_studio_nm, _sc["scene_num"], _tv)
-                                    if _ok:
-                                        st.success(_msg)
-                                        st.session_state.pop("_missing_data", None); st.session_state.pop("_missing_data_ts", None)
-                                        st.rerun()
-                                    else:
-                                        st.error(_msg)
-
-                        if "description" in _miss:
-                            st.divider()
-                            st.markdown("**📝 Description**")
-                            _render_desc_section(_sid, _sid_pad, _sc, _tab_key, _is_missing=True)
-
-                else:
-                    # ── Complete scenes — collapsed, show update options when opened ──
-                    _exp_label = f"✅ {_sid_pad}{_comp_tag} · {_fem}{_date_str}"
-                    with st.expander(_exp_label, expanded=_expand_this):
-                        _pi1, _pi2 = st.columns([4, 1])
-                        with _pi1:
-                            st.markdown(f"**{_sc['performers']}**")
-                        with _pi2:
-                            if _rel:
-                                st.caption(_rel)
-
-                        st.caption(_asset_row(_sc.get('has_desc'), _sc.get('has_videos'), _sc.get('video_count'), _sc.get('has_thumbnail'), _sc.get('has_photos'), _sc.get('has_storyboard'), _sc.get('storyboard_count')))
-
-                        _gp = []
-                        _title_val = _sc.get('title', '')
-                        _gp.append(f"{'✅' if _title_val else '❌'} Title" + (f": *{_title_val}*" if _title_val else ""))
-                        _gp.append(f"{'✅' if _sc['cats'] else '❌'} Cats")
-                        _gp.append(f"{'✅' if _sc['tags'] else '❌'} Tags")
-                        st.caption("  ·  ".join(_gp))
-
-                        # ── Title update ──────────────────────────────────────────
-                        st.divider()
-                        st.markdown("**🏷️ Title**")
-                        _tc1, _tc2, _tc3 = st.columns([2, 4, 1])
-                        with _tc1:
-                            def _on_gen_title_c(_sid=_sid, _studio=_studio_nm, _fem=_fem, _theme=_sc.get("theme",""), _plot=_sc.get("plot","")):
-                                st.session_state["_gen_title_trigger"] = {"sid": _sid, "studio": _studio, "female": _fem, "theme": _theme, "plot": _plot}
-                                st.session_state["_expand_sid"] = _sid
-                            st.button("✨ Generate", key=f"gen_t_{_sid}", use_container_width=True, type="primary", on_click=_on_gen_title_c)
-                        with _tc2:
-                            if f"tin_{_sid}" not in st.session_state and _sc.get("title"):
-                                st.session_state[f"tin_{_sid}"] = _sc["title"]
-                            _tv = st.text_input("t", key=f"tin_{_sid}", label_visibility="collapsed", placeholder="Title…")
-                        with _tc3:
-                            if _tv and st.button("💾", key=f"sv_t_{_sid}", use_container_width=True):
-                                _ok, _msg = _write_title_to_grail(_studio_nm, _sc["scene_num"], _tv)
-                                if _ok:
-                                    st.success(_msg)
-                                    st.session_state.pop("_missing_data", None); st.session_state.pop("_missing_data_ts", None)
-                                    st.rerun()
-                                else:
-                                    st.error(_msg)
-
-                        # ── Description update ────────────────────────────────────
-                        st.markdown("**📝 Description**")
-                        _render_desc_section(_sid, _sid_pad, _sc, _tab_key, _is_missing=False)
-
-            st.divider()
-
-
-    # ── TAB 6: Model Research ─────────────────────────────────────────────────────
+    # ── TAB 5: Model Research ─────────────────────────────────────────────────────
 with tab_research:
     if _has_tab("Model Research"):
         try:
@@ -2963,12 +2487,12 @@ with tab_research:
                 else:
                     _initials = "".join(w[0].upper() for w in name.split()[:2])
                     _media = (
-                        f"<div style='height:195px;background:#161d2e;display:flex;"
+                        f"<div style='height:195px;background:{_C['elevated']};display:flex;"
                         f"align-items:center;justify-content:center;font-size:1.8rem;"
-                        f"font-weight:700;color:#2e4060;border-radius:8px 8px 0 0'>{_initials}</div>"
+                        f"font-weight:700;color:{_C['subtle']};border-radius:8px 8px 0 0'>{_initials}</div>"
                     )
                 if score is not None:
-                    _sc_bg = "#22c55e" if score >= 70 else ("#f59e0b" if score >= 50 else "#6b7280")
+                    _sc_bg = _C["green"] if score >= 70 else (_C["amber"] if score >= 50 else _C["muted"])
                     _score_overlay = (
                         f"<div style='position:absolute;top:6px;right:6px;background:{_sc_bg};"
                         f"border-radius:12px;padding:2px 7px;font-size:0.65rem;font-weight:700;"
@@ -2978,15 +2502,15 @@ with tab_research:
                     _score_overlay = ""
                 with col:
                     st.markdown(
-                        f"<div style='border-radius:8px;overflow:hidden;background:#0f1520;"
+                        f"<div style='border-radius:8px;overflow:hidden;background:{_C['surface']};"
                         f"margin-bottom:3px'>"
                         f"<div style='position:relative'>"
                         f"{_media}{_score_overlay}"
                         f"<div style='position:absolute;bottom:0;left:0;right:0;"
                         f"background:linear-gradient(transparent,rgba(0,0,0,0.82));padding:24px 8px 7px'>"
-                        f"<div style='font-size:0.8rem;font-weight:700;color:#f3f4f6;"
+                        f"<div style='font-size:0.8rem;font-weight:700;color:{_C['text']};"
                         f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>{name}</div>"
-                        f"<div style='font-size:0.72rem;color:#d1d5db;margin-top:1px;"
+                        f"<div style='font-size:0.72rem;color:{_C['muted']};margin-top:1px;"
                         f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>{stat_line}</div>"
                         f"</div></div></div>",
                         unsafe_allow_html=True,
@@ -3014,8 +2538,8 @@ with tab_research:
                 _sh1, _sh2 = st.columns([11, 1])
                 with _sh1:
                     st.markdown(
-                        "<span style='font-size:0.7rem;font-weight:700;letter-spacing:.08em;"
-                        "color:#f59e0b;text-transform:uppercase'>🔥 Trending Now</span>",
+                        f"<span style='font-size:0.7rem;font-weight:700;letter-spacing:.08em;"
+                        f"color:{_C['amber']};text-transform:uppercase'>🔥 Trending Now</span>",
                         unsafe_allow_html=True)
                 with _sh2:
                     if st.button("↺", key="mr_refresh_trending", help="Refresh both sections"):
@@ -3054,10 +2578,10 @@ with tab_research:
 
                 # ── Priority header ───────────────────────────────────────────
                 st.markdown(
-                    "<div style='margin-top:18px'>"
-                    "<span style='font-size:0.7rem;font-weight:700;letter-spacing:.08em;"
-                    "color:#22c55e;text-transform:uppercase'>⭐ Priority Outreach</span>"
-                    "</div>",
+                    f"<div style='margin-top:18px'>"
+                    f"<span style='font-size:0.7rem;font-weight:700;letter-spacing:.08em;"
+                    f"color:{_C['green']};text-transform:uppercase'>⭐ Priority Outreach</span>"
+                    f"</div>",
                     unsafe_allow_html=True)
 
                 # ── Priority grid ─────────────────────────────────────────────
@@ -3152,7 +2676,7 @@ with tab_research:
 
                 with _hc_info:
                     # Name + age + rank badge
-                    _age_badge = f" <span style='font-size:1rem;color:#aaa'>{_age_str}</span>" if _age_str else ""
+                    _age_badge = f" <span style='font-size:1rem;color:{_C['muted']}'>{_age_str}</span>" if _age_str else ""
                     _rank_badge_html = ""
                     if _rank_info:
                         _ri_icon, _ri_label, _ri_bg = _rank_info
@@ -3193,7 +2717,7 @@ with tab_research:
                     _avail_h = _bk_data.get("available for", "")
                     if _avail_h:
                         _tags_html = " ".join(
-                            f"<span style='background:#1e3a5f;border-radius:4px;padding:2px 7px;"
+                            f"<span style='background:{_C['blue_dim']};border-radius:4px;padding:2px 7px;"
                             f"font-size:0.75rem;margin:2px;display:inline-block'>{t.strip()}</span>"
                             for t in _avail_h.split(",") if t.strip()
                         )
@@ -3202,20 +2726,20 @@ with tab_research:
                 with _hc_booking:
                     if _hist:
                         st.markdown(
-                            f"<div style='background:#0d1f12;border:1px solid #1a3d24;border-radius:8px;"
+                            f"<div style='background:{_C['green_dim']};border:1px solid {_C['green']}33;border-radius:8px;"
                             f"padding:12px 14px'>"
-                            f"<div style='color:#4ade80;font-size:1.4rem;font-weight:700'>{_h_total}× booked</div>"
-                            f"<div style='color:#d1d5db;font-size:0.82rem;margin-top:5px'>Last: {_last_fmt}</div>"
-                            f"<div style='color:#d1d5db;font-size:0.82rem'>Rate: {_rate_str}</div>"
-                            f"<div style='color:#9ca3af;font-size:0.75rem;margin-top:5px'>{_studios_str}</div>"
+                            f"<div style='color:{_C['green']};font-size:1.4rem;font-weight:700'>{_h_total}× booked</div>"
+                            f"<div style='color:{_C['text']};font-size:0.82rem;margin-top:5px'>Last: {_last_fmt}</div>"
+                            f"<div style='color:{_C['text']};font-size:0.82rem'>Rate: {_rate_str}</div>"
+                            f"<div style='color:{_C['muted']};font-size:0.75rem;margin-top:5px'>{_studios_str}</div>"
                             f"</div>",
                             unsafe_allow_html=True)
                     elif _HAS_BK_HIST:
                         st.markdown(
-                            "<div style='background:#1a0e0e;border:1px solid #3d1a1a;border-radius:8px;"
-                            "padding:12px 14px'>"
-                            "<span style='color:#f87171;font-size:0.88rem'>🔴 Never booked with your studio</span>"
-                            "</div>",
+                            f"<div style='background:{_C['red_dim']};border:1px solid {_C['red']}33;border-radius:8px;"
+                            f"padding:12px 14px'>"
+                            f"<span style='color:{_C['red']};font-size:0.88rem'>🔴 Never booked with your studio</span>"
+                            f"</div>",
                             unsafe_allow_html=True)
 
                 st.divider()
@@ -3274,8 +2798,8 @@ with tab_research:
                     _brief_text = st.session_state.get(_brief_key, "")
                     if _brief_text:
                         st.markdown(
-                            f"<div style='background:#0d1117;border-radius:6px;padding:12px 14px;"
-                            f"font-size:0.88rem;line-height:1.6;color:#e2e8f0'>{_brief_text}</div>",
+                            f"<div class='hub-card' style='font-size:0.88rem;line-height:1.6;"
+                            f"color:{_C['text']}'>{_brief_text}</div>",
                             unsafe_allow_html=True
                         )
 
@@ -3291,7 +2815,7 @@ with tab_research:
 
                     # ── Compact stats table ───────────────────────────────────────
                     def _stat_row(icon, label, value):
-                        return (f"<tr><td style='color:#888;padding:3px 10px 3px 0;"
+                        return (f"<tr><td style='color:{_C['muted']};padding:3px 10px 3px 0;"
                                 f"white-space:nowrap;font-size:0.85rem'>{icon} {label}</td>"
                                 f"<td style='font-weight:600;font-size:0.9rem'>{value}</td></tr>")
 
@@ -3337,11 +2861,11 @@ with tab_research:
                         all_rows = _bk_rows
                         if _plat_rows:
                             all_rows += [f"<tr><td colspan='2' style='padding-top:8px;"
-                                         f"color:#888;font-size:0.75rem;text-transform:uppercase;"
+                                         f"color:{_C['muted']};font-size:0.75rem;text-transform:uppercase;"
                                          f"letter-spacing:.05em'>Platform</td></tr>"] + _plat_rows
                         if _soc_rows:
                             all_rows += [f"<tr><td colspan='2' style='padding-top:8px;"
-                                         f"color:#888;font-size:0.75rem;text-transform:uppercase;"
+                                         f"color:{_C['muted']};font-size:0.75rem;text-transform:uppercase;"
                                          f"letter-spacing:.05em'>Social</td></tr>"] + _soc_rows
 
                         if all_rows:
@@ -3382,8 +2906,8 @@ with tab_research:
 
                     if _bio_rows:
                         _phys_html = (
-                            "<p style='color:#888;font-size:0.75rem;text-transform:uppercase;"
-                            "letter-spacing:.05em;margin:10px 0 4px'>Physical Stats</p>"
+                            f"<p style='color:{_C['muted']};font-size:0.75rem;text-transform:uppercase;"
+                            f"letter-spacing:.05em;margin:10px 0 4px'>Physical Stats</p>"
                             "<table style='border-collapse:collapse;width:100%'>"
                             + "".join(_stat_row("", r[""], r[" "]) for r in _bio_rows)
                             + "</table>"
@@ -3393,13 +2917,13 @@ with tab_research:
                     # About / bio blurb
                     if _about:
                         st.markdown(
-                            f"<p style='font-size:0.85rem;color:#bbb;line-height:1.5;"
+                            f"<p style='font-size:0.85rem;color:{_C['text']};line-height:1.5;"
                             f"margin-top:8px'>{_about}</p>",
                             unsafe_allow_html=True
                         )
                     elif _ddg and not _bio_rows:
                         st.markdown(
-                            f"<p style='font-size:0.85rem;color:#bbb;line-height:1.5;"
+                            f"<p style='font-size:0.85rem;color:{_C['text']};line-height:1.5;"
                             f"margin-top:8px'>{_ddg[:400]}</p>",
                             unsafe_allow_html=True
                         )
@@ -3476,8 +3000,8 @@ with tab_research:
                     _competitor_scenes = get_competitor_scenes(_all_scenes) if _HAS_BK_HIST else []
                     if _competitor_scenes:
                         st.markdown(
-                            "<p style='color:#888;font-size:0.72rem;text-transform:uppercase;"
-                            "letter-spacing:.05em;margin:14px 0 6px'>Competitor Activity</p>",
+                            f"<p style='color:{_C['muted']};font-size:0.72rem;text-transform:uppercase;"
+                            f"letter-spacing:.05em;margin:14px 0 6px'>Competitor Activity</p>",
                             unsafe_allow_html=True
                         )
                         for _cs in _competitor_scenes:
@@ -3746,15 +3270,15 @@ with tab_desc:
                 _has_cnt = len(_scan_data.get("scenes", [])) - len(_missing_scenes)
                 st.markdown(
                     f"<div style='margin-bottom:12px'>"
-                    f"<div style='font-size:0.9rem;font-weight:700;color:#f3f4f6'>"
-                    f"Missing <span style='background:#374151;color:#9ca3af;font-size:0.65rem;"
+                    f"<div style='font-size:0.9rem;font-weight:700;color:{_C['text']}'>"
+                    f"Missing <span style='background:{_C['elevated']};color:{_C['muted']};font-size:0.65rem;"
                     f"padding:2px 8px;border-radius:10px;margin-left:4px'>{len(_missing_scenes)}</span></div>"
-                    f"<div style='color:#4b5563;font-size:0.65rem;margin-top:2px'>"
+                    f"<div style='color:{_C['subtle']};font-size:0.65rem;margin-top:2px'>"
                     f"Scanned {_scan_ts} · {_has_cnt} complete</div></div>",
                     unsafe_allow_html=True
                 )
             else:
-                st.markdown("<div style='font-weight:700;color:#f3f4f6;margin-bottom:6px'>Queue</div>",
+                st.markdown(f"<div style='font-weight:700;color:{_C['text']};margin-bottom:6px'>Queue</div>",
                             unsafe_allow_html=True)
                 st.caption("No scan file. Run `scan_mega.py` on Mac.")
 
@@ -3763,7 +3287,7 @@ with tab_desc:
             _sorted_scenes = sorted(_missing_scenes, key=lambda x: x["studio"])
             for _stu, _grp_iter in _groupby(_sorted_scenes, key=lambda x: x["studio"]):
                 _grp = list(_grp_iter)
-                _sc = _STUDIO_COLORS.get(_stu, "#6b7280")
+                _sc = _STUDIO_COLORS.get(_stu, _C["muted"])
                 st.markdown(
                     f"<div style='color:{_sc};font-size:0.62rem;font-weight:700;letter-spacing:.1em;"
                     f"text-transform:uppercase;margin:8px 0 4px 0;border-bottom:1px solid {_sc}33;"
@@ -3801,13 +3325,16 @@ with tab_desc:
 
             _active_scene = st.session_state.get("desc_active_scene", "")
             if _active_scene:
-                _ac_color = _STUDIO_COLORS.get(st.session_state.get("d_studio", ""), "#6b7280")
+                _ac_color = _STUDIO_COLORS.get(st.session_state.get("d_studio", ""), _C["muted"])
                 st.markdown(
                     f"<div style='display:inline-block;background:{_ac_color}18;border:1px solid {_ac_color}40;"
                     f"color:{_ac_color};font-size:0.75rem;font-weight:700;padding:2px 10px;"
                     f"border-radius:10px;margin-bottom:8px'>Editing: {_active_scene}</div>",
                     unsafe_allow_html=True
                 )
+
+            # ── Ticket linking ────────────────────────────────────────────────────
+            _desc_linked_ticket = _ticket_linker("descriptions")
 
             # ── Form ──────────────────────────────────────────────────────────────
             _da, _db, _dc = st.columns([3, 2, 2])
@@ -4020,9 +3547,8 @@ Rewrite this paragraph now. Output ONLY the paragraph text (no title, no meta fi
                             st.session_state["d_editing_para"] = _pi
                             st.rerun()
                     st.markdown(
-                        f"<div style='background:#111827;border:1px solid #1f2937;border-radius:8px;"
-                        f"padding:12px 16px;margin-bottom:8px'>"
-                        f"<div style='color:#d1d5db;font-size:0.82rem;line-height:1.6'>{_p_body}</div>"
+                        f"<div class='hub-card' style='margin-bottom:8px'>"
+                        f"<div style='color:{_C['text']};font-size:0.82rem;line-height:1.6'>{_p_body}</div>"
                         f"</div>",
                         unsafe_allow_html=True
                     )
@@ -4038,7 +3564,7 @@ Rewrite this paragraph now. Output ONLY the paragraph text (no title, no meta fi
                                          value=_parsed.get("meta_description", ""),
                                          key="d_meta_desc", max_chars=200)
                 _md_len = len(_meta_d)
-                _md_color = "#22c55e" if _md_len <= 160 else "#ef4444"
+                _md_color = _C["green"] if _md_len <= 160 else _C["red"]
                 st.markdown(f"<span style='color:{_md_color};font-size:0.7rem'>{_md_len}/160 chars</span>",
                             unsafe_allow_html=True)
 
@@ -4105,8 +3631,36 @@ Rewrite this paragraph now. Output ONLY the paragraph text (no title, no meta fi
                         st.session_state.pop("_missing_data_ts", None)
                         st.session_state.pop("scan_data", None)
                         st.session_state["_desc_saved_mega"] = True
-                    # MEGA description save disabled — descriptions managed manually
-                    st.caption("_Save to MEGA disabled_")
+                    # Submit description for approval
+                    if st.button("Submit for Approval", key="d_submit_approval",
+                                 use_container_width=True, type="primary"):
+                        try:
+                            import json as _json_d
+                            import approval_tools as _apr_d
+                            _desc_content = {
+                                "title": _d_title,
+                                "description": _final_text,
+                                "categories": _d_cats,
+                                "tags": _d_tags,
+                                "talent": _talent_ln,
+                                "meta_title": _meta_t,
+                                "meta_description": _meta_d,
+                            }
+                            _d_preview = f"Title: {_d_title}\n{_final_text[:180]}"
+                            _d_linked = st.session_state.get("descriptions_linked_ticket", "")
+                            _apr_d_id = _apr_d.submit_for_approval(
+                                submitted_by=_user_name,
+                                content_type="description",
+                                scene_id=_scene_id,
+                                studio=_d_studio,
+                                content_preview=_d_preview,
+                                content_json=_json_d.dumps(_desc_content),
+                                target_sheet=f"Description:{_scene_id}",
+                                linked_ticket=_d_linked,
+                            )
+                            st.success(f"Submitted for approval: **{_apr_d_id}**")
+                        except Exception as _e:
+                            st.error(f"Approval submission failed: {_e}")
                 with _dl2:
                     if _docx_bytes_out:
                         st.download_button("⬇ Download .docx", data=_docx_bytes_out,
@@ -4140,7 +3694,7 @@ with tab_comp:
                 "Studio", _comp_studios, default="VRH", key="comp_studio",
                 label_visibility="collapsed"
             ) or "VRH"
-            _cs_color = _COMP_STUDIO_COLORS.get(_comp_studio, "#6b7280")
+            _cs_color = _COMP_STUDIO_COLORS.get(_comp_studio, _C["muted"])
 
             st.divider()
 
@@ -4207,17 +3761,16 @@ with tab_comp:
                             _avail = _idea.get("available_count", 0)
                             _vol   = _idea.get("vol", 1)
                             _vol_badge = f"Vol.{_vol}" if _vol > 1 else "New"
-                            _vol_color = "#f59e0b" if _vol > 1 else "#22c55e"
+                            _vol_color = _C["amber"] if _vol > 1 else _C["green"]
                             st.markdown(
-                                f"<div style='background:#111827;border:1px solid #1f2937;border-radius:8px;"
-                                f"padding:12px 16px;margin-bottom:8px'>"
-                                f"<div style='font-weight:700;font-size:0.82rem;color:#f3f4f6;margin-bottom:4px'>"
+                                f"<div class='hub-card' style='margin-bottom:8px'>"
+                                f"<div style='font-weight:700;font-size:0.82rem;color:{_C['text']};margin-bottom:4px'>"
                                 f"{_idea['title']}</div>"
-                                f"<div style='font-size:0.68rem;color:#6b7280'>"
+                                f"<div style='font-size:0.68rem;color:{_C['muted']}'>"
                                 f"<span style='background:{_vol_color}20;color:{_vol_color};font-size:0.6rem;"
                                 f"padding:1px 6px;border-radius:8px;margin-right:4px'>{_vol_badge}</span>"
                                 f"~{_avail} scenes available</div>"
-                                f"<div style='font-size:0.7rem;color:#9ca3af;margin-top:6px'>{_idea.get('rationale','')[:100]}</div>"
+                                f"<div style='font-size:0.7rem;color:{_C['muted']};margin-top:6px'>{_idea.get('rationale','')[:100]}</div>"
                                 f"</div>",
                                 unsafe_allow_html=True
                             )
@@ -4317,9 +3870,9 @@ with tab_comp:
 
                     # Column headers
                     _ha, _hb, _hc, _hd = st.columns([1.5, 3, 2.5, 1])
-                    _ha.markdown("<span style='font-size:0.65rem;color:#6b7280;font-weight:600'>GRAIL #</span>", unsafe_allow_html=True)
-                    _hb.markdown("<span style='font-size:0.65rem;color:#6b7280;font-weight:600'>SCENE TITLE</span>", unsafe_allow_html=True)
-                    _hc.markdown("<span style='font-size:0.65rem;color:#6b7280;font-weight:600'>PERFORMERS</span>", unsafe_allow_html=True)
+                    _ha.markdown(f"<span style='font-size:0.65rem;color:{_C['muted']};font-weight:600'>GRAIL #</span>", unsafe_allow_html=True)
+                    _hb.markdown(f"<span style='font-size:0.65rem;color:{_C['muted']};font-weight:600'>SCENE TITLE</span>", unsafe_allow_html=True)
+                    _hc.markdown(f"<span style='font-size:0.65rem;color:{_C['muted']};font-weight:600'>PERFORMERS</span>", unsafe_allow_html=True)
                     _hd.markdown("", unsafe_allow_html=True)
 
                     # Editable scene table
@@ -4541,36 +4094,1220 @@ with tab_comp:
 
         _comp_fragment()
 
-    # ── TAB 8: Tickets ────────────────────────────────────────────────────────────
+    # ── TAB 8: Tickets (Asset Tracker + Approvals + Tickets + Submit) ────────────
 with tab_tickets:
     if _has_tab("Tickets"):
         import ticket_tools as _tkt
+        import approval_tools as _apr
+        import asset_tracker as _at
 
-        # ── View toggle ──────────────────────────────────────────────────────────
+        # ── Sub-view nav ────────────────────────────────────────────────────────
+        # Badge count — use stored count (set when Approvals sub-view loads), zero on first visit
+        _pending_ct = st.session_state.get("_apr_pending_count", 0)
+        _apr_label = f"Approvals ({_pending_ct})" if _pending_ct else "Approvals"
+
+        _tk_options = ["Asset Tracker", _apr_label, "Tickets", "Submit"]
+        if _user_can_manage_users:
+            _tk_options.append("Users")
         _tk_mode = st.segmented_control(
-            "", ["📝 Submit a Ticket", "📋 All Tickets"],
-            default="📋 All Tickets", key="tk_mode", label_visibility="collapsed",
+            "", _tk_options,
+            default="Asset Tracker", key="tk_mode", label_visibility="collapsed",
         )
 
-        # ── Submit view ──────────────────────────────────────────────────────────
-        if _tk_mode == "📝 Submit a Ticket":
-            st.subheader("Submit a New Ticket")
+        # Breadcrumb for detail views
+        _breadcrumb_detail = ""
+        if _tk_mode == "Asset Tracker" and st.session_state.get("at_selected"):
+            _breadcrumb_detail = st.session_state["at_selected"]
+        elif _tk_mode == "Tickets" and st.session_state.get("tk_selected"):
+            _breadcrumb_detail = st.session_state["tk_selected"]
+        _mode_name = _tk_mode.split(" (")[0] if _tk_mode and "(" in _tk_mode else (_tk_mode or "")
+        if _breadcrumb_detail:
+            st.caption(f"Tickets > {_mode_name} > {_breadcrumb_detail}")
+
+        # ── SUB-VIEW 1: Asset Tracker ────────────────────────────────────────────
+        if _tk_mode == "Asset Tracker":
+            hub_ui.section("Asset Tracker")
+
+            # ── Naming convention spec (from Grail Naming Scheme doc) ────────
+            _NAMING_SPEC = {
+                "folder": "{PREFIX}{NUM:04d}",          # e.g. FPVR0001
+                "description_doc": "{PREFIX}{NUM:04d}-{Names}.doc",
+                "description_txt": "{PREFIX}{NUM:04d}-{Names}.txt",
+                "thumbnail": "{PREFIX}{NUM:04d}-{Names}_Thumbnail.{ext}",
+                "photos_raw": "_{PREFIX}{NUM:04d}.zip",   # underscore prefix
+                "photos_web": "{PREFIX}{NUM:04d}.zip",
+                "video_full": "{Names}-180-{PREFIX}_{res}",
+                "video_trailer_2min": "{Names}-180-{PREFIX}-2min_{res}",
+            }
+
+            def _validate_naming(_scene):
+                """Check file names against the naming spec. Returns list of issues."""
+                issues = []
+                sid = _scene["scene_id"]
+                prefix = _scene["studio"]
+                # Normalize NJOI → NJOI for mega scan paths
+                if prefix == "NNJOI":
+                    prefix = "NJOI"
+                num_str = _scene["scene_num"]
+                num_padded = num_str.zfill(4)
+                expected_prefix = f"{prefix}{num_padded}"
+                mega_files = _scene.get("mega_files", {})
+
+                # Check thumbnail naming
+                for f in mega_files.get("thumbnail", []):
+                    fname = f.split("/")[-1]
+                    if not fname.startswith(expected_prefix):
+                        issues.append(("Thumbnail", f, f"Should start with {expected_prefix}"))
+                    if "_Thumbnail" not in fname:
+                        issues.append(("Thumbnail", f, "Missing _Thumbnail suffix"))
+
+                # Check description naming
+                for f in mega_files.get("description", []):
+                    fname = f.split("/")[-1]
+                    if not fname.startswith(expected_prefix):
+                        issues.append(("Description", f, f"Should start with {expected_prefix}"))
+
+                # Check video naming — should contain model names + 180 + studio prefix
+                for f in mega_files.get("videos", []):
+                    fname = f.split("/")[-1]
+                    if f"-{prefix}" not in fname and f"-{prefix.upper()}" not in fname:
+                        issues.append(("Video", fname[:50], f"Should contain -{prefix}"))
+
+                return issues
+
+            # Filters
+            _at_f1, _at_f2 = st.columns(2)
+            with _at_f1:
+                _at_studio = st.selectbox(
+                    "Studio", ["All", "FPVR", "VRH", "VRA", "NNJOI"], key="at_studio")
+            with _at_f2:
+                _at_show = st.selectbox(
+                    "Show", ["All", "Missing Only", "Complete"], key="at_show")
+            _at_limit = 6  # 2 clean rows of 3 per studio
+
+            # Load asset data (globally cached — loads once, instant after that)
+            _at_studios_tuple = None if _at_studio == "All" else tuple([_at_studio])
+            _asset_data = _cached_load_assets(_at_studios_tuple, _at_limit)
+            _scan_date = _asset_data.get("_meta", {}).get("scan_date", "")
+
+            # Refresh button — clears global cache and module caches
+            if st.button("Refresh", key="at_refresh"):
+                _at.bust_caches()
+                _cached_load_assets.clear()
+                st.rerun()
+
+            # Gather scenes grouped by studio
+            _at_studios = ["FPVR", "VRH", "VRA", "NNJOI"] if _at_studio == "All" else [_at_studio]
+            _at_by_studio = {}
+            _at_scenes = []  # flat list for detail view lookup
+            for _s in _at_studios:
+                _studio_scenes = list(_asset_data.get(_s, []))
+                if _at_show == "Missing Only":
+                    _studio_scenes = [s for s in _studio_scenes if s["completed"] < s["total"]]
+                elif _at_show == "Complete":
+                    _studio_scenes = [s for s in _studio_scenes if s["completed"] == s["total"]]
+                _studio_scenes.sort(key=lambda s: s.get("release_date", "") or "", reverse=True)
+                _at_by_studio[_s] = _studio_scenes
+                _at_scenes.extend(_studio_scenes)
+
+            # Summary metrics
+            _at_total = len(_at_scenes)
+            _at_complete = sum(1 for s in _at_scenes if s["completed"] == s["total"])
+            _at_partial = sum(1 for s in _at_scenes if 0 < s["completed"] < s["total"])
+            _m1, _m2, _m3 = st.columns(3)
+            _m1.metric("Total Scenes", _at_total)
+            _m2.metric("Complete", _at_complete)
+            _m3.metric("In Progress", _at_partial)
+            if _scan_date:
+                st.caption(f"MEGA scan: {_scan_date}")
+
+            # Studio color map
+            _studio_colors = {"FPVR": _C["fpvr"], "VRH": _C["vrh"], "VRA": _C["vra"], "NNJOI": _C["njoi"]}
+
+            # Scenes with issues — collapsible summary
+            _issue_scenes = [s for s in _at_scenes if s["completed"] < s["total"]]
+            if _issue_scenes:
+                _issue_scenes.sort(key=lambda s: len(s["missing"]), reverse=True)
+                with st.expander(f"Scenes with Issues ({len(_issue_scenes)})", expanded=False):
+                    for _is in _issue_scenes:
+                        _is_pct = int((_is["completed"] / _is["total"]) * 100) if _is["total"] else 0
+                        _is_color = _studio_colors.get(_is["studio"], _C["muted"])
+                        _is_missing = ", ".join(_is["missing"])
+                        _ic1, _ic2 = st.columns([3, 1])
+                        with _ic1:
+                            st.markdown(
+                                f"<div style='display:flex;align-items:center;gap:8px;padding:4px 0'>"
+                                f"<span style='width:3px;height:16px;border-radius:2px;"
+                                f"background:{_is_color};display:inline-block'></span>"
+                                f"<span style='font-family:DM Mono,monospace;font-size:0.78rem;"
+                                f"font-weight:600;color:{_C['text']}'>{_is['scene_id']}</span>"
+                                f"<span style='font-size:0.72rem;color:{_C['red']}'>"
+                                f"Missing: {_is_missing}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+                        with _ic2:
+                            if st.button("View", key=f"issue_{_is['scene_id']}", use_container_width=True):
+                                st.session_state["at_selected"] = _is["scene_id"]
+                                st.rerun()
+
+            st.divider()
+
+            # ── Detail view (selected scene) ─────────────────────────────────
+            _selected_scene_id = st.session_state.get("at_selected")
+            _selected_scene = next((s for s in _at_scenes if s["scene_id"] == _selected_scene_id), None) if _selected_scene_id else None
+
+            if _selected_scene:
+                _sc = _selected_scene
+                _s_color = _studio_colors.get(_sc["studio"], _C["muted"])
+                _pct = int((_sc["completed"] / _sc["total"]) * 100) if _sc["total"] else 0
+                _pct_color = _C["green"] if _pct == 100 else (_C["amber"] if _pct >= 50 else _C["red"])
+
+                if st.button("Back to all scenes", key="at_back"):
+                    st.session_state.pop("at_selected", None)
+                    st.rerun()
+
+                # Scene header
+                _comp_badge = (
+                    f"<span style='font-size:0.68rem;background:{_C['accent']};color:#fff;"
+                    f"padding:2px 8px;border-radius:4px;font-weight:600'>Compilation</span>"
+                ) if _sc.get("is_compilation") else ""
+                st.markdown(
+                    f"<div style='display:flex;align-items:center;gap:12px;margin:8px 0 4px'>"
+                    f"<div style='width:4px;height:28px;border-radius:2px;background:{_s_color}'></div>"
+                    f"<span style='font-family:DM Mono,monospace;font-size:1.1rem;font-weight:700;"
+                    f"color:{_C['text']}'>{_sc['scene_id']}</span>"
+                    f"<span style='background:{_s_color}22;color:{_s_color};font-size:0.72rem;"
+                    f"font-weight:600;padding:3px 8px;border-radius:4px'>{_sc['studio_name']}</span>"
+                    f"{_comp_badge}"
+                    f"<span style='font-size:0.82rem;color:{_C['muted']};margin-left:auto'>"
+                    f"{_sc.get('release_date','')[:10] or 'No date'}</span>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+                # Info row
+                st.markdown(
+                    f"<div style='margin:4px 0 12px 16px;font-size:0.85rem'>"
+                    f"<b style='color:{_C['text']}'>{_sc['performers'] or 'TBD'}</b>"
+                    f"<span style='color:{_C['muted']};margin-left:12px;font-style:italic'>"
+                    f"{_sc['title'] or 'No title'}</span></div>",
+                    unsafe_allow_html=True,
+                )
+
+                # Progress bar (larger)
+                st.markdown(
+                    f"<div style='display:flex;align-items:center;gap:10px;margin:0 0 16px 0'>"
+                    f"<div style='flex:1;height:10px;background:{_C['elevated']};border-radius:5px;overflow:hidden'>"
+                    f"<div style='width:{_pct}%;height:100%;background:{_pct_color};border-radius:5px'></div>"
+                    f"</div>"
+                    f"<span style='font-size:0.85rem;font-weight:700;color:{_pct_color}'>"
+                    f"{_sc['completed']}/{_sc['total']} assets</span>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+                # ── Asset grid (interactive for editable fields) ────────────
+                # Read-only asset status for non-editable items
+                _readonly_assets = [
+                    ("has_videos", "Videos", "Video files in Videos/"),
+                    ("has_thumbnail", "Thumbnail", "In Video Thumbnail/"),
+                    ("has_photos", "Photos", "Photo .zip in Photos/"),
+                ]
+                _ro1, _ro2, _ro3 = st.columns(3)
+                for _col_ro, (_ak, _al, _desc) in zip([_ro1, _ro2, _ro3], _readonly_assets):
+                    _ok = _sc.get(_ak, False)
+                    _icon = f"<span style='color:{_C['green']};font-size:1.1rem'>&#10003;</span>" if _ok else f"<span style='color:{_C['red']};font-size:1.1rem'>&#10007;</span>"
+                    _col_ro.markdown(
+                        f"<div style='background:{_C['elevated']};border-radius:6px;padding:8px 12px;"
+                        f"margin-bottom:6px;display:flex;align-items:center;gap:8px'>"
+                        f"{_icon}"
+                        f"<div><span style='font-size:0.82rem;font-weight:600;color:{_C['text']}'>{_al}</span>"
+                        f"<br><span style='font-size:0.68rem;color:{_C['muted']}'>{_desc}</span></div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                # ── Editable fields: Title, Categories, Tags, Description ────
+                _grail_tab = _sc.get("grail_tab", "")
+                _grail_row = _sc.get("grail_row", 0)
+                _sc_studio = _sc.get("studio", "")
+                # Map NNJOI → NJOI for category/tag lookups
+                _cat_studio = "NJOI" if _sc_studio == "NNJOI" else _sc_studio
+
+                # — Title —
+                hub_ui.section("Title")
+                _cur_title = _sc.get("title", "")
+                _editing_title = st.session_state.get("at_editing_title", False)
+
+                if _editing_title and _user_can_write_grail:
+                    _new_title = st.text_input(
+                        "Title", value=_cur_title, key="at_title_input",
+                        placeholder="Enter scene title")
+                    _tc1, _tc2 = st.columns(2)
+                    with _tc1:
+                        if st.button("Save Title", key="at_title_save", use_container_width=True):
+                            if _new_title.strip() and _grail_tab and _grail_row:
+                                _ok_t, _msg_t = _write_grail_cell(_grail_tab, _grail_row, 4, _new_title.strip())
+                                if _ok_t:
+                                    st.session_state.pop("at_editing_title", None)
+                                    _cached_load_assets.clear()
+                                    st.rerun()
+                                else:
+                                    st.error(_msg_t)
+                            else:
+                                st.warning("Title cannot be empty.")
+                    with _tc2:
+                        if st.button("Cancel", key="at_title_cancel", use_container_width=True):
+                            st.session_state.pop("at_editing_title", None)
+                            st.rerun()
+                else:
+                    _title_icon = f"<span style='color:{_C['green']}'>&#10003;</span>" if _cur_title else f"<span style='color:{_C['red']}'>&#10007;</span>"
+                    st.markdown(
+                        f"<div style='display:flex;align-items:center;gap:8px;padding:4px 0'>"
+                        f"{_title_icon} <span style='font-size:0.85rem;color:{_C['text']}'>"
+                        f"{_cur_title or 'No title'}</span></div>",
+                        unsafe_allow_html=True,
+                    )
+                    if _user_can_write_grail:
+                        _title_btn_label = "Edit Title" if _cur_title else "Add Title"
+                        if st.button(_title_btn_label, key="at_title_edit"):
+                            st.session_state["at_editing_title"] = True
+                            st.session_state.pop("at_editing_cats", None)
+                            st.session_state.pop("at_editing_tags", None)
+                            st.rerun()
+
+                # — Categories —
+                hub_ui.section("Categories")
+                _cur_cats_raw = ""
+                # Categories are in Grail col F — reconstruct from scene data
+                # asset_tracker doesn't store raw cats, but we can get from the Grail row
+                # For now, use has_categories + look for cats in asset_data
+                # Actually the Grail loader stores cats at r[5] — check scene dict
+                _editing_cats = st.session_state.get("at_editing_cats", False)
+                _approved_cats = _STUDIO_CATEGORIES.get(_cat_studio, [])
+
+                if _editing_cats and _user_can_write_grail:
+                    # Need to load current cats from Grail for pre-fill
+                    _prefill_cats = [c.strip() for c in st.session_state.get("at_cats_prefill", "").split(",") if c.strip()]
+                    if _approved_cats:
+                        _new_cats = st.multiselect(
+                            "Categories", options=_approved_cats,
+                            default=[c for c in _prefill_cats if c in _approved_cats],
+                            key="at_cats_input")
+                    else:
+                        _new_cats_str = st.text_area(
+                            "Categories (comma-separated)",
+                            value=st.session_state.get("at_cats_prefill", ""),
+                            key="at_cats_input_text")
+                        _new_cats = [c.strip() for c in _new_cats_str.split(",") if c.strip()]
+                    _cc1, _cc2 = st.columns(2)
+                    with _cc1:
+                        if st.button("Save Categories", key="at_cats_save", use_container_width=True):
+                            _cats_str = ", ".join(_new_cats)
+                            if _grail_tab and _grail_row:
+                                _ok_c, _msg_c = _write_grail_cell(_grail_tab, _grail_row, 6, _cats_str)
+                                if _ok_c:
+                                    st.session_state.pop("at_editing_cats", None)
+                                    st.session_state.pop("at_cats_prefill", None)
+                                    _cached_load_assets.clear()
+                                    st.rerun()
+                                else:
+                                    st.error(_msg_c)
+                    with _cc2:
+                        if st.button("Cancel", key="at_cats_cancel", use_container_width=True):
+                            st.session_state.pop("at_editing_cats", None)
+                            st.session_state.pop("at_cats_prefill", None)
+                            st.rerun()
+                else:
+                    _has_cats = _sc.get("has_categories", False)
+                    _cats_icon = f"<span style='color:{_C['green']}'>&#10003;</span>" if _has_cats else f"<span style='color:{_C['red']}'>&#10007;</span>"
+                    st.markdown(
+                        f"<div style='display:flex;align-items:center;gap:8px;padding:4px 0'>"
+                        f"{_cats_icon} <span style='font-size:0.85rem;color:{_C['text']}'>"
+                        f"{'Set' if _has_cats else 'No categories'}</span></div>",
+                        unsafe_allow_html=True,
+                    )
+                    if _user_can_write_grail:
+                        _cats_btn_label = "Edit Categories" if _has_cats else "Add Categories"
+                        if st.button(_cats_btn_label, key="at_cats_edit"):
+                            # Load current cats from Grail for pre-fill
+                            try:
+                                import gspread as _gs_cats
+                                from google.oauth2.service_account import Credentials as _Creds_cats
+                                _creds_c = _Creds_cats.from_service_account_file(
+                                    os.path.join(os.path.dirname(__file__), "service_account.json"),
+                                    scopes=["https://www.googleapis.com/auth/spreadsheets"])
+                                _gc_c = _gs_cats.authorize(_creds_c)
+                                _ws_c = _gc_c.open_by_key("1Eq5G5FU6A8EqeFZCnZjrEaMYS8F1DiK5vP5tCSINeJk").worksheet(_grail_tab)
+                                _cur_cats_val = _ws_c.cell(_grail_row, 6).value or ""
+                                st.session_state["at_cats_prefill"] = _cur_cats_val
+                            except Exception:
+                                st.session_state["at_cats_prefill"] = ""
+                            st.session_state["at_editing_cats"] = True
+                            st.session_state.pop("at_editing_title", None)
+                            st.session_state.pop("at_editing_tags", None)
+                            st.rerun()
+
+                # — Tags —
+                hub_ui.section("Tags")
+                _editing_tags = st.session_state.get("at_editing_tags", False)
+                _approved_tags_ref = _STUDIO_TAGS.get(_cat_studio, "")
+
+                if _editing_tags and _user_can_write_grail:
+                    _prefill_tags = st.session_state.get("at_tags_prefill", "")
+                    _new_tags = st.text_area(
+                        "Tags (comma-separated)", value=_prefill_tags,
+                        key="at_tags_input", height=100)
+                    if _approved_tags_ref:
+                        with st.expander(f"Approved {_cat_studio} Tags Reference", expanded=False):
+                            st.caption(_approved_tags_ref)
+                    _tc1t, _tc2t = st.columns(2)
+                    with _tc1t:
+                        if st.button("Save Tags", key="at_tags_save", use_container_width=True):
+                            if _grail_tab and _grail_row:
+                                _ok_tg, _msg_tg = _write_grail_cell(_grail_tab, _grail_row, 7, _new_tags.strip())
+                                if _ok_tg:
+                                    st.session_state.pop("at_editing_tags", None)
+                                    st.session_state.pop("at_tags_prefill", None)
+                                    _cached_load_assets.clear()
+                                    st.rerun()
+                                else:
+                                    st.error(_msg_tg)
+                    with _tc2t:
+                        if st.button("Cancel", key="at_tags_cancel", use_container_width=True):
+                            st.session_state.pop("at_editing_tags", None)
+                            st.session_state.pop("at_tags_prefill", None)
+                            st.rerun()
+                else:
+                    _has_tags = _sc.get("has_tags", False)
+                    _tags_icon = f"<span style='color:{_C['green']}'>&#10003;</span>" if _has_tags else f"<span style='color:{_C['red']}'>&#10007;</span>"
+                    st.markdown(
+                        f"<div style='display:flex;align-items:center;gap:8px;padding:4px 0'>"
+                        f"{_tags_icon} <span style='font-size:0.85rem;color:{_C['text']}'>"
+                        f"{'Set' if _has_tags else 'No tags'}</span></div>",
+                        unsafe_allow_html=True,
+                    )
+                    if _user_can_write_grail:
+                        _tags_btn_label = "Edit Tags" if _has_tags else "Add Tags"
+                        if st.button(_tags_btn_label, key="at_tags_edit"):
+                            try:
+                                import gspread as _gs_tags
+                                from google.oauth2.service_account import Credentials as _Creds_tags
+                                _creds_t = _Creds_tags.from_service_account_file(
+                                    os.path.join(os.path.dirname(__file__), "service_account.json"),
+                                    scopes=["https://www.googleapis.com/auth/spreadsheets"])
+                                _gc_t = _gs_tags.authorize(_creds_t)
+                                _ws_t = _gc_t.open_by_key("1Eq5G5FU6A8EqeFZCnZjrEaMYS8F1DiK5vP5tCSINeJk").worksheet(_grail_tab)
+                                _cur_tags_val = _ws_t.cell(_grail_row, 7).value or ""
+                                st.session_state["at_tags_prefill"] = _cur_tags_val
+                            except Exception:
+                                st.session_state["at_tags_prefill"] = ""
+                            st.session_state["at_editing_tags"] = True
+                            st.session_state.pop("at_editing_title", None)
+                            st.session_state.pop("at_editing_cats", None)
+                            st.rerun()
+
+                # — Description —
+                hub_ui.section("Description")
+                _has_desc = _sc.get("has_description", False)
+                _desc_files = _sc.get("mega_files", {}).get("description", [])
+                _desc_icon = f"<span style='color:{_C['green']}'>&#10003;</span>" if _has_desc else f"<span style='color:{_C['red']}'>&#10007;</span>"
+
+                if _has_desc and _desc_files:
+                    _desc_names = ", ".join(f.split("/")[-1] for f in _desc_files)
+                    st.markdown(
+                        f"<div style='display:flex;align-items:center;gap:8px;padding:4px 0'>"
+                        f"{_desc_icon} <span style='font-size:0.85rem;color:{_C['text']}'>"
+                        f"{_desc_names}</span></div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f"<div style='display:flex;align-items:center;gap:8px;padding:4px 0'>"
+                        f"{_desc_icon} <span style='font-size:0.85rem;color:{_C['text']}'>"
+                        f"No description file</span></div>",
+                        unsafe_allow_html=True,
+                    )
+                    # Pre-fill Descriptions tab and prompt user to switch
+                    if st.button("Create in Descriptions Tab", key="at_desc_create"):
+                        _desc_studio_key = "NJOI" if _sc_studio == "NNJOI" else _sc_studio
+                        st.session_state["d_studio"] = _desc_studio_key
+                        _sn = _sc.get("scene_num", "")
+                        st.session_state["d_scene_num"] = int(_sn) if _sn.isdigit() else 1
+                        _female = _sc.get("female", "")
+                        if _female:
+                            st.session_state["d_female"] = _female
+                        st.session_state["desc_active_scene"] = _sc["scene_id"]
+                        st.info("Scene pre-filled in the Descriptions tab. Click the Descriptions tab to continue.")
+
+                # ── File listings ─────────────────────────────────────────────
+                _mega_files = _sc.get("mega_files", {})
+                _has_any_files = any(_mega_files.get(k) for k in _mega_files)
+
+                if _has_any_files:
+                    st.divider()
+                    hub_ui.section("MEGA Files")
+
+                    # Thumbnail files
+                    _thumbs = _mega_files.get("thumbnail", [])
+                    if _thumbs:
+                        st.markdown(f"**Video Thumbnail** ({len(_thumbs)} file{'s' if len(_thumbs)>1 else ''})")
+                        for _tf in _thumbs:
+                            _fname = _tf.split("/")[-1] if "/" in _tf else _tf
+                            st.markdown(
+                                f"<div style='font-family:DM Mono,monospace;font-size:0.75rem;"
+                                f"color:{_C['text']};background:{_C['elevated']};padding:4px 8px;"
+                                f"border-radius:4px;margin:2px 0'>{_fname}</div>",
+                                unsafe_allow_html=True,
+                            )
+
+                    # Video files
+                    _vids = _mega_files.get("videos", [])
+                    if _vids:
+                        st.markdown(f"**Videos** ({len(_vids)} file{'s' if len(_vids)>1 else ''})")
+                        # Group by type: full, 2min, 45sec, 6min, rollover
+                        _vid_groups = {"Full": [], "2min": [], "45sec": [], "6min": [], "Rollover": [], "Other": []}
+                        for _vf in _vids:
+                            _vn = _vf.split("/")[-1] if "/" in _vf else _vf
+                            if "-2min" in _vn: _vid_groups["2min"].append(_vn)
+                            elif "-45sec" in _vn: _vid_groups["45sec"].append(_vn)
+                            elif "-6min" in _vn: _vid_groups["6min"].append(_vn)
+                            elif "rollover" in _vn.lower(): _vid_groups["Rollover"].append(_vn)
+                            else: _vid_groups["Full"].append(_vn)
+                        for _gname, _gfiles in _vid_groups.items():
+                            if _gfiles:
+                                st.caption(f"{_gname} ({len(_gfiles)})")
+                                for _vn in sorted(_gfiles):
+                                    st.markdown(
+                                        f"<div style='font-family:DM Mono,monospace;font-size:0.7rem;"
+                                        f"color:{_C['text']};padding:1px 8px'>{_vn}</div>",
+                                        unsafe_allow_html=True,
+                                    )
+
+                    # Description files
+                    _descs = _mega_files.get("description", [])
+                    if _descs:
+                        st.markdown(f"**Description** ({len(_descs)} file{'s' if len(_descs)>1 else ''})")
+                        for _df in _descs:
+                            _fname = _df.split("/")[-1] if "/" in _df else _df
+                            st.markdown(
+                                f"<div style='font-family:DM Mono,monospace;font-size:0.75rem;"
+                                f"color:{_C['text']};padding:1px 8px'>{_fname}</div>",
+                                unsafe_allow_html=True,
+                            )
+
+                    # Photos + storyboard
+                    _photos = _mega_files.get("photos", [])
+                    _story = _mega_files.get("storyboard", [])
+                    if _photos:
+                        st.markdown(f"**Photos** ({len(_photos)} file{'s' if len(_photos)>1 else ''})")
+                        for _pf in _photos:
+                            _fname = _pf.split("/")[-1] if "/" in _pf else _pf
+                            st.markdown(
+                                f"<div style='font-family:DM Mono,monospace;font-size:0.75rem;"
+                                f"color:{_C['text']};padding:1px 8px'>{_fname}</div>",
+                                unsafe_allow_html=True,
+                            )
+                    if _story:
+                        st.markdown(f"**Storyboard** ({len(_story)} file{'s' if len(_story)>1 else ''})")
+
+                elif not _has_any_files:
+                    st.info("No MEGA files found for this scene. Run the MEGA scanner to update.")
+
+                # ── Naming validation ─────────────────────────────────────────
+                _naming_issues = _validate_naming(_sc)
+                if _naming_issues:
+                    st.divider()
+                    hub_ui.section("Naming Issues")
+                    for _cat, _file, _issue in _naming_issues:
+                        st.markdown(
+                            f"<div style='background:{_C['red_dim']};border-radius:4px;padding:6px 10px;"
+                            f"margin:3px 0;font-size:0.78rem'>"
+                            f"<b style='color:{_C['red']}'>{_cat}</b> "
+                            f"<code style='font-size:0.72rem'>{_file}</code>"
+                            f"<br><span style='color:{_C['muted']}'>{_issue}</span></div>",
+                            unsafe_allow_html=True,
+                        )
+                elif _has_any_files:
+                    st.success("All file names match naming conventions.")
+
+                # ── Actions ───────────────────────────────────────────────────
+                st.divider()
+                if _sc["missing"]:
+                    if st.button("Create Ticket for Missing Assets", key="at_detail_tkt", use_container_width=True):
+                        _missing_str = ", ".join(_sc["missing"])
+                        st.session_state["tk_mode"] = "Submit"
+                        st.session_state["tk_prefill"] = {
+                            "project": "Content Pipeline",
+                            "type": "Missing Content",
+                            "title": f"Missing assets: {_sc['scene_id']}",
+                            "desc": f"Scene {_sc['scene_id']} ({_sc['studio_name']}) — {_sc['performers']}\n\nMissing: {_missing_str}",
+                        }
+                        st.rerun()
+                if st.button("Report Issue", key="at_detail_report", use_container_width=True):
+                    st.session_state["tk_mode"] = "Submit"
+                    st.session_state["tk_prefill"] = {
+                        "project": "Content Pipeline",
+                        "type": "Bug",
+                        "title": f"Issue with {_sc['scene_id']}",
+                        "desc": f"Scene {_sc['scene_id']} ({_sc['studio_name']}) — {_sc['performers']}\n\nDescribe the issue:\n",
+                    }
+                    st.rerun()
+
+            # ── Grid view grouped by studio ──────────────────────────────────
+            else:
+                if not _at_scenes:
+                    st.info("No scenes found matching your filters.")
+                else:
+                    _studio_names = {"FPVR": "FuckPassVR", "VRH": "VRHush", "VRA": "VRAllure", "NNJOI": "NaughtyJOI"}
+                    for _grp_studio in _at_studios:
+                        _grp_scenes = _at_by_studio.get(_grp_studio, [])
+                        if not _grp_scenes:
+                            continue
+                        _s_color = _studio_colors.get(_grp_studio, _C["muted"])
+                        st.markdown(
+                            f"<div style='display:flex;align-items:center;gap:10px;margin:16px 0 8px'>"
+                            f"<div style='width:4px;height:20px;border-radius:2px;background:{_s_color}'></div>"
+                            f"<span style='font-family:Syne,sans-serif;font-size:1rem;font-weight:700;"
+                            f"color:{_C['text']}'>{_studio_names.get(_grp_studio, _grp_studio)}</span>"
+                            f"<span style='font-size:0.72rem;color:{_C['muted']}'>{len(_grp_scenes)} scenes</span>"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+                        for _ri in range(0, len(_grp_scenes), 3):
+                            _row_scenes = _grp_scenes[_ri:_ri + 3]
+                            _cols = st.columns(3)
+                            for _ci, _scene in enumerate(_row_scenes):
+                                with _cols[_ci]:
+                                    _pct = int((_scene["completed"] / _scene["total"]) * 100) if _scene["total"] else 0
+                                    _pct_color = _C["green"] if _pct == 100 else (_C["amber"] if _pct >= 50 else _C["red"])
+
+                                    _missing_names = _scene.get("missing", [])
+                                    if _missing_names:
+                                        _checks_html = (
+                                            f"<span style='font-size:0.72rem;color:{_C['red']}'>"
+                                            f"Missing: {', '.join(_missing_names)}</span>"
+                                        )
+                                    else:
+                                        _checks_html = (
+                                            f"<span style='font-size:0.72rem;color:{_C['green']}'>"
+                                            f"&#10003; All assets complete</span>"
+                                        )
+
+                                    _perf_display = _scene["performers"] or "TBD"
+                                    _title_display = _scene["title"][:40] + "..." if len(_scene.get("title", "")) > 40 else (_scene.get("title") or "\u2014")
+                                    _date_display = _scene.get("release_date", "")[:10] or "No date"
+                                    _card_comp = (
+                                        f"<span style='font-size:0.6rem;background:{_C['accent']};color:#fff;"
+                                        f"padding:1px 6px;border-radius:3px;margin-left:6px;font-family:inherit'>COMP</span>"
+                                    ) if _scene.get("is_compilation") else ""
+
+                                    st.markdown(
+                                        f"<div style='background:{_C['surface']};border:1px solid {_C['border']};"
+                                        f"border-left:3px solid {_s_color};border-radius:8px;padding:14px 16px;"
+                                        f"min-height:180px;display:flex;flex-direction:column'>"
+                                        f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>"
+                                        f"<span style='font-family:DM Mono,monospace;font-size:0.82rem;font-weight:600;"
+                                        f"color:{_C['text']}'>{_scene['scene_id']}{_card_comp}</span>"
+                                        f"<span style='font-size:0.68rem;color:{_C['subtle']}'>{_date_display}</span>"
+                                        f"</div>"
+                                        f"<div style='font-size:0.82rem;color:{_C['text']};font-weight:500;"
+                                        f"margin-bottom:2px'>{_perf_display}</div>"
+                                        f"<div style='font-size:0.72rem;color:{_C['muted']};margin-bottom:8px;"
+                                        f"font-style:italic'>{_title_display}</div>"
+                                        f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:8px'>"
+                                        f"<div style='flex:1;height:6px;background:{_C['elevated']};border-radius:3px;overflow:hidden'>"
+                                        f"<div style='width:{_pct}%;height:100%;background:{_pct_color};border-radius:3px'></div>"
+                                        f"</div>"
+                                        f"<span style='font-size:0.72rem;font-weight:600;color:{_pct_color}'>"
+                                        f"{_scene['completed']}/{_scene['total']}</span>"
+                                        f"</div>"
+                                        f"<div style='display:flex;flex-wrap:wrap;gap:4px 12px;margin-bottom:auto'>"
+                                        f"{_checks_html}</div>"
+                                        f"</div>",
+                                        unsafe_allow_html=True,
+                                    )
+                                    if st.button("Open", key=f"at_open_{_scene['scene_id']}", use_container_width=True):
+                                        st.session_state["at_selected"] = _scene["scene_id"]
+                                        st.rerun()
+
+        # ── SUB-VIEW 2: Approvals ────────────────────────────────────────────────
+        elif _tk_mode == _apr_label:
+            hub_ui.section("Approval Queue")
+
+            # Load approvals (globally cached)
+            _all_approvals = _cached_load_approvals()
+            st.session_state["_apr_pending_count"] = sum(1 for a in _all_approvals if a["status"] == "Pending")
+
+            # Refresh button
+            if st.button("Refresh", key="apr_refresh"):
+                _cached_load_approvals.clear()
+                st.rerun()
+
+            # Filter controls
+            _ap_f1, _ap_f2, _ap_f3 = st.columns(3)
+            with _ap_f1:
+                _ap_filt = st.selectbox("Status", ["Pending", "All", "Approved", "Rejected", "Superseded"],
+                                        key="ap_filt_status")
+            with _ap_f2:
+                _ap_type = st.selectbox("Content Type", ["All"] + _apr.CONTENT_TYPES, key="ap_filt_type")
+            with _ap_f3:
+                _ap_submitter = st.selectbox(
+                    "Submitter", ["All", "Mine"],
+                    index=0 if _user_is_admin else 1,
+                    key="ap_filt_submitter",
+                )
+
+            _filt_approvals = _all_approvals
+            if _ap_filt != "All":
+                _filt_approvals = [a for a in _filt_approvals if a["status"] == _ap_filt]
+            if _ap_type != "All":
+                _filt_approvals = [a for a in _filt_approvals if a["content_type"] == _ap_type]
+            if _ap_submitter == "Mine":
+                _filt_approvals = [a for a in _filt_approvals if a["submitted_by"] == _user_name]
+
+            # Summary
+            _ap_pending = sum(1 for a in _all_approvals if a["status"] == "Pending")
+            _ap_approved = sum(1 for a in _all_approvals if a["status"] == "Approved")
+            _ap_rejected = sum(1 for a in _all_approvals if a["status"] == "Rejected")
+            _apm1, _apm2, _apm3 = st.columns(3)
+            _apm1.metric("Pending", _ap_pending)
+            _apm2.metric("Approved", _ap_approved)
+            _apm3.metric("Rejected", _ap_rejected)
+
+            st.divider()
+
+            _type_colors = {
+                "script": _C["blue"], "description": _C["green"],
+                "title_text": _C["amber"], "title_card": _C["vra"],
+            }
+
+            if not _filt_approvals:
+                st.info("No approvals found matching filters.")
+            else:
+                for _appr in reversed(_filt_approvals):
+                    _tc = _type_colors.get(_appr["content_type"], _C["muted"])
+                    _is_pending = _appr["status"] == "Pending"
+                    _status_badge = hub_ui.badge(_appr["status"], {
+                        "Pending": "amber", "Approved": "green",
+                        "Rejected": "red", "Superseded": "gray",
+                    }.get(_appr["status"], "gray"))
+                    _type_badge = hub_ui.badge(_appr["content_type"], "blue")
+                    _linked = f" &middot; {_appr['linked_ticket']}" if _appr.get("linked_ticket") else ""
+
+                    with st.expander(
+                        f"{_appr['id']} — {_appr['content_type']} — {_appr['scene_id']} ({_appr['studio']})",
+                        expanded=_is_pending,
+                    ):
+                        st.markdown(
+                            f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:8px'>"
+                            f"{_status_badge} {_type_badge}"
+                            f"<span style='font-size:0.75rem;color:{_C['muted']}'>"
+                            f"by {_appr['submitted_by']} &middot; {_appr['date']}{_linked}</span>"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+                        # Rejection feedback (prominent, before preview)
+                        if _appr["status"] == "Rejected" and _appr["notes"]:
+                            hub_ui.card(
+                                f"<div style='font-size:0.82rem;color:{_C['red']}'>"
+                                f"<b>Rejection Reason:</b> {_appr['notes']}</div>",
+                                accent=_C["red"],
+                            )
+
+                        # Content preview
+                        hub_ui.card(
+                            f"<div style='font-size:0.82rem;color:{_C['text']};white-space:pre-wrap;"
+                            f"line-height:1.6'>{_appr['preview']}</div>",
+                        )
+                        # Truncation indicator
+                        if len(_appr.get("preview", "")) >= 200 and _appr["content_json"]:
+                            st.caption("Content truncated — click below for full text")
+                        # Full content JSON toggle
+                        if _appr["content_json"]:
+                            with st.popover("View Full Content"):
+                                try:
+                                    import json as _json_mod
+                                    _parsed = _json_mod.loads(_appr["content_json"])
+                                    st.json(_parsed)
+                                except Exception:
+                                    st.code(_appr["content_json"])
+
+                        # Target sheet (where content was/will be written)
+                        if _appr.get("target_sheet"):
+                            _target_display = _appr["target_sheet"].replace(":", " > ")
+                            _target_label = "Written to" if _appr["status"] == "Approved" else "Target"
+                            st.caption(f"{_target_label}: {_target_display}")
+
+                        # Admin notes (skip for Rejected — already shown above)
+                        if _appr["notes"] and _appr["status"] != "Rejected":
+                            st.markdown(
+                                f"<div style='font-size:0.78rem;color:{_C['muted']};margin-top:4px'>"
+                                f"<b>Notes:</b> {_appr['notes']}</div>",
+                                unsafe_allow_html=True,
+                            )
+
+                        # Admin actions for pending items
+                        if _is_pending and _user_is_admin:
+                            _ap_c1, _ap_c2 = st.columns(2)
+                            with _ap_c1:
+                                if st.button("Approve", key=f"apr_ok_{_appr['id']}", use_container_width=True):
+                                    with st.spinner("Approving..."):
+                                        try:
+                                            _apr.approve_item(_appr["row_index"], approved_by=_user_name)
+                                            st.success(f"{_appr['id']} approved and written to target.")
+                                            _cached_load_approvals.clear()
+                                            st.rerun()
+                                        except Exception as _e:
+                                            st.error(f"Failed: {_e}")
+                            with _ap_c2:
+                                _rej_notes = st.text_input("Rejection notes", key=f"apr_rej_notes_{_appr['id']}")
+                                if st.button("Reject", key=f"apr_rej_{_appr['id']}", use_container_width=True):
+                                    if not _rej_notes.strip():
+                                        st.error("Notes are required for rejection.")
+                                    else:
+                                        with st.spinner("Rejecting..."):
+                                            try:
+                                                _apr.reject_item(_appr["row_index"], rejected_by=_user_name,
+                                                                 notes=_rej_notes.strip())
+                                                st.warning(f"{_appr['id']} rejected.")
+                                                _cached_load_approvals.clear()
+                                                st.rerun()
+                                            except Exception as _e:
+                                                st.error(f"Failed: {_e}")
+
+                        # Non-admin: read-only status
+                        elif _is_pending and not _user_is_admin:
+                            st.markdown(
+                                f"<div style='font-size:0.78rem;color:{_C['amber']};margin-top:4px'>"
+                                f"Awaiting admin review</div>",
+                                unsafe_allow_html=True,
+                            )
+
+                        # Link to Asset Tracker scene
+                        if _appr.get("scene_id"):
+                            if st.button(
+                                f"View {_appr['scene_id']} in Asset Tracker",
+                                key=f"apr_goto_at_{_appr['id']}",
+                            ):
+                                st.session_state["tk_mode"] = "Asset Tracker"
+                                st.session_state["at_selected"] = _appr["scene_id"]
+                                st.rerun()
+
+        # ── SUB-VIEW 3: Tickets ──────────────────────────────────────────────────
+        elif _tk_mode == "Tickets":
+            hub_ui.section("Ticket Dashboard")
+
+            # Filters
+            _tf1, _tf2 = st.columns(2)
+            with _tf1:
+                _filt_status = st.selectbox("Status", ["All"] + _tkt.STATUSES, key="tk_filt_status")
+            with _tf2:
+                _filt_project = st.selectbox("Project", ["All"] + _tkt.PROJECTS, key="tk_filt_project")
+            _tf3, _tf4 = st.columns(2)
+            with _tf3:
+                _filt_priority = st.selectbox("Priority", ["All"] + _tkt.PRIORITIES, key="tk_filt_priority")
+            with _tf4:
+                _filt_assignee = st.selectbox(
+                    "Assigned To",
+                    ["All", "Mine", "Unassigned"] + _tkt.EMPLOYEES,
+                    key="tk_filt_assignee",
+                )
+
+            # Load tickets (globally cached)
+            _all_tickets = _cached_load_tickets()
+
+            # Refresh button
+            if st.button("Refresh", key="tk_refresh"):
+                _cached_load_tickets.clear()
+                st.rerun()
+
+            # Apply filters
+            _filtered = _all_tickets
+            if _filt_status != "All":
+                _filtered = [t for t in _filtered if t["status"] == _filt_status]
+            if _filt_project != "All":
+                _filtered = [t for t in _filtered if t["project"] == _filt_project]
+            if _filt_priority != "All":
+                _filtered = [t for t in _filtered if t["priority"] == _filt_priority]
+            if _filt_assignee == "Mine":
+                _filtered = [t for t in _filtered
+                             if t.get("assigned_to") == _user_name or t.get("submitted_by") == _user_name]
+            elif _filt_assignee == "Unassigned":
+                _filtered = [t for t in _filtered if not t.get("assigned_to")]
+            elif _filt_assignee not in ("All",):
+                _filtered = [t for t in _filtered if t.get("assigned_to") == _filt_assignee]
+
+            # Summary stats — consolidated 3 metrics
+            _active_ct = sum(1 for t in _all_tickets if t["status"] in ("New", "Approved", "In Progress"))
+            _review_ct = sum(1 for t in _all_tickets if t["status"] == "In Review")
+            _resolved_ct = sum(1 for t in _all_tickets if t["status"] in ("Closed", "Rejected"))
+            _sm1, _sm2, _sm3 = st.columns(3)
+            _sm1.metric("Active", _active_ct)
+            _sm2.metric("In Review", _review_ct)
+            _sm3.metric("Resolved", _resolved_ct)
+
+            st.divider()
+
+            # Hide Closed/Rejected from grid unless explicitly filtered
+            _hidden_count = 0
+            if _filt_status == "All":
+                _hidden_count = sum(1 for t in _filtered if t["status"] in ("Closed", "Rejected"))
+                _filtered = [t for t in _filtered if t["status"] not in ("Closed", "Rejected")]
+            if _hidden_count:
+                st.caption(f"{_hidden_count} closed/rejected ticket{'s' if _hidden_count != 1 else ''} hidden — filter by status to view")
+
+            _pri_colors = {"Critical": _C["red"], "High": _C["amber"], "Medium": _C["blue"], "Low": _C["green"]}
+            _st_colors = {
+                "New": _C["blue"], "Approved": _C["green"], "In Progress": _C["amber"],
+                "In Review": _C["accent"], "Closed": _C["green"], "Rejected": _C["red"],
+            }
+            _st_bg = {
+                "New": _C["blue_dim"], "Approved": _C["green_dim"], "In Progress": _C["amber_dim"],
+                "In Review": _C["accent_dim"], "Closed": _C["green_dim"], "Rejected": _C["red_dim"],
+            }
+
+            # ── Detail view (selected ticket) ────────────────────────────────
+            _selected_tid = st.session_state.get("tk_selected")
+            _selected_ticket = next((t for t in _all_tickets if t["id"] == _selected_tid), None) if _selected_tid else None
+
+            if _selected_ticket:
+                _t = _selected_ticket
+                _pc = _pri_colors.get(_t["priority"], _C["muted"])
+                _sc = _st_colors.get(_t["status"], _C["muted"])
+                _sb = _st_bg.get(_t["status"], "rgba(255,255,255,0.06)")
+
+                if st.button("Back to all tickets", key="tk_back"):
+                    st.session_state.pop("tk_selected", None)
+                    st.rerun()
+
+                st.markdown(
+                    f"<div style='display:flex;align-items:center;gap:12px;margin:8px 0 4px'>"
+                    f"<div style='width:4px;height:28px;border-radius:2px;background:{_pc}'></div>"
+                    f"<span style='font-family:DM Mono,monospace;font-size:0.82rem;color:{_C['subtle']}'>{_t['id']}</span>"
+                    f"<span style='font-family:Syne,sans-serif;font-size:1.2rem;font-weight:700;color:{_C['text']}'>{_t['title']}</span>"
+                    f"<span style='background:{_sb};color:{_sc};font-size:0.72rem;font-weight:600;"
+                    f"padding:3px 10px;border-radius:9999px;margin-left:auto'>{_t['status']}</span>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+                _b_pri = hub_ui.badge(_t['priority'], {"Critical": "red", "High": "amber", "Medium": "blue", "Low": "green"}.get(_t["priority"], "gray"))
+                _b_proj = hub_ui.badge(_t['project'], 'blue')
+                _b_type = hub_ui.badge(_t['type'], 'gray')
+                _b_assign = hub_ui.badge(_t.get('assigned_to') or 'Unassigned', 'accent' if _t.get('assigned_to') else 'gray')
+                st.markdown(
+                    f"<div style='display:flex;align-items:center;gap:10px;margin:0 0 12px 16px'>"
+                    f"{_b_pri} {_b_proj} {_b_type} {_b_assign}"
+                    f"<span style='font-size:0.75rem;color:{_C['muted']}'>by {_t['submitted_by']} &middot; {_t['date']}</span>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+                hub_ui.section("Description")
+                st.markdown(
+                    f"<div class='hub-card' style='white-space:pre-wrap;font-size:0.85rem;"
+                    f"line-height:1.7;color:{_C['text']}'>{_t['description']}</div>",
+                    unsafe_allow_html=True,
+                )
+
+                if _t["admin_notes"]:
+                    hub_ui.section("Admin Notes")
+                    # Render as timeline if timestamped entries exist
+                    _notes_raw = _t["admin_notes"]
+                    import re as _re_mod
+                    _note_entries = _re_mod.split(r'(?=\[\d{4}-\d{2}-\d{2})', _notes_raw)
+                    _note_entries = [n.strip() for n in _note_entries if n.strip()]
+                    if len(_note_entries) > 1 or _note_entries[0].startswith("["):
+                        _notes_html = ""
+                        for _ne in _note_entries:
+                            _ts_match = _re_mod.match(r'\[(\d{4}-\d{2}-\d{2}\s*\d{0,2}:?\d{0,2})\s*([^\]]*)\]\s*(.*)', _ne, _re_mod.DOTALL)
+                            if _ts_match:
+                                _notes_html += (
+                                    f"<div style='padding:6px 0;border-bottom:1px solid {_C['border']}'>"
+                                    f"<span style='font-size:0.68rem;color:{_C['subtle']}'>{_ts_match.group(1)}</span>"
+                                    f" <span style='font-size:0.72rem;font-weight:600;color:{_C['accent']}'>{_ts_match.group(2)}</span>"
+                                    f"<div style='font-size:0.82rem;color:{_C['text']};margin-top:2px'>{_ts_match.group(3)}</div>"
+                                    f"</div>"
+                                )
+                            else:
+                                _notes_html += f"<div style='font-size:0.82rem;color:{_C['text']};padding:4px 0'>{_ne}</div>"
+                        st.markdown(
+                            f"<div class='hub-card hub-card-accent' style='border-left-color:{_C['accent']}'>"
+                            f"{_notes_html}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f"<div class='hub-card hub-card-accent' style='border-left-color:{_C['accent']}'>"
+                            f"<span style='font-size:0.85rem'>{_notes_raw}</span></div>",
+                            unsafe_allow_html=True,
+                        )
+
+                if _t["date_resolved"]:
+                    st.caption(f"Resolved: {_t['date_resolved']}")
+
+                # QC Feedback — anyone can report test results on active tickets
+                if _t["status"] in ("New", "Approved", "In Progress"):
+                    hub_ui.section("QC Feedback")
+                    _qc_note = st.text_input("Notes (optional)", key="tk_qc_note",
+                                             placeholder="What did you find?")
+                    _qc1, _qc2 = st.columns(2)
+                    with _qc1:
+                        if st.button("Fixed", key="tk_qc_fixed", use_container_width=True):
+                            with st.spinner("Updating..."):
+                                try:
+                                    _qc_text = f"QC passed" + (f": {_qc_note.strip()}" if _qc_note.strip() else "")
+                                    _tkt.update_ticket(
+                                        _t["row_index"], status="In Review",
+                                        admin_notes=_tkt.append_note(_t["admin_notes"], _user_name, _qc_text),
+                                    )
+                                    st.success(f"Marked as fixed — moved to In Review.")
+                                    _cached_load_tickets.clear()
+                                    st.rerun()
+                                except Exception as _e:
+                                    st.error(f"Failed: {_e}")
+                    with _qc2:
+                        if st.button("Still Broken", key="tk_qc_broken", use_container_width=True):
+                            with st.spinner("Updating..."):
+                                try:
+                                    _qc_text = f"QC failed" + (f": {_qc_note.strip()}" if _qc_note.strip() else "")
+                                    _tkt.update_ticket(
+                                        _t["row_index"],
+                                        admin_notes=_tkt.append_note(_t["admin_notes"], _user_name, _qc_text),
+                                    )
+                                    st.warning(f"Feedback recorded.")
+                                    _cached_load_tickets.clear()
+                                    st.rerun()
+                                except Exception as _e:
+                                    st.error(f"Failed: {_e}")
+
+                # Verify & Close for In Review tickets
+                if _t["status"] == "In Review":
+                    hub_ui.section("Verify This Change")
+                    _last_note = _t["admin_notes"].strip().split("\n")[-1] if _t["admin_notes"] else ""
+                    _verify_ctx = f"Change reported: **{_last_note}**" if _last_note else "No notes on what was changed."
+                    st.markdown(
+                        f"<div style='font-size:0.82rem;color:{_C['muted']};margin-bottom:8px'>"
+                        f"This ticket was marked as done. {_verify_ctx}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    _vc1, _vc2 = st.columns(2)
+                    with _vc1:
+                        if st.button("Verified — Close", key="tk_verify_close", use_container_width=True):
+                            with st.spinner("Closing..."):
+                                try:
+                                    _tkt.update_ticket(
+                                        _t["row_index"], status="Closed",
+                                        approved_by=_user_name,
+                                        admin_notes=(_t["admin_notes"] + f"\nVerified by {_user_name}").strip(),
+                                    )
+                                    st.success(f"Ticket {_t['id']} verified and closed.")
+                                    _cached_load_tickets.clear()
+                                    st.session_state.pop("tk_selected", None)
+                                    st.rerun()
+                                except Exception as _e:
+                                    st.error(f"Failed: {_e}")
+                    with _vc2:
+                        if st.button("Not Fixed — Reopen", key="tk_verify_reopen", use_container_width=True):
+                            with st.spinner("Reopening..."):
+                                try:
+                                    _tkt.update_ticket(
+                                        _t["row_index"], status="In Progress",
+                                        admin_notes=(_t["admin_notes"] + f"\nReopened by {_user_name} — not fixed").strip(),
+                                    )
+                                    st.warning(f"Ticket {_t['id']} reopened.")
+                                    _cached_load_tickets.clear()
+                                    st.rerun()
+                                except Exception as _e:
+                                    st.error(f"Failed: {_e}")
+
+                # Quick approve/reject for New tickets
+                if _t["status"] == "New" and _user_is_admin:
+                    hub_ui.section("Review New Ticket")
+                    _qa1, _qa2 = st.columns(2)
+                    with _qa1:
+                        if st.button("Approve", key="tk_quick_approve", use_container_width=True):
+                            with st.spinner("Approving..."):
+                                try:
+                                    _tkt.update_ticket(
+                                        _t["row_index"], status="Approved",
+                                        approved_by=_user_name,
+                                        admin_notes=_tkt.append_note(_t["admin_notes"], _user_name, "Approved"),
+                                    )
+                                    st.success(f"Ticket {_t['id']} approved.")
+                                    _cached_load_tickets.clear()
+                                    st.rerun()
+                                except Exception as _e:
+                                    st.error(f"Failed: {_e}")
+                    with _qa2:
+                        _reject_reason = st.text_input("Rejection reason", key="tk_quick_rej_reason")
+                        if st.button("Reject", key="tk_quick_reject", use_container_width=True):
+                            if not _reject_reason.strip():
+                                st.error("Please provide a reason.")
+                            else:
+                                with st.spinner("Rejecting..."):
+                                    try:
+                                        _tkt.update_ticket(
+                                            _t["row_index"], status="Rejected",
+                                            approved_by=_user_name,
+                                            admin_notes=_tkt.append_note(_t["admin_notes"], _user_name, f"Rejected: {_reject_reason.strip()}"),
+                                        )
+                                        st.warning(f"Ticket {_t['id']} rejected.")
+                                        _cached_load_tickets.clear()
+                                        st.rerun()
+                                    except Exception as _e:
+                                        st.error(f"Failed: {_e}")
+
+                # Admin actions
+                if _user_is_admin:
+                    hub_ui.section("Admin Actions")
+                    # Valid status transitions
+                    _TRANSITIONS = {
+                        "New":         ["New", "Approved", "Rejected"],
+                        "Approved":    ["Approved", "In Progress", "Rejected"],
+                        "In Progress": ["In Progress", "In Review", "Closed"],
+                        "In Review":   ["In Review", "In Progress", "Closed"],
+                        "Closed":      ["Closed", "In Progress"],
+                        "Rejected":    ["Rejected", "New"],
+                    }
+                    _valid_statuses = _TRANSITIONS.get(_t["status"], _tkt.STATUSES)
+                    _ac1, _ac2 = st.columns(2)
+                    with _ac1:
+                        _new_status = st.selectbox(
+                            "Update Status", _valid_statuses,
+                            index=0,
+                            key="tk_detail_status",
+                        )
+                    with _ac2:
+                        _assign_opts = ["Unassigned"] + _tkt.EMPLOYEES
+                        _cur_assign = _t.get("assigned_to", "") or "Unassigned"
+                        _assign_idx = _assign_opts.index(_cur_assign) if _cur_assign in _assign_opts else 0
+                        _new_assignee = st.selectbox(
+                            "Assign To", _assign_opts, index=_assign_idx,
+                            key="tk_detail_assignee",
+                        )
+                    _add_note = st.text_input("Add Note", key="tk_detail_add_note", placeholder="Add a timestamped note...")
+                    if st.button("Update Ticket", key="tk_detail_save", use_container_width=True):
+                        _final_notes = None
+                        if _add_note.strip():
+                            _final_notes = _tkt.append_note(_t["admin_notes"], _user_name, _add_note.strip())
+                        _final_assignee = _new_assignee if _new_assignee != "Unassigned" else ""
+                        _status_changed = _new_status != _t["status"]
+                        _assignee_changed = _final_assignee != (_t.get("assigned_to") or "")
+                        _has_note = _final_notes is not None
+
+                        if not _status_changed and not _assignee_changed and not _has_note:
+                            st.warning("Nothing changed.")
+                        else:
+                            with st.spinner("Updating..."):
+                                try:
+                                    _tkt.update_ticket(
+                                        _t["row_index"],
+                                        status=_new_status if _status_changed else None,
+                                        approved_by=_user_name if _status_changed and _new_status in ("Approved", "Rejected", "Closed") else None,
+                                        admin_notes=_final_notes,
+                                        assigned_to=_final_assignee if _assignee_changed else None,
+                                    )
+                                    st.success(f"Ticket {_t['id']} updated.")
+                                    _cached_load_tickets.clear()
+                                    st.rerun()
+                                except Exception as _e:
+                                    st.error(f"Failed to update: {_e}")
+
+            # ── Grid view (3 columns) ────────────────────────────────────────
+            else:
+                if not _filtered:
+                    st.info("No tickets found matching your filters.")
+                else:
+                    _sorted_tickets = list(reversed(_filtered))
+                    for _ri in range(0, len(_sorted_tickets), 3):
+                        _row_tickets = _sorted_tickets[_ri:_ri + 3]
+                        _cols = st.columns(3)
+                        for _ci, _ticket in enumerate(_row_tickets):
+                            with _cols[_ci]:
+                                _pc = _pri_colors.get(_ticket["priority"], _C["muted"])
+                                _sc = _st_colors.get(_ticket["status"], _C["muted"])
+                                _sb = _st_bg.get(_ticket["status"], "rgba(255,255,255,0.06)")
+                                _trunc_title = _ticket["title"][:50] + ("..." if len(_ticket["title"]) > 50 else "")
+                                _trunc_desc = _ticket["description"][:80] + ("..." if len(_ticket["description"]) > 80 else "")
+                                _ticket["_assignee_html"] = (
+                                    f"<span style='color:{_C['border']}'>&middot;</span>"
+                                    f"<span style='font-size:0.68rem;color:{_C['accent']}'>{_ticket.get('assigned_to', '')}</span>"
+                                ) if _ticket.get("assigned_to") else ""
+                                st.markdown(
+                                    f"<div style='background:{_C['surface']};border:1px solid {_C['border']};"
+                                    f"border-top:3px solid {_pc};border-radius:8px;padding:14px 16px;"
+                                    f"min-height:160px;display:flex;flex-direction:column'>"
+                                    f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+                                    f"<span style='font-family:DM Mono,monospace;font-size:0.7rem;color:{_C['subtle']}'>{_ticket['id']}</span>"
+                                    f"<span style='background:{_sb};color:{_sc};font-size:0.65rem;font-weight:600;"
+                                    f"padding:2px 8px;border-radius:9999px'>{_ticket['status']}</span>"
+                                    f"</div>"
+                                    f"<div style='font-size:0.88rem;font-weight:600;color:{_C['text']};"
+                                    f"margin-bottom:6px;line-height:1.3'>{_trunc_title}</div>"
+                                    f"<div style='font-size:0.75rem;color:{_C['muted']};line-height:1.4;"
+                                    f"margin-bottom:auto'>{_trunc_desc}</div>"
+                                    f"<div style='display:flex;gap:6px;align-items:center;margin-top:10px;"
+                                    f"padding-top:8px;border-top:1px solid {_C['border']}'>"
+                                    f"<span style='font-size:0.68rem;color:{_C['muted']}'>{_ticket['project']}</span>"
+                                    f"<span style='color:{_C['border']}'>&middot;</span>"
+                                    f"<span style='font-size:0.68rem;color:{_C['subtle']}'>{_ticket['submitted_by']}</span>"
+                                    f"{_ticket.get('_assignee_html', '')}"
+                                    f"<span style='font-size:0.68rem;color:{_C['subtle']};margin-left:auto'>{_ticket['date'][:10]}</span>"
+                                    f"</div>"
+                                    f"</div>",
+                                    unsafe_allow_html=True,
+                                )
+                                if st.button("Open", key=f"tk_open_{_ticket['id']}", use_container_width=True):
+                                    st.session_state["tk_selected"] = _ticket["id"]
+                                    st.rerun()
+
+        # ── SUB-VIEW 4: Submit ───────────────────────────────────────────────────
+        elif _tk_mode == "Submit":
+            hub_ui.section("Submit a New Ticket")
+
+            # Persistent success banner
+            _last_submitted = st.session_state.get("_last_submitted_ticket")
+            if _last_submitted:
+                st.info(f"Last submitted: **{_last_submitted}** — view it in the Tickets tab")
+                if st.button("Dismiss", key="dismiss_last_ticket"):
+                    st.session_state.pop("_last_submitted_ticket", None)
+                    st.rerun()
+
+            # Check for pre-fill from Asset Tracker
+            _prefill = st.session_state.pop("tk_prefill", {})
+            if _prefill:
+                if st.button("Cancel — return to Asset Tracker", key="tk_cancel_prefill"):
+                    st.session_state["tk_mode"] = "Asset Tracker"
+                    st.rerun()
+
             with st.form("ticket_submit_form", clear_on_submit=True):
                 _tk_c1, _tk_c2 = st.columns(2)
                 with _tk_c1:
-                    _tk_emp_idx = _tkt.EMPLOYEES.index(_user_name) if _user_name in _tkt.EMPLOYEES else 0
-                    _tk_who = st.selectbox("Submitted By", _tkt.EMPLOYEES, index=_tk_emp_idx, key="tk_who")
-                    _tk_project = st.selectbox("Project", _tkt.PROJECTS, key="tk_project")
+                    st.text_input("Submitted By", value=_user_name, disabled=True, key="tk_who_display")
                 with _tk_c2:
-                    _tk_type = st.selectbox("Type", _tkt.TICKET_TYPES, key="tk_type")
+                    _pf_proj = _prefill.get("project", "")
+                    _pf_proj_idx = _tkt.PROJECTS.index(_pf_proj) if _pf_proj in _tkt.PROJECTS else 0
+                    _tk_project = st.selectbox("Project", _tkt.PROJECTS, index=_pf_proj_idx, key="tk_project")
+                _tk_c3, _tk_c4 = st.columns(2)
+                with _tk_c3:
+                    _pf_type = _prefill.get("type", "")
+                    _pf_type_idx = _tkt.TICKET_TYPES.index(_pf_type) if _pf_type in _tkt.TICKET_TYPES else 0
+                    _tk_type = st.selectbox("Type", _tkt.TICKET_TYPES, index=_pf_type_idx, key="tk_type")
+                with _tk_c4:
                     _tk_priority = st.selectbox("Priority", _tkt.PRIORITIES,
                                                 index=1, key="tk_priority")
-                _tk_title = st.text_input("Title", placeholder="Short summary of the issue or request",
+                _tk_title = st.text_input("Title",
+                                          value=_prefill.get("title", ""),
+                                          placeholder="Short summary of the issue or request",
                                           key="tk_title")
                 _tk_desc = st.text_area("Description",
+                                        value=_prefill.get("desc", ""),
                                         placeholder="Detailed description — steps to reproduce, expected behavior, screenshots, etc.",
                                         height=200, key="tk_desc")
-                _tk_submit = st.form_submit_button("🎟️ Submit Ticket", use_container_width=True)
+                _tk_submit = st.form_submit_button("Submit Ticket", use_container_width=True)
 
             if _tk_submit:
                 if not _tk_title.strip():
@@ -4581,137 +5318,215 @@ with tab_tickets:
                     with st.spinner("Submitting ticket..."):
                         try:
                             _new_id = _tkt.create_ticket(
-                                _tk_who, _tk_project, _tk_type, _tk_priority,
+                                _user_name, _tk_project, _tk_type, _tk_priority,
                                 _tk_title.strip(), _tk_desc.strip(),
                             )
-                            st.success(f"Ticket **{_new_id}** submitted successfully!")
-                            st.session_state.pop("tickets_cache", None)
+                            st.session_state["_last_submitted_ticket"] = _new_id
+                            _cached_load_tickets.clear()
+                            st.rerun()
                         except Exception as _e:
                             st.error(f"Failed to submit ticket: {_e}")
 
-        # ── Dashboard view ───────────────────────────────────────────────────────
-        else:
-            st.subheader("Ticket Dashboard")
+        # ── SUB-VIEW 5: Users (Drew + David only) ────────────────────────────
+        elif _tk_mode == "Users" and _user_can_manage_users:
+            hub_ui.section("User Management")
 
-            # Filters row
-            _tf1, _tf2, _tf3, _tf4 = st.columns([2, 2, 2, 1])
-            with _tf1:
-                _filt_status = st.selectbox("Status", ["All"] + _tkt.STATUSES, key="tk_filt_status")
-            with _tf2:
-                _filt_project = st.selectbox("Project", ["All"] + _tkt.PROJECTS, key="tk_filt_project")
-            with _tf3:
-                _filt_priority = st.selectbox("Priority", ["All"] + _tkt.PRIORITIES, key="tk_filt_priority")
-            with _tf4:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("🔄 Refresh", key="tk_refresh", use_container_width=True):
-                    st.session_state.pop("tickets_cache", None)
-                    st.session_state.pop("tickets_cache_ts", None)
-                    st.rerun()
+            # Load current users from sheet
+            _um_users = auth_config.load_users_config()
+            _um_roles = ["admin", "editor"]
+            _um_editing = st.session_state.get("um_editing")
 
-            # Load tickets (cached 60s)
-            _tk_cache_key = "tickets_cache"
-            _tk_ts_key = "tickets_cache_ts"
-            if (_tk_cache_key not in st.session_state
-                    or time.time() - st.session_state.get(_tk_ts_key, 0) > 60):
-                with st.spinner("Loading tickets..."):
-                    try:
-                        st.session_state[_tk_cache_key] = _tkt.load_tickets()
-                        st.session_state[_tk_ts_key] = time.time()
-                    except Exception as _e:
-                        st.error(f"Failed to load tickets: {_e}")
-                        st.session_state[_tk_cache_key] = []
+            # Collapse duplicate emails into unique people (Drew has 2 emails)
+            _um_people = {}
+            for _um_email, _um_info in _um_users.items():
+                _um_name = _um_info["name"]
+                if _um_name not in _um_people:
+                    _um_people[_um_name] = {"emails": [], "role": _um_info["role"], "tabs": _um_info["allowed_tabs"]}
+                _um_people[_um_name]["emails"].append(_um_email)
 
-            _all_tickets = st.session_state.get(_tk_cache_key, [])
-
-            # Apply filters
-            _filtered = _all_tickets
-            if _filt_status != "All":
-                _filtered = [t for t in _filtered if t["status"] == _filt_status]
-            if _filt_project != "All":
-                _filtered = [t for t in _filtered if t["project"] == _filt_project]
-            if _filt_priority != "All":
-                _filtered = [t for t in _filtered if t["priority"] == _filt_priority]
-
-            # Summary stats
-            _sc1, _sc2, _sc3, _sc4, _sc5 = st.columns(5)
-            _status_counts = {}
-            for _t in _all_tickets:
-                _status_counts[_t["status"]] = _status_counts.get(_t["status"], 0) + 1
-            _sc1.metric("🆕 New", _status_counts.get("New", 0))
-            _sc2.metric("✅ Approved", _status_counts.get("Approved", 0))
-            _sc3.metric("🔧 In Progress", _status_counts.get("In Progress", 0))
-            _sc4.metric("🚀 Deployed", _status_counts.get("Deployed", 0))
-            _sc5.metric("❌ Rejected", _status_counts.get("Rejected", 0))
+            # Summary metrics
+            _um_total = len(_um_people)
+            _um_admin_ct = sum(1 for p in _um_people.values() if p["role"] == "admin")
+            _um_editor_ct = _um_total - _um_admin_ct
+            _um1, _um2, _um3 = st.columns(3)
+            _um1.metric("Total Users", _um_total)
+            _um2.metric("Admins", _um_admin_ct)
+            _um3.metric("Editors", _um_editor_ct)
 
             st.divider()
 
-            if not _filtered:
-                st.info("No tickets found matching your filters.")
-            else:
-                # Show tickets newest first
-                for _ticket in reversed(_filtered):
-                    _pri_emoji = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "🟢"}.get(
-                        _ticket["priority"], "⚪"
-                    )
-                    _status_emoji = {
-                        "New": "🆕", "Approved": "✅", "In Progress": "🔧",
-                        "Deployed": "🚀", "Rejected": "❌",
-                    }.get(_ticket["status"], "")
+            # ── User cards — 2 per row ───────────────────────────────────────
+            _um_sorted = sorted(_um_people.items(), key=lambda x: (0 if x[1]["role"] == "admin" else 1, x[0]))
+            for _um_ri in range(0, len(_um_sorted), 2):
+                _um_row = _um_sorted[_um_ri:_um_ri + 2]
+                _um_cols = st.columns(2)
+                for _um_ci, (_um_name, _um_p) in enumerate(_um_row):
+                    with _um_cols[_um_ci]:
+                        _um_role = _um_p["role"]
+                        _um_tabs = _um_p["tabs"]
+                        _um_emails = _um_p["emails"]
+                        _um_key = _um_name.lower().replace(" ", "_")
+                        _um_is_all = set(_um_tabs) >= set(auth_config.ALL_TAB_KEYS)
+                        _um_tabs_display = "All Tabs" if _um_is_all else ", ".join(t for t in _um_tabs if t in auth_config.ALL_TAB_KEYS)
 
-                    _exp_label = (
-                        f"{_pri_emoji} **{_ticket['id']}** — {_ticket['title']}  "
-                        f"| {_status_emoji} {_ticket['status']}  "
-                        f"| {_ticket['project']}  "
-                        f"| by {_ticket['submitted_by']}  "
-                        f"| {_ticket['date']}"
-                    )
-                    with st.expander(_exp_label, expanded=(_ticket["status"] == "New")):
-                        # Ticket details
-                        _dc1, _dc2, _dc3, _dc4 = st.columns(4)
-                        _dc1.markdown(f"**Type:** {_ticket['type']}")
-                        _dc2.markdown(f"**Priority:** {_pri_emoji} {_ticket['priority']}")
-                        _dc3.markdown(f"**Project:** {_ticket['project']}")
-                        _dc4.markdown(f"**Submitted:** {_ticket['date']}")
+                        # Role badge
+                        _role_badge_var = "accent" if _um_role == "admin" else "gray"
+                        _role_badge = hub_ui.badge(_um_role.capitalize(), _role_badge_var)
 
-                        st.markdown("**Description:**")
-                        st.text(_ticket["description"])
+                        # Grail writer indicator
+                        _writer_badge = ""
+                        if _um_name in auth_config._GRAIL_WRITERS:
+                            _writer_badge = f" {hub_ui.badge('Grail Writer', 'green')}"
 
-                        if _ticket["admin_notes"]:
-                            st.markdown(f"**Admin Notes:** {_ticket['admin_notes']}")
-                        if _ticket["date_resolved"]:
-                            st.markdown(f"**Resolved:** {_ticket['date_resolved']}")
+                        # Email(s)
+                        _emails_html = "<br>".join(
+                            f"<span style='font-size:0.72rem;color:{_C['muted']}'>{e}</span>"
+                            for e in _um_emails
+                        )
 
-                        # Admin actions (only visible to admins)
-                        if _user_is_admin:
-                            st.markdown("---")
-                            st.caption("Admin Actions")
-                            _ac1, _ac2 = st.columns([1, 2])
-                            with _ac1:
-                                _new_status = st.selectbox(
-                                    "Update Status",
-                                    _tkt.STATUSES,
-                                    index=_tkt.STATUSES.index(_ticket["status"])
-                                    if _ticket["status"] in _tkt.STATUSES else 0,
-                                    key=f"tk_st_{_ticket['row_index']}",
-                                )
-                            with _ac2:
-                                _new_notes = st.text_input(
-                                    "Admin Notes",
-                                    value=_ticket["admin_notes"],
-                                    key=f"tk_notes_{_ticket['row_index']}",
-                                )
-                            if st.button("💾 Update Ticket", key=f"tk_update_{_ticket['row_index']}",
-                                         use_container_width=True):
-                                with st.spinner("Updating..."):
-                                    try:
-                                        _tkt.update_ticket(
-                                            _ticket["row_index"],
-                                            status=_new_status,
-                                            approved_by=_user_name if _new_status in ("Approved", "Rejected") else None,
-                                            admin_notes=_new_notes if _new_notes != _ticket["admin_notes"] else None,
-                                        )
-                                        st.success(f"Ticket {_ticket['id']} updated to **{_new_status}**")
-                                        st.session_state.pop("tickets_cache", None)
-                                        st.session_state.pop("tickets_cache_ts", None)
-                                    except Exception as _e:
-                                        st.error(f"Failed to update: {_e}")
+                        # Tabs as small pills
+                        if _um_is_all:
+                            _tabs_html = f"<span style='font-size:0.7rem;color:{_C['green']}'>All tabs</span>"
+                        else:
+                            _valid = [t for t in _um_tabs if t in auth_config.ALL_TAB_KEYS]
+                            _tabs_html = " ".join(
+                                f"<span style='display:inline-block;font-size:0.65rem;padding:1px 6px;"
+                                f"border-radius:3px;background:{_C['elevated']};color:{_C['muted']};"
+                                f"margin:1px'>{t}</span>"
+                                for t in _valid
+                            ) if _valid else f"<span style='font-size:0.7rem;color:{_C['red']}'>No tabs</span>"
+
+                        hub_ui.card(
+                            f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:6px'>"
+                            f"<span style='font-family:Syne,sans-serif;font-size:0.95rem;font-weight:700;"
+                            f"color:{_C['text']}'>{_um_name}</span>"
+                            f"{_role_badge}{_writer_badge}"
+                            f"</div>"
+                            f"{_emails_html}"
+                            f"<div style='margin-top:8px'>{_tabs_html}</div>"
+                        )
+
+                        # Edit / Remove buttons
+                        _eb1, _eb2 = st.columns(2)
+                        with _eb1:
+                            if st.button("Edit", key=f"um_edit_{_um_key}", use_container_width=True):
+                                st.session_state["um_editing"] = _um_name
+                                st.rerun()
+                        with _eb2:
+                            if st.button("Remove", key=f"um_del_{_um_key}", use_container_width=True):
+                                st.session_state[f"um_confirm_del_{_um_key}"] = True
+                                st.rerun()
+
+            # ── Edit panel (slides in below cards when editing) ──────────────
+            if _um_editing and _um_editing in _um_people:
+                st.divider()
+                _ep = _um_people[_um_editing]
+                _ep_key = _um_editing.lower().replace(" ", "_")
+                hub_ui.section(f"Editing {_um_editing}")
+
+                _ep_r1, _ep_r2 = st.columns(2)
+                with _ep_r1:
+                    _ep_new_role = st.selectbox(
+                        "Role", _um_roles,
+                        index=_um_roles.index(_ep["role"]) if _ep["role"] in _um_roles else 1,
+                        key=f"um_erole_{_ep_key}")
+                with _ep_r2:
+                    _ep_valid_tabs = [t for t in _ep["tabs"] if t in auth_config.ALL_TAB_KEYS]
+                    _ep_is_all = set(_ep["tabs"]) >= set(auth_config.ALL_TAB_KEYS)
+                    _ep_new_tabs = st.multiselect(
+                        "Allowed Tabs", auth_config.ALL_TAB_KEYS,
+                        default=auth_config.ALL_TAB_KEYS if _ep_is_all else _ep_valid_tabs,
+                        key=f"um_etabs_{_ep_key}")
+
+                _ep_b1, _ep_b2 = st.columns(2)
+                with _ep_b1:
+                    if st.button("Save Changes", key=f"um_esave_{_ep_key}", use_container_width=True):
+                        try:
+                            _gc_um = auth_config._get_client()
+                            _sh_um = _gc_um.open_by_key(auth_config.USERS_SHEET_ID)
+                            _ws_um = _sh_um.worksheet(auth_config.USERS_TAB_NAME)
+                            _um_rows = _ws_um.get_all_values()
+                            _tabs_val = "ALL" if set(_ep_new_tabs) == set(auth_config.ALL_TAB_KEYS) else ", ".join(_ep_new_tabs)
+                            _updated = False
+                            for _ep_email in _ep["emails"]:
+                                for _ri_um, _row_um in enumerate(_um_rows[1:], start=2):
+                                    if _row_um[0].strip().lower() == _ep_email:
+                                        _ws_um.update_cell(_ri_um, 3, _ep_new_role)
+                                        _ws_um.update_cell(_ri_um, 4, _tabs_val)
+                                        _updated = True
+                            if _updated:
+                                auth_config.invalidate_cache()
+                                st.session_state.pop("um_editing", None)
+                                st.rerun()
+                        except Exception as _e_um:
+                            st.error(f"Failed to update: {_e_um}")
+                with _ep_b2:
+                    if st.button("Cancel", key=f"um_ecancel_{_ep_key}", use_container_width=True):
+                        st.session_state.pop("um_editing", None)
+                        st.rerun()
+
+            # ── Delete confirmation (appears inline) ─────────────────────────
+            for _um_name_d, _um_p_d in _um_people.items():
+                _um_key_d = _um_name_d.lower().replace(" ", "_")
+                if st.session_state.get(f"um_confirm_del_{_um_key_d}"):
+                    st.divider()
+                    st.warning(f"Remove **{_um_name_d}** ({', '.join(_um_p_d['emails'])})? This cannot be undone.")
+                    _d1, _d2 = st.columns(2)
+                    with _d1:
+                        if st.button("Yes, Remove", key=f"um_cyes_{_um_key_d}", use_container_width=True):
+                            try:
+                                _gc_um2 = auth_config._get_client()
+                                _sh_um2 = _gc_um2.open_by_key(auth_config.USERS_SHEET_ID)
+                                _ws_um2 = _sh_um2.worksheet(auth_config.USERS_TAB_NAME)
+                                _um_rows2 = _ws_um2.get_all_values()
+                                for _ep_email_d in _um_p_d["emails"]:
+                                    for _ri_um2, _row_um2 in enumerate(_um_rows2[1:], start=2):
+                                        if _row_um2[0].strip().lower() == _ep_email_d:
+                                            _ws_um2.delete_rows(_ri_um2)
+                                            break
+                                auth_config.invalidate_cache()
+                                st.session_state.pop(f"um_confirm_del_{_um_key_d}", None)
+                                st.rerun()
+                            except Exception as _e_um2:
+                                st.error(f"Failed to remove: {_e_um2}")
+                    with _d2:
+                        if st.button("Cancel", key=f"um_cno_{_um_key_d}", use_container_width=True):
+                            st.session_state.pop(f"um_confirm_del_{_um_key_d}", None)
+                            st.rerun()
+
+            # ── Add user ─────────────────────────────────────────────────────
+            st.divider()
+            hub_ui.section("Add User")
+            with st.form("um_add_form", clear_on_submit=True):
+                _um_ac1, _um_ac2 = st.columns(2)
+                with _um_ac1:
+                    _um_new_email = st.text_input("Email", placeholder="user@example.com", key="um_new_email")
+                with _um_ac2:
+                    _um_new_name = st.text_input("Name", placeholder="First name", key="um_new_name")
+                _um_ac3, _um_ac4 = st.columns(2)
+                with _um_ac3:
+                    _um_new_r = st.selectbox("Role", _um_roles, index=1, key="um_new_role")
+                with _um_ac4:
+                    _um_new_t = st.multiselect("Tabs", auth_config.ALL_TAB_KEYS,
+                                                default=auth_config.ALL_TAB_KEYS, key="um_new_tabs")
+                _um_add_btn = st.form_submit_button("Add User", use_container_width=True)
+
+            if _um_add_btn:
+                if not _um_new_email.strip() or not _um_new_name.strip():
+                    st.error("Email and name are required.")
+                elif _um_new_email.strip().lower() in _um_users:
+                    st.error("User already exists.")
+                else:
+                    try:
+                        _gc_uma = auth_config._get_client()
+                        _sh_uma = _gc_uma.open_by_key(auth_config.USERS_SHEET_ID)
+                        _ws_uma = _sh_uma.worksheet(auth_config.USERS_TAB_NAME)
+                        _tabs_val_new = "ALL" if set(_um_new_t) == set(auth_config.ALL_TAB_KEYS) else ", ".join(_um_new_t)
+                        _ws_uma.append_row(
+                            [_um_new_email.strip().lower(), _um_new_name.strip(), _um_new_r, _tabs_val_new],
+                            value_input_option="USER_ENTERED")
+                        auth_config.invalidate_cache()
+                        st.success(f"Added {_um_new_name}")
+                        st.rerun()
+                    except Exception as _e_uma:
+                        st.error(f"Failed to add user: {_e_uma}")

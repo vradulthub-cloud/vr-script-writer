@@ -36,12 +36,12 @@ EMPLOYEES = [
     "Tam",
 ]
 
-PROJECTS = ["VR Player", "Eclatech Hub", "Script Writer", "Compilations", "Website", "Other"]
-TICKET_TYPES = ["Bug", "Feature Request", "Change Request"]
+PROJECTS = ["VR Player", "Eclatech Hub", "Script Writer", "Compilations", "Content Pipeline", "Website", "Other"]
+TICKET_TYPES = ["Bug", "Feature Request", "Change Request", "Missing Content"]
 PRIORITIES = ["Low", "Medium", "High", "Critical"]
-STATUSES = ["New", "Approved", "In Progress", "Deployed", "Rejected"]
+STATUSES = ["New", "Approved", "In Progress", "In Review", "Closed", "Rejected"]
 
-# Column indices (0-based, matching sheet columns A-L)
+# Column indices (0-based, matching sheet columns A-M)
 COL_ID = 0
 COL_DATE = 1
 COL_SUBMITTED_BY = 2
@@ -53,12 +53,13 @@ COL_DESCRIPTION = 7
 COL_STATUS = 8
 COL_APPROVED_BY = 9
 COL_ADMIN_NOTES = 10
-COL_DATE_RESOLVED = 11
+COL_ASSIGNED_TO = 11
+COL_DATE_RESOLVED = 12
 
 HEADERS = [
     "Ticket ID", "Date Submitted", "Submitted By", "Project", "Type",
     "Priority", "Title", "Description", "Status", "Approved By",
-    "Admin Notes", "Date Resolved",
+    "Admin Notes", "Assigned To", "Date Resolved",
 ]
 
 # ── Sheet client (cached) ────────────────────────────────────────────────────
@@ -85,8 +86,8 @@ def _get_worksheet():
     # Auto-create headers if row 1 is empty
     first_row = ws.row_values(1)
     if not first_row or first_row[0] != "Ticket ID":
-        ws.update("A1:L1", [HEADERS])
-        ws.format("A1:L1", {"textFormat": {"bold": True}})
+        ws.update("A1:M1", [HEADERS])
+        ws.format("A1:M1", {"textFormat": {"bold": True}})
         ws.freeze(rows=1)
     return ws
 
@@ -101,7 +102,7 @@ def load_tickets():
         return []
     tickets = []
     for i, row in enumerate(rows[1:], start=2):
-        row = row + [""] * (12 - len(row))
+        row = row + [""] * (13 - len(row))
         tickets.append({
             "row_index": i,
             "id": row[COL_ID],
@@ -115,6 +116,7 @@ def load_tickets():
             "status": row[COL_STATUS],
             "approved_by": row[COL_APPROVED_BY],
             "admin_notes": row[COL_ADMIN_NOTES],
+            "assigned_to": row[COL_ASSIGNED_TO],
             "date_resolved": row[COL_DATE_RESOLVED],
         })
     return tickets
@@ -139,7 +141,8 @@ def get_next_ticket_id(tickets=None):
     return f"TKT-{max_num + 1:04d}"
 
 
-def create_ticket(submitted_by, project, ticket_type, priority, title, description):
+def create_ticket(submitted_by, project, ticket_type, priority, title, description,
+                   assigned_to=""):
     """Create a new ticket. Returns the ticket ID."""
     ws = _get_worksheet()
     tickets = load_tickets()
@@ -158,6 +161,7 @@ def create_ticket(submitted_by, project, ticket_type, priority, title, descripti
         "New",
         "",   # approved_by
         "",   # admin_notes
+        assigned_to,
         "",   # date_resolved
     ]
     ws.append_row(new_row, value_input_option="USER_ENTERED")
@@ -171,18 +175,74 @@ def create_ticket(submitted_by, project, ticket_type, priority, title, descripti
     return ticket_id
 
 
-def update_ticket(row_index, status=None, approved_by=None, admin_notes=None):
-    """Update a ticket's status, approver, and/or admin notes."""
+def update_ticket(row_index, status=None, approved_by=None, admin_notes=None,
+                   assigned_to=None):
+    """Update a ticket's status, approver, admin notes, and/or assignee."""
     ws = _get_worksheet()
     if status is not None:
         ws.update_cell(row_index, COL_STATUS + 1, status)
-        if status in ("Deployed", "Rejected"):
+        if status in ("Closed", "Rejected"):
             ws.update_cell(row_index, COL_DATE_RESOLVED + 1,
                            datetime.now().strftime("%Y-%m-%d %H:%M"))
     if approved_by is not None:
         ws.update_cell(row_index, COL_APPROVED_BY + 1, approved_by)
     if admin_notes is not None:
         ws.update_cell(row_index, COL_ADMIN_NOTES + 1, admin_notes)
+    if assigned_to is not None:
+        ws.update_cell(row_index, COL_ASSIGNED_TO + 1, assigned_to)
+
+
+def resolve_ticket(ticket_id, status="In Review", notes="", approved_by="Claude"):
+    """Update a ticket by its ID (e.g. 'TKT-0005'). Used by Claude Code after deploys.
+    Default status is 'In Review' — employee must verify and close."""
+    tickets = load_tickets()
+    match = next((t for t in tickets if t["id"] == ticket_id), None)
+    if not match:
+        raise ValueError(f"Ticket {ticket_id} not found")
+    # Append to existing notes rather than overwriting
+    existing = match.get("admin_notes", "")
+    combined = f"{existing}\n{notes}".strip() if existing else notes
+    update_ticket(match["row_index"], status=status, approved_by=approved_by,
+                  admin_notes=combined if notes else None)
+    return match
+
+
+def resolve_tickets(ticket_ids, status="In Review", notes="", approved_by="Claude"):
+    """Batch-resolve multiple tickets. Returns list of updated IDs."""
+    updated = []
+    for tid in ticket_ids:
+        try:
+            resolve_ticket(tid, status=status, notes=notes, approved_by=approved_by)
+            updated.append(tid)
+        except Exception as e:
+            print(f"  ⚠ {tid}: {e}")
+    return updated
+
+
+def get_open_tickets():
+    """Return tickets that are still active (not Closed/Rejected). Used for linking in tabs."""
+    return [t for t in load_tickets() if t["status"] not in ("Closed", "Rejected")]
+
+
+def progress_ticket(ticket_id, new_status="In Progress", notes="", by=""):
+    """Move a ticket forward in the workflow. Used by tab linking."""
+    tickets = load_tickets()
+    match = next((t for t in tickets if t["id"] == ticket_id), None)
+    if not match:
+        return
+    existing = match.get("admin_notes", "")
+    combined = f"{existing}\n{notes}".strip() if existing and notes else (notes or existing)
+    update_ticket(match["row_index"], status=new_status,
+                  admin_notes=combined if combined != existing else None)
+
+
+# ── Notes helper ─────────────────────────────────────────────────────────────
+
+def append_note(existing_notes, author, text):
+    """Append a timestamped note. Returns combined string."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry = f"[{ts} {author}] {text}"
+    return f"{existing_notes}\n{entry}".strip() if existing_notes else entry
 
 
 # ── Email notification ───────────────────────────────────────────────────────

@@ -20,7 +20,6 @@ SCOPES = [
 
 # All available tabs in display order
 ALL_TABS = [
-    ("Missing",        "⚠️ Missing"),
     ("Tickets",        "🎟️ Tickets"),
     ("Model Research", "Model Research"),
     ("Scripts",        "Scripts"),
@@ -118,6 +117,21 @@ def get_allowed_tabs(user_config):
 def is_admin(user_config):
     """Check if user has admin role."""
     return user_config["role"] == "admin"
+
+
+# ── Granular permission checks ──────────────────────────────────────────────
+_GRAIL_WRITERS = {"Drew", "David", "Duc"}
+_USER_MANAGERS = {"Drew", "David"}
+
+
+def is_grail_writer(user_config):
+    """Check if user can write to the Grail sheet (title, categories, tags)."""
+    return user_config["name"] in _GRAIL_WRITERS
+
+
+def is_user_manager(user_config):
+    """Check if user can access the User Management dashboard."""
+    return user_config["name"] in _USER_MANAGERS
 
 
 def invalidate_cache():
