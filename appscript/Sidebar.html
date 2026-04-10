@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Google Sans', Arial, sans-serif;
+      background: #f0f2f5;
+      color: #1a1a2e;
+      font-size: 13px;
+      padding: 10px;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+    }
+
+    /* ── Header ── */
+    .model-name {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1a1a2e;
+      line-height: 1.2;
+      margin-bottom: 3px;
+    }
+    .model-agency {
+      font-size: 11px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 10px;
+    }
+
+    /* ── Rank badge ── */
+    .rank-badge {
+      display: inline-block;
+      padding: 3px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 14px;
+    }
+    .rank-great    { background: #e8f5e9; color: #1b5e20; }
+    .rank-good     { background: #e3f2fd; color: #0d47a1; }
+    .rank-moderate { background: #fff8e1; color: #e65100; }
+    .rank-unknown  { background: #fce4ec; color: #b71c1c; }
+    .rank-default  { background: #f5f5f5; color: #555; }
+
+    /* ── Divider ── */
+    .divider {
+      height: 1px;
+      background: #f0f0f0;
+      margin: 12px 0;
+    }
+
+    /* ── Section title ── */
+    .section-title {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #aaa;
+      margin-bottom: 8px;
+    }
+
+    /* ── Stats grid ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .stat-item {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 7px 10px;
+    }
+    .stat-label {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #999;
+      margin-bottom: 2px;
+    }
+    .stat-value {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1a1a2e;
+    }
+    .stat-value.natural-yes { color: #2e7d32; }
+    .stat-value.natural-no  { color: #c62828; }
+    .stat-value.empty       { color: #ccc; font-weight: 400; font-style: italic; }
+
+    /* ── Rate / Location row ── */
+    .meta-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 0;
+    }
+    .meta-item {
+      flex: 1;
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 7px 10px;
+    }
+
+    /* ── Available For chips ── */
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .chip {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 500;
+      background: #e8eaf6;
+      color: #283593;
+    }
+    .chip.explicit {
+      background: #fce4ec;
+      color: #880e4f;
+    }
+    .chip.anal   { background: #f3e5f5; color: #4a148c; }
+    .chip.atm    { background: #fff3e0; color: #bf360c; }
+    .chip.dp     { background: #f3e5f5; color: #4a148c; }
+    .chip.solo   { background: #e8f5e9; color: #1b5e20; }
+    .chip.gg     { background: #e3f2fd; color: #0d47a1; }
+
+    /* ── Tattoos / Notes ── */
+    .text-block {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #444;
+      line-height: 1.5;
+    }
+    .text-block.empty {
+      color: #bbb;
+      font-style: italic;
+    }
+
+    /* ── Placeholder ── */
+    .placeholder {
+      text-align: center;
+      padding: 50px 20px;
+      color: #bbb;
+    }
+    .placeholder-icon {
+      font-size: 36px;
+      margin-bottom: 10px;
+    }
+    .placeholder-text {
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+<script>
+  const model = <?= modelJson ?>;
+
+  function val(key) {
+    return (model[key] || '').trim();
+  }
+
+  function rankClass(rank) {
+    const r = rank.toLowerCase();
+    if (r === 'great')    return 'rank-great';
+    if (r === 'good')     return 'rank-good';
+    if (r === 'moderate') return 'rank-moderate';
+    if (r === 'unknown')  return 'rank-unknown';
+    return 'rank-default';
+  }
+
+  function statHtml(label, key, opts = {}) {
+    let v = val(key);
+    let cls = '';
+    if (!v) { v = '—'; cls = 'empty'; }
+    else if (opts.isNatural) {
+      cls = v.toLowerCase() === 'yes' ? 'natural-yes' : 'natural-no';
+      v   = v.toLowerCase() === 'yes' ? '✓ Yes' : '✗ No';
+    }
+    return `<div class="stat-item">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value ${cls}">${v}</div>
+    </div>`;
+  }
+
+  function chipClass(act) {
+    const a = act.trim().toLowerCase();
+    if (a === 'solo' || a === 'solo stills' || a === 'solo video') return 'solo';
+    if (a === 'anal' || a === 'bg anal' || a === 'gg anal')         return 'anal';
+    if (a === 'dp' || a === 'dvp' || a === 'dap')                   return 'dp';
+    if (a === 'gg' || a === 'girl/girl' || a === 'girl / girl')     return 'gg';
+    if (a.includes('atm'))                                           return 'atm';
+    return '';
+  }
+
+  function renderChips(str) {
+    if (!str) return '<span style="color:#ccc;font-style:italic">None listed</span>';
+    return str.split(',')
+      .map(s => s.trim()).filter(Boolean)
+      .map(act => `<span class="chip ${chipClass(act)}">${act}</span>`)
+      .join('');
+  }
+
+  function render() {
+    const name    = val('Name')    || '—';
+    const agency  = val('__agency__') || val('__tab__') || '';
+    const rank    = val('Rank');
+    const age     = val('Age');
+    const rate    = val('AVG Rate');
+    const loc     = val('Location');
+    const tattoos = val('Tattoos');
+    const notes   = val('Notes');
+    const avail   = val('Available For');
+
+    if (!name || name === '—') {
+      document.body.innerHTML = `
+        <div class="placeholder">
+          <div class="placeholder-icon">👤</div>
+          <div class="placeholder-text">Click a model row to see their profile</div>
+        </div>`;
+      return;
+    }
+
+    let html = `
+    <!-- Header card -->
+    <div class="card">
+      <div class="model-name">${name}</div>
+      <div class="model-agency">${agency}</div>`;
+
+    if (rank) {
+      html += `<div class="rank-badge ${rankClass(rank)}">${rank}</div>`;
+    }
+
+    // Meta row: rate + location
+    if (rate || loc) {
+      html += `<div class="meta-row">`;
+      if (rate) html += `<div class="meta-item"><div class="stat-label">AVG Rate</div><div class="stat-value">$${rate}</div></div>`;
+      if (loc)  html += `<div class="meta-item"><div class="stat-label">Location</div><div class="stat-value">${loc}</div></div>`;
+      html += `</div>`;
+    }
+
+    html += `</div>`;
+
+    // Stats card
+    html += `
+    <div class="card">
+      <div class="section-title">Physical Stats</div>
+      <div class="stats-grid">
+        ${statHtml('Age', 'Age')}
+        ${statHtml('Height', 'Height')}
+        ${statHtml('Weight', 'Weight')}
+        ${statHtml('Measurements', 'Measurements')}
+        ${statHtml('Hair', 'Hair')}
+        ${statHtml('Eyes', 'Eyes')}
+        ${statHtml('Natural', 'Natural Breasts', {isNatural: true})}
+        ${statHtml('Shoe Size', 'Shoe Size')}
+      </div>
+    </div>`;
+
+    // Tattoos card (only if has data)
+    if (tattoos && tattoos !== 'No' && tattoos !== 'None') {
+      html += `
+      <div class="card">
+        <div class="section-title">Tattoos</div>
+        <div class="text-block">${tattoos}</div>
+      </div>`;
+    }
+
+    // Available For card
+    html += `
+    <div class="card">
+      <div class="section-title">Available For</div>
+      <div class="chips">${renderChips(avail)}</div>
+    </div>`;
+
+    // Notes card (only if has notes)
+    if (notes) {
+      html += `
+      <div class="card">
+        <div class="section-title">Notes</div>
+        <div class="text-block">${notes}</div>
+      </div>`;
+    }
+
+    document.body.innerHTML = html;
+  }
+
+  render();
+</script>
+
+</body>
+</html>

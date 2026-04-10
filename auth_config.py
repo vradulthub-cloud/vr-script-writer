@@ -49,7 +49,7 @@ def _get_client():
 # ── User config loading ──────────────────────────────────────────────────────
 _users_cache = None
 _users_cache_at = 0
-_USERS_CACHE_TTL = 300  # 5 minutes
+_USERS_CACHE_TTL = 900  # 15 minutes
 
 
 def load_users_config():

@@ -273,11 +273,20 @@ code, .stCodeBlock {{
 .hub-badge-accent {{ background: {c['accent_dim']}; color: {c['accent']}; }}
 .hub-badge-gray   {{ background: rgba(255,255,255,0.06); color: {c['muted']}; }}
 
-/* ── Segmented control ─────────────────────────────────────── */
+/* ── Segmented control (sub-nav) ──────────────────────────── */
 [data-testid="stSegmentedControl"] button {{
     font-family: 'DM Sans', sans-serif !important;
     font-size: 0.8rem !important;
     font-weight: 500 !important;
+    color: {c['muted']} !important;
+    border-radius: 6px !important;
+    transition: color 0.15s, background 0.15s !important;
+}}
+
+[data-testid="stSegmentedControl"] button[aria-checked="true"] {{
+    color: {c['text']} !important;
+    font-weight: 600 !important;
+    background: {c['elevated']} !important;
 }}
 
 /* ── Progress bars ─────────────────────────────────────────── */
@@ -291,15 +300,43 @@ code, .stCodeBlock {{
     font-size: 0.8rem !important;
 }}
 
+/* ── Danger button (Remove / Delete) ─────────────────────── */
+.danger-btn button {{
+    color: {c['red']} !important;
+    border-color: {c['red_dim']} !important;
+}}
+.danger-btn button:hover {{
+    background: {c['red_dim']} !important;
+    border-color: {c['red']} !important;
+}}
+
 </style>"""
 
 
 # ── UI Helper Functions ───────────────────────────────────────────────────────
 
-def logo_header(user_name):
-    """Render the branded header bar: logo icon + ECLATECH HUB + user + sign out."""
+def logo_header(user_name, unread_count=0):
+    """Render the branded header bar: logo icon + ECLATECH HUB + bell + user + sign out."""
     c = COLORS
     icon = _logo_svg(height=24)
+    # Bell SVG icon (Heroicons outline bell)
+    _bell_svg = (
+        "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' "
+        f"viewBox='0 0 24 24' stroke-width='1.8' stroke='{c['muted']}'>"
+        "<path stroke-linecap='round' stroke-linejoin='round' "
+        "d='M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75"
+        "a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0"
+        "m5.714 0a3 3 0 1 1-5.714 0'/></svg>"
+    )
+    _badge_html = ""
+    if unread_count > 0:
+        _count_text = str(unread_count) if unread_count < 100 else "99+"
+        _badge_html = (
+            f"<span style='position:absolute;top:-5px;right:-7px;min-width:15px;height:15px;"
+            f"background:{c['red']};color:#fff;font-size:0.55rem;font-weight:700;"
+            f"border-radius:8px;display:flex;align-items:center;justify-content:center;"
+            f"padding:0 3px;font-family:DM Sans,sans-serif'>{_count_text}</span>"
+        )
     st.markdown(
         f"<div style='display:flex;align-items:center;justify-content:space-between;"
         f"margin:0 0 8px;padding:4px 0;border-bottom:1px solid {c['border']}'>"
@@ -310,11 +347,53 @@ def logo_header(user_name):
         f"<span style='font-family:DM Sans,sans-serif;font-size:0.75rem;font-weight:400;"
         f"color:{c['muted']};margin-left:-4px'>HUB</span>"
         f"</div>"
+        f"<div style='display:flex;align-items:center;gap:14px'>"
         f"<span style='font-family:DM Sans,sans-serif;font-size:0.78rem;"
         f"color:{c['muted']}'>{user_name}</span>"
+        f"<div style='position:relative;cursor:pointer' class='notif-bell'>"
+        f"{_bell_svg}{_badge_html}</div>"
+        f"</div>"
         f"</div>",
         unsafe_allow_html=True,
     )
+
+
+def notification_panel(notifications, colors=None):
+    """Render the notification dropdown panel as styled HTML."""
+    c = colors or COLORS
+    if not notifications:
+        st.caption("No notifications")
+        return
+
+    for n in notifications:
+        _is_read = n.get("read", False)
+        _bg = c["surface"] if _is_read else c["elevated"]
+        _border_left = c["border"] if _is_read else c["accent"]
+        _opacity = "0.6" if _is_read else "1"
+        _time = n.get("timestamp", "")
+        _type_icon = {
+            "ticket_created": "🎟",
+            "ticket_status": "🔄",
+            "ticket_assigned": "👤",
+            "approval_submitted": "📋",
+            "approval_decided": "✅",
+            "qc_feedback": "🔍",
+        }.get(n.get("type", ""), "🔔")
+        st.markdown(
+            f"<div style='padding:8px 12px;margin-bottom:4px;background:{_bg};"
+            f"border-left:3px solid {_border_left};border-radius:4px;"
+            f"opacity:{_opacity};font-family:DM Sans,sans-serif'>"
+            f"<div style='display:flex;justify-content:space-between;align-items:center;"
+            f"margin-bottom:2px'>"
+            f"<span style='font-size:0.75rem;font-weight:600;color:{c['text']}'>"
+            f"{_type_icon} {n.get('title', '')}</span>"
+            f"<span style='font-size:0.62rem;color:{c['muted']}'>{_time}</span>"
+            f"</div>"
+            f"<div style='font-size:0.7rem;color:{c['muted']}'>"
+            f"{n.get('message', '')}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
 
 def login_page():
@@ -397,7 +476,7 @@ def freshness_bar(ts_key, bust_keys, label=""):
             unsafe_allow_html=True,
         )
     with _c2:
-        if st.button("Refresh", key=f"refresh_{ts_key}", use_container_width=True):
+        if st.button("Refresh", key=f"refresh_{ts_key}", width="stretch"):
             for k in bust_keys:
                 st.session_state.pop(k, None)
             st.rerun()

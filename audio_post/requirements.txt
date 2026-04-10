@@ -1,0 +1,7 @@
+torch
+silero-vad
+soundfile
+scipy
+numpy
+speechbrain
+huggingface_hub

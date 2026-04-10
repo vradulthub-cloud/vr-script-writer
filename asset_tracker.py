@@ -308,6 +308,8 @@ def load_asset_status(studios=None, limit_per_studio=20, cached_approvals=None):
                     "has_description": has_desc,
                     "has_categories": has_cats,
                     "has_tags": has_tags,
+                    "categories_raw": cats,
+                    "tags_raw": tags,
                     "has_videos": has_videos,
                     "has_thumbnail": has_thumbnail,
                     "has_photos": has_photos,

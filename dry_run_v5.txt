@@ -1,0 +1,137 @@
+10:12:55 [INFO] Starting roster update – mode: DRY RUN
+10:12:56 [INFO] Found 13 worksheet(s) in spreadsheet
+10:12:56 [INFO] 
+============================================================
+10:12:56 [INFO] Processing tab: OC Models
+10:12:56 [INFO]   Sheet has 88 model(s)
+10:12:56 [INFO]   [OC Models] Scraping: https://ocmodeling.com/model-gender/female/
+10:13:01 [INFO]   [OC Models] Found 61 models online
+10:13:01 [WARNING]   [OC Models] Only found 61 models vs 88 in sheet (confidence 69% < 70%) – skipping removals to be safe
+10:13:01 [INFO]   Diff → +3 to add, -0 to remove
+10:13:01 [INFO]     Adding 3 model(s): ['Avery Wilds', 'Lana Violet', 'Lauren Phillips']
+10:13:01 [INFO]     Looking up ages for 87 model(s) with missing age…
+10:13:03 [INFO] 
+============================================================
+10:13:03 [INFO] Processing tab: Invision Models
+10:13:04 [INFO]   Sheet has 33 model(s)
+10:13:04 [INFO]   [Invision Models] Scraping: https://www.invisionmodels.com/models-2
+10:13:07 [INFO]     (Strategy 4 – URL slugs triggered)
+10:13:07 [INFO]   [Invision Models] Found 32 models online
+10:13:07 [INFO]   Diff → +2 to add, -3 to remove
+10:13:07 [INFO]     Removing 3 model(s): ['Adira Allure', 'Rhae Woods', 'Riven Lynn']
+10:13:07 [INFO]     Adding 2 model(s): ['River Lynn', 'Rhea Woods']
+10:13:07 [INFO]     Looking up ages for 3 model(s) with missing age…
+10:13:09 [INFO] 
+============================================================
+10:13:09 [INFO] Processing tab: Hussie Models
+10:13:10 [INFO]   Sheet has 47 model(s)
+10:13:10 [INFO]   [Hussie Models] Scraping: https://hussiemodels.com/models/women
+10:13:14 [INFO]   [Hussie Models] Found 16 models online
+10:13:14 [WARNING]   [Hussie Models] Only found 16 models vs 47 in sheet (confidence 34% < 70%) – skipping removals to be safe
+10:13:14 [INFO]   Diff → +7 to add, -0 to remove
+10:13:14 [INFO]     Adding 7 model(s): ['Adriana Maya', 'Alexandra Quintezz', 'Bambi Barton', 'Beca Barbie', 'Cassie Lenoir', 'Chloe Temple INC', 'Christina Savoy']
+10:13:14 [INFO]     Looking up ages for 47 model(s) with missing age…
+10:13:16 [INFO] 
+============================================================
+10:13:16 [INFO] Processing tab: The Bakery Talent
+10:13:17 [INFO]   Sheet has 7 model(s)
+10:13:17 [INFO]   [The Bakery Talent] Scraping: https://www.thebakerytalent.com/models
+10:13:20 [INFO]     (Strategy 5 – aria-labels triggered)
+10:13:20 [INFO]   [The Bakery Talent] Found 3 models online
+10:13:20 [WARNING]   [The Bakery Talent] Only found 3 models vs 7 in sheet (confidence 43% < 70%) – skipping removals to be safe
+10:13:20 [INFO]   Diff → +1 to add, -0 to remove
+10:13:20 [INFO]     Adding 1 model(s): ['Agatha Vega']
+10:13:20 [INFO]     Looking up ages for 7 model(s) with missing age…
+10:13:22 [INFO] 
+============================================================
+10:13:22 [INFO] Processing tab: East Coast Talent
+10:13:23 [INFO]   Sheet has 36 model(s)
+10:13:23 [INFO]   [East Coast Talent] Scraping: https://eastcoasttalents.com/talent-category/female/
+10:13:27 [INFO]   [East Coast Talent] Found 33 models online
+10:13:27 [INFO]   Diff → +2 to add, -5 to remove
+10:13:27 [INFO]     Removing 5 model(s): ['Ashley Alexander', 'Elizabeth Skylar', 'Summer Col', 'Taylor Vixxen', 'Theodora Day']
+10:13:27 [INFO]     Adding 2 model(s): ['Aubree Blair', 'Sakura Lin']
+10:13:27 [INFO]     Looking up ages for 31 model(s) with missing age…
+10:13:29 [INFO] 
+============================================================
+10:13:29 [INFO] Processing tab: The Model Service
+10:13:29 [INFO]   Sheet has 16 model(s)
+10:13:29 [INFO]   [The Model Service] Scraping: https://themodelservice.com/
+10:13:33 [INFO]   [The Model Service] Found 21 models online
+10:13:33 [INFO]   Diff → +10 to add, -5 to remove
+10:13:33 [INFO]     Removing 5 model(s): ['Name', 'Diabeticoochie', 'Jewelz Blu', 'Luna Baby', 'XWife Karen']
+10:13:33 [INFO]     Adding 10 model(s): ['Chanell Heart', 'Ari Alectra', 'Kali Roses', 'Zoey Uso', 'Chocolate God', 'Derek Savage', 'Dwayne Foxxx', 'Sly Diggler', 'Lil D', 'Rocket Powers']
+10:13:33 [INFO]     Looking up ages for 11 model(s) with missing age…
+10:13:35 [INFO] 
+============================================================
+10:13:35 [INFO] Processing tab: ATMLA
+10:13:36 [INFO]   Sheet has 100 model(s)
+10:13:36 [INFO]   [ATMLA] Scraping: https://atmla.com/performers/female-models/
+10:13:42 [INFO]   [ATMLA] Found 18 models online
+10:13:42 [WARNING]   [ATMLA] Only found 18 models vs 100 in sheet (confidence 18% < 70%) – skipping removals to be safe
+10:13:42 [INFO]   Diff → +3 to add, -0 to remove
+10:13:42 [INFO]     Adding 3 model(s): ['Amalia Davis', 'Amirah Adara', 'Celestina Blooms']
+10:13:42 [INFO]     Looking up ages for 100 model(s) with missing age…
+10:13:44 [INFO] 
+============================================================
+10:13:44 [INFO] Processing tab: Coxxx Models
+10:13:44 [INFO]   Sheet has 77 model(s)
+10:13:44 [INFO]   [Coxxx Models] Scraping: https://coxxxmodels.com/female-talent
+10:13:48 [INFO]   [Coxxx Models] Found 14 models online
+10:13:48 [WARNING]   [Coxxx Models] Only found 14 models vs 77 in sheet (confidence 18% < 70%) – skipping removals to be safe
+10:13:48 [INFO]   Diff → +10 to add, -0 to remove
+10:13:48 [INFO]     Adding 10 model(s): ['Ashlynn Taylor-fi', 'CiCi Shellz-fi-new', 'Jayde Kalipso-fi', 'Kira Perez-fi', 'Lexa Jo-fi', 'Mercy Marie-fi', 'Nikki Sexx-fi', 'Pixie Kinzi-fi', 'Sara St Clair-fi', 'Taylor Rae-fi']
+10:13:48 [INFO]     Looking up ages for 77 model(s) with missing age…
+10:13:50 [INFO] 
+============================================================
+10:13:50 [INFO] Processing tab: 101 Models
+10:13:50 [INFO]   Sheet has 106 model(s)
+10:13:50 [INFO]   [101 Models] Scraping: https://www.101modeling.com/site/female.php
+10:13:54 [INFO]   [101 Models] Found 97 models online
+10:13:54 [INFO]   Diff → +42 to add, -51 to remove
+10:13:54 [INFO]     Removing 51 model(s): ['Kiki Klout', 'Sofie Reyez', 'Daisy Pheonix', 'Aderes Quin', 'Alex Kane', 'Harlow West', 'Lacey London', 'Mandy Waters', 'Sarah Lace', 'September Reign', 'Sweet Sophia', 'Alice Rebel', 'Amber Maddie', 'Aubry Babcock', 'Audrey Hollander', 'Avery Moon', 'Bunny Fae', 'Casca Akashova', 'Celestina Blooms', 'Dolly Mattel', 'Emerald Loves', 'Izi Blu', 'Jayde Kalipso', 'Jessica Aaren', 'Jewels Jade', 'Kaci Kennedy', 'Kalani Luana', 'Kat Marie', 'Kiki Cali', 'Leila Mills', 'Lexy Blaze', 'Lilith Moaningstar', 'Lucia Rossi', 'Mads Flores', 'Mandy Rhea', 'Marie McCray', 'Marina Vaylor', 'McKenzie Lee', 'Melanie Muse', 'Robbin Banx', 'Rolli Rawlings', 'Rose Darling', 'Sara St Clair', 'Tess Thompson', 'Tia Maria', 'Tokyo Lynn', 'Tyle Texas', 'Victoria Lobov', 'Vivianne DeSilva', 'Zoey Foxx', 'Zoey Uso']
+10:13:54 [INFO]     Adding 42 model(s): ['Alina Voss', 'Amiee Cambridge', 'Aria Banks', 'Audrey Bitoni', 'Ava Devine', 'Bambi Blitz', 'Chastity Doll', 'Claire Black', 'Daisy Stone', 'Dakota Marr', 'Demi Nova', 'Gia Vendetti', 'Hannah Quinn', 'Jazmin Luv', 'Jojo Austin', 'Journey Love', 'Kallie Taylor', 'Katarina Karson', 'Kayden Kole', 'Kiana Kumani', 'Kiki King', 'Kimber James', 'Kitty Lynn', 'Layla Quinn', 'Lila Lust', 'Lola Cheeks', 'Lola Valentine', 'Luna Angel', 'Maddy Haze', 'Mageneta Lexx', 'Miki Moon', 'Nadia Noja', 'Natasha Starr', 'Nikki Nightly', 'Odessa Bell', 'Shrooms Q', 'Spencer Scott', 'Stella Nash', 'Tifa Quinn', 'Tiny Khloe', 'Tylee Texas', 'Vanessa Blake']
+10:13:54 [INFO]     Looking up ages for 55 model(s) with missing age…
+10:13:56 [INFO] 
+============================================================
+10:13:56 [INFO] Processing tab: Zen Models
+10:13:57 [INFO]   Sheet has 13 model(s)
+10:13:57 [INFO]   [Zen Models] Scraping: https://zenmodels.org/our-models/
+10:14:03 [INFO]   [Zen Models] Found 13 models online
+10:14:03 [INFO]   Diff → +2 to add, -2 to remove
+10:14:03 [INFO]     Removing 2 model(s): ['Brenna Mckenna', 'Kylie Shay']
+10:14:03 [INFO]     Adding 2 model(s): ['Adriana Chechik', 'Cecelia Taylor']
+10:14:03 [INFO]     Looking up ages for 11 model(s) with missing age…
+10:14:05 [INFO] 
+============================================================
+10:14:05 [INFO] Processing tab: Speigler
+10:14:06 [INFO]   Sheet has 35 model(s)
+10:14:06 [INFO]   [Speigler] Scraping: https://www.spieglergirls.com/html/main.html
+10:14:10 [INFO]     (Strategy 6 – general link text fallback triggered)
+10:14:10 [INFO]   [Speigler] Found 39 models online
+10:14:10 [INFO]   Diff → +21 to add, -16 to remove
+10:14:10 [INFO]     Removing 16 model(s): ['Anna Foxxx', 'Annalena Reno', 'Bella Rolland', 'Bunny Madison', 'Kenzie Taylor', 'Lily Bell', 'Maddy May', 'Natalie Brooks', 'Nicole Doshi', 'Nicole Emma Vont', 'Queenie Sateen', 'Reyna Bell', 'Selena Love', 'Sinatra Monroe', 'Summer Col', 'Yhivi']
+10:14:10 [INFO]     Adding 21 model(s): ['Asa Akira', 'Riley Reid', 'Abella Danger', 'Angela White', 'Aiden Starr', 'Casey Calvert', 'Luna Star', 'Kira Noir', 'Joanna Angel', 'Charlotte Sins', 'Ryan Reid', 'Valentina Nappi', 'Lilly Bell', 'Anna Claire Clouds', 'Kylie Rocket', 'Nicole Vaunt', 'Jennifer White', 'Anissa Kate', 'Megan Mistakes', 'Archer Ali', 'Addison Vodka']
+10:14:10 [INFO]     Looking up ages for 19 model(s) with missing age…
+10:14:12 [INFO] 
+============================================================
+10:14:12 [INFO] Processing tab: Foxxx Modeling
+10:14:13 [INFO]   Sheet has 33 model(s)
+10:14:13 [INFO]   [Foxxx Modeling] URL override: https://www.foxxxmodeling.com/ → https://wp-quri045785.pairsite.com/models/
+10:14:13 [INFO]   [Foxxx Modeling] Scraping: https://wp-quri045785.pairsite.com/models/
+10:14:17 [INFO]   [Foxxx Modeling] Found 36 models online
+10:14:17 [INFO]   Diff → +28 to add, -25 to remove
+10:14:17 [INFO]     Removing 25 model(s): ['Ali Jones', 'Aspen Woods', 'Aubry Babcock', 'Bubbles Bankz', 'Cara Mella', 'Catherine Knight', 'Chanel Lux', 'Emma Shay', 'Gigi Sweets', 'Harlow West', 'Hazel Heart', 'Kitt Jones', 'Laynee James', 'Lilith Grace', 'Luna Legend', 'Maisey Monroe', 'Marina Gold', 'Matty Mila Perez', 'Miya Silver', 'Nico Luva', 'Nina Capel', 'Nina Nova', 'Remi Raw', 'Rio Rain', 'Tifa Quinn']
+10:14:17 [INFO]     Adding 28 model(s): ['About Foxxx', 'Alex Banks', 'Amber Angel', 'Angelica Coralvine', 'Bailey Blaze', 'Breezy Bri', 'Brianna Arson', 'Delilah Day', 'Em Indica', 'Emma Hix', 'Evie Christian', 'Harmony Rivers', 'Jade Valentine', 'Kitty Lynn', 'Luxe La Fox', 'Melanie Marie', 'Nicole Luva', 'Nova Flame', 'Reina Heart', 'Reyna Belle', 'Riley Nixon', 'River Lynn', 'Sage Rabbit', 'Sienna Rae', 'Sofi Rose', 'Tessa Thomas', 'Vickie Jay', 'Violet Spice']
+10:14:17 [INFO]     Looking up ages for 8 model(s) with missing age…
+10:14:19 [INFO] 
+============================================================
+10:14:19 [INFO] Processing tab: Nexxxt Level
+10:14:20 [INFO]   Sheet has 0 model(s)
+10:14:20 [INFO]   [Nexxxt Level] Scraping: https://nexxxtleveltalentagency.com/female-talent/
+10:14:24 [INFO]   [Nexxxt Level] Found 22 models online
+10:14:24 [INFO]   Diff → +22 to add, -0 to remove
+10:14:24 [INFO]     Adding 22 model(s): ['Jewels Jade', 'Audrey Madison', 'Tara Bell', 'Shay Fox', 'Kristen Lace', 'Heather Bonanza', 'Luna Colombiana', 'Chloe Adams', 'Raven Reverie', 'Mandy Spears', 'Abi James', 'Anna Kolba', 'Leya Falcon', 'Addyson James', 'Wendy Raine', 'Rebel Lynn', 'Cali Sweets', 'Yaya Gingersnatch', 'Gigi Dior', 'Alaina Taylor', 'Victoria Zdrok', 'Lexi Stone']
+10:14:26 [INFO] 
+============================================================
+10:14:26 [INFO] Roster update complete.
