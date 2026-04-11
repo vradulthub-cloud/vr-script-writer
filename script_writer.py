@@ -10,7 +10,94 @@ Usage:
 """
 
 import anthropic
+import re
 import sys
+
+# ── Ollama config ─────────────────────────────────────────────────────────────
+OLLAMA_BASE_URL = "http://localhost:11434/v1"
+OLLAMA_MODEL    = "vr-scriptwriter"
+
+def get_ollama_client():
+    """Return an OpenAI-compatible client pointed at the local Ollama instance."""
+    from openai import OpenAI
+    return OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
+
+# ── Research cache (in-memory, per process) ───────────────────────────────────
+_research_cache: dict = {}
+
+def cache_get(key: str) -> str | None:
+    return _research_cache.get(key.lower().strip())
+
+def cache_set(key: str, value: str) -> None:
+    _research_cache[key.lower().strip()] = value
+
+def research_scene_trends(female: str, ollama_client=None, model: str | None = None) -> str:
+    """Ask Ollama to summarize a performer's on-screen persona and physical look.
+    Returns a plain-text research summary, or empty string on failure.
+    Saves result to in-memory cache."""
+    client = ollama_client or get_ollama_client()
+    model  = model or OLLAMA_MODEL
+    prompt = (
+        f"Briefly summarize {female}'s on-screen persona for a VR film director. "
+        f"Cover: body type, hair, notable tattoos or piercings, typical role archetype "
+        f"(e.g. submissive, dominant, girl-next-door, playful), and any signature style. "
+        f"Keep it under 120 words. Plain text only, no headers."
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=model, max_tokens=200, temperature=0.3,
+            messages=[{"role": "user", "content": prompt}],
+            stream=False,
+        )
+        result = (resp.choices[0].message.content or "").strip()
+        if result:
+            cache_set(female, result)
+        return result
+    except Exception:
+        return ""
+
+# ── Script validation ─────────────────────────────────────────────────────────
+_BANNED_CONTENT = [
+    (re.compile(r'\b(?:wine|beer|liquor|whiskey|bourbon|vodka|rum|gin|champagne|prosecco|ros[eé]|cocktail|alcohol)\b', re.I),
+     "Contains banned alcohol reference"),
+    (re.compile(r'\b(?:chok(?:e|ing|ed)|strangulat(?:e|ion))\b', re.I),
+     "Contains banned choking reference"),
+    (re.compile(r'\b(?:drug|cocaine|heroin|weed|marijuana|cannabis|molly|ecstasy)\b', re.I),
+     "Contains banned drug reference"),
+    (re.compile(r'\b(?:incest|step-?(?:mom|dad|sister|brother|son|daughter|sibling))\b', re.I),
+     "Contains banned incest reference"),
+]
+
+_REQUIRED_FIELDS = [
+    ("theme",          "Missing THEME section"),
+    ("plot",           "Missing PLOT section"),
+    ("shoot_location", "Missing SHOOT LOCATION section"),
+    ("wardrobe_female","Missing WARDROBE - FEMALE section"),
+]
+
+def validate_script(fields: dict, female: str = "", male: str = "") -> list[str]:
+    """Return a list of rule violation strings. Empty list = pass."""
+    violations = []
+
+    # Required sections
+    for key, msg in _REQUIRED_FIELDS:
+        if not fields.get(key, "").strip():
+            violations.append(msg)
+
+    # Banned content check across all text fields
+    all_text = " ".join(fields.get(k, "") for k in
+                        ("theme", "plot", "set_design", "props", "wardrobe_female", "wardrobe_male"))
+    for pattern, msg in _BANNED_CONTENT:
+        if pattern.search(all_text):
+            violations.append(msg)
+
+    # Male talent name check — should not appear as a named character (POV = "you")
+    if male and male.strip():
+        male_first = male.strip().split()[0]
+        if len(male_first) > 2 and re.search(r'\b' + re.escape(male_first) + r'\b', all_text, re.I):
+            violations.append(f"Male talent '{male_first}' named in script — POV talent should be 'you'")
+
+    return violations
 
 SYSTEM_PROMPT = """You are a professional VR adult film script writer for two studios: VRHush (VRH) and FuckPassVR (FPVR). Your writing is cinematic, intimate, and director-ready — rich with physical detail, emotional texture, and clear stage direction without dialogue cues.
 
@@ -109,6 +196,14 @@ Use this research to shape the plot, her characterization in the scene, and her 
 Write like a cinematic short film, not a checklist. The best plots feel specific — they have a world, a reason, a moment. The seduction should feel inevitable but not rushed. The intimacy should feel personal, not generic.
 
 Every script should be different. Rotate rooms, vary scenario types, find new angles on familiar situations. The goal is that a director and two performers can walk into a room, read this, and know exactly what world they're inhabiting."""
+
+# NaughtyJOI uses a fixed plot template — no AI generation needed.
+# Performer-specific details (name, look, wardrobe) are filled in at shoot time.
+NJOI_STATIC_PLOT = """She walks in like she owns the room — unhurried, eyes locked on the camera. She already knows why you're here. She settles in front of you, makes herself comfortable, and tells you exactly how this is going to go. Her voice is calm, deliberate. She's done this before and she likes watching you try to keep up.
+
+She builds you slow. Instructions come one at a time — start here, stop there, wait for her. She strips down at her own pace, not yours, letting each reveal land before moving to the next. When you rush she notices. When you obey she rewards you with a little more. The rhythm is entirely hers and she's not in a hurry.
+
+When she's ready she starts the countdown. Ten, nine, eight — her voice drops. She watches the camera with the focus of someone who knows exactly what they're doing to you. She brings you both to the edge at the same time, and when she hits zero she means it."""
 
 
 def parse_input(raw: str) -> dict | None:
