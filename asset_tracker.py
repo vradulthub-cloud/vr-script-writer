@@ -4,6 +4,7 @@ Builds unified per-scene asset status by joining Grail + Scripts + MEGA scan + A
 """
 
 import json
+import logging as _log
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -58,6 +59,20 @@ def _get_client():
     return _cached_client
 
 
+def _retry_api(func, max_retries=3, base_sleep=5):
+    """Retry a gspread call on 429 quota errors with exponential backoff."""
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except gspread.exceptions.APIError as exc:
+            if "429" in str(exc) and attempt < max_retries - 1:
+                wait = base_sleep * (2 ** attempt)  # 5, 10, 20 seconds
+                _log.warning("Sheets 429 – waiting %ds (attempt %d)", wait, attempt + 1)
+                time.sleep(wait)
+            else:
+                raise
+
+
 # ── Data loaders ─────────────────────────────────────────────────────────────
 
 def bust_caches():
@@ -82,7 +97,7 @@ def _load_scripts_lookup():
         return _scripts_cache
 
     gc = _get_client()
-    sh = gc.open_by_key(SCRIPTS_SHEET_ID)
+    sh = _retry_api(lambda: gc.open_by_key(SCRIPTS_SHEET_ID))
     lookup = {}
 
     today = date.today()
@@ -93,7 +108,7 @@ def _load_scripts_lookup():
     for month_name in months:
         try:
             ws = sh.worksheet(month_name)
-            rows = ws.get_all_values()
+            rows = _retry_api(ws.get_all_values)
             for r in rows[1:]:
                 studio_raw = r[1].strip() if len(r) > 1 else ""
                 female = r[4].strip() if len(r) > 4 else ""
@@ -190,7 +205,7 @@ def load_asset_status(studios=None, limit_per_studio=20, cached_approvals=None):
     }
     """
     gc = _get_client()
-    grail = gc.open_by_key(GRAIL_SHEET_ID)
+    grail = _retry_api(lambda: gc.open_by_key(GRAIL_SHEET_ID))
 
     # Load scripts, mega, and approvals — scripts may hit API so run in parallel
     mega_lookup, scan_date = _load_mega_scan()  # cached, instant after first call
@@ -208,8 +223,8 @@ def load_asset_status(studios=None, limit_per_studio=20, cached_approvals=None):
     # Fetch all Grail studio tabs in parallel — biggest performance win
     def _fetch_tab(tab_name):
         try:
-            ws = grail.worksheet(tab_name)
-            return tab_name, ws.get_all_values()
+            ws = _retry_api(lambda: grail.worksheet(tab_name))
+            return tab_name, _retry_api(ws.get_all_values)
         except Exception:
             return tab_name, None
 
