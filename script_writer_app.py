@@ -211,7 +211,10 @@ Respond with ONLY the two titles separated by a newline — no quotes, no explan
 
 def _generate_title(studio, female, theme, plot, description=""):
     """Generate a scene title using Claude based on script content."""
-    _claude_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    try:
+        _claude_key = st.secrets.get("ANTHROPIC_API_KEY", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+    except Exception:
+        _claude_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not _claude_key:
         return None
 
@@ -355,7 +358,7 @@ _C = hub_ui.COLORS  # shorthand for inline style references
 # ── Globally cached data loaders (shared across all sessions) ────────────────
 # Data loads once, serves everyone for 30 min. Refresh button clears on demand.
 
-@st.cache_data(ttl=1800, show_spinner="Loading asset data...")
+@st.cache_data(ttl=3600, show_spinner="Loading asset data...")
 def _cached_load_assets(_studios_tuple, limit):
     import asset_tracker as _at_inner
     studios = list(_studios_tuple) if _studios_tuple else None
@@ -4387,9 +4390,17 @@ with tab_tickets:
                     st.selectbox(
                         "Show", ["All", "Missing Only", "Complete"], key="at_show")
 
-                if st.button("Refresh", key="at_refresh"):
+                if st.button("🔄 Refresh MEGA", key="at_refresh"):
+                    try:
+                        import mega_scan_worker as _msw
+                        with st.status("Scanning MEGA folders…", expanded=True) as _scan_status:
+                            _msw.run_scan(progress_callback=lambda m: _scan_status.update(label=m))
+                            _scan_status.update(label="Scan complete", state="complete")
+                    except Exception as _scan_err:
+                        st.error(f"MEGA scan failed: {_scan_err}")
                     _at.bust_caches()
                     _cached_load_assets.clear()
+                    st.session_state.pop("scan_data", None)
                     st.rerun()
 
                 _at_total = len(_at_scenes)
@@ -4515,16 +4526,18 @@ with tab_tickets:
                 _editing_title = st.session_state.get("at_editing_title", False)
 
                 if _editing_title and _user_can_write_grail:
+                    _edit_default = st.session_state.pop("at_generated_title", None) or _cur_title
                     _new_title = st.text_input(
-                        "Title", value=_cur_title, key="at_title_input",
+                        "Title", value=_edit_default, key="at_title_input",
                         placeholder="Enter scene title")
-                    _tc1, _tc2 = st.columns(2)
+                    _tc1, _tc2, _tc3 = st.columns(3)
                     with _tc1:
                         if st.button("Save Title", key="at_title_save", width="stretch"):
                             if _new_title.strip() and _grail_tab and _grail_row:
                                 _ok_t, _msg_t = _write_grail_cell(_grail_tab, _grail_row, 4, _new_title.strip())
                                 if _ok_t:
                                     st.session_state.pop("at_editing_title", None)
+                                    st.session_state.pop("at_generated_title", None)
                                     _cached_load_assets.clear()
                                     st.rerun()
                                 else:
@@ -4532,8 +4545,23 @@ with tab_tickets:
                             else:
                                 st.warning("Title cannot be empty.")
                     with _tc2:
+                        if st.button("Regenerate", key="at_title_regen", width="stretch"):
+                            with st.spinner("Generating..."):
+                                _gen = _generate_title(
+                                    _sc.get("studio_name", "VRHush"),
+                                    _sc.get("female", ""),
+                                    _sc.get("theme", ""),
+                                    _sc.get("plot_preview", ""))
+                                if _gen:
+                                    st.session_state["at_generated_title"] = _gen
+                                    st.session_state["at_title_input"] = _gen
+                                    st.rerun()
+                                else:
+                                    st.error("Title generation failed. Check API key.")
+                    with _tc3:
                         if st.button("Cancel", key="at_title_cancel", width="stretch"):
                             st.session_state.pop("at_editing_title", None)
+                            st.session_state.pop("at_generated_title", None)
                             st.rerun()
                 else:
                     _title_icon = f"<span style='color:{_C['green']}'>&#10003;</span>" if _cur_title else f"<span style='color:{_C['red']}'>&#10007;</span>"
@@ -4544,12 +4572,30 @@ with tab_tickets:
                         unsafe_allow_html=True,
                     )
                     if _user_can_write_grail:
-                        _title_btn_label = "Edit Title" if _cur_title else "Add Title"
-                        if st.button(_title_btn_label, key="at_title_edit"):
-                            st.session_state["at_editing_title"] = True
-                            st.session_state.pop("at_editing_cats", None)
-                            st.session_state.pop("at_editing_tags", None)
-                            st.rerun()
+                        _tb1, _tb2 = st.columns(2)
+                        with _tb1:
+                            _title_btn_label = "Edit Title" if _cur_title else "Add Title"
+                            if st.button(_title_btn_label, key="at_title_edit", width="stretch"):
+                                st.session_state["at_editing_title"] = True
+                                st.session_state.pop("at_editing_cats", None)
+                                st.session_state.pop("at_editing_tags", None)
+                                st.rerun()
+                        with _tb2:
+                            if st.button("AI Generate Title", key="at_gen_title", width="stretch"):
+                                with st.spinner("Generating title..."):
+                                    _gen = _generate_title(
+                                        _sc.get("studio_name", "VRHush"),
+                                        _sc.get("female", ""),
+                                        _sc.get("theme", ""),
+                                        _sc.get("plot_preview", ""))
+                                    if _gen:
+                                        st.session_state["at_generated_title"] = _gen
+                                        st.session_state["at_editing_title"] = True
+                                        st.session_state.pop("at_editing_cats", None)
+                                        st.session_state.pop("at_editing_tags", None)
+                                        st.rerun()
+                                    else:
+                                        st.error("Title generation failed. Check API key.")
 
                 # — Categories —
                 hub_ui.section("Categories")
@@ -4622,6 +4668,7 @@ with tab_tickets:
                                 st.session_state["at_cats_prefill"] = ""
                             st.session_state["at_editing_cats"] = True
                             st.session_state.pop("at_editing_title", None)
+                            st.session_state.pop("at_generated_title", None)
                             st.session_state.pop("at_editing_tags", None)
                             st.rerun()
 
@@ -4683,6 +4730,7 @@ with tab_tickets:
                                 st.session_state["at_tags_prefill"] = ""
                             st.session_state["at_editing_tags"] = True
                             st.session_state.pop("at_editing_title", None)
+                            st.session_state.pop("at_generated_title", None)
                             st.session_state.pop("at_editing_cats", None)
                             st.rerun()
 
