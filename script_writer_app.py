@@ -209,14 +209,53 @@ Respond with ONLY the two titles separated by a newline — no quotes, no explan
 }
 
 
+# ── Shared API client caches ───────────────────────────────────────────────────
+# Anthropic client — reuse across title generation calls (avoids SSL/connection overhead)
+_anthropic_client = None
+
+def _get_anthropic_client():
+    global _anthropic_client
+    if _anthropic_client is None:
+        try:
+            _key = st.secrets.get("ANTHROPIC_API_KEY", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+        except Exception:
+            _key = os.environ.get("ANTHROPIC_API_KEY", "")
+        import anthropic as _anth
+        _anthropic_client = _anth.Anthropic(api_key=_key)
+    return _anthropic_client
+
+
+# Grail gspread client — reuse across all Grail write operations (avoids JWT auth on every call)
+_grail_gc = None
+_grail_gc_at = 0.0
+_GRAIL_ID = "1Eq5G5FU6A8EqeFZCnZjrEaMYS8F1DiK5vP5tCSINeJk"
+
+def _get_grail_client():
+    global _grail_gc, _grail_gc_at
+    now = time.time()
+    if _grail_gc and (now - _grail_gc_at) < 1800:
+        return _grail_gc
+    import gspread
+    from google.oauth2.service_account import Credentials
+    creds = Credentials.from_service_account_file(
+        os.path.join(os.path.dirname(__file__), "service_account.json"),
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+    _grail_gc = gspread.authorize(creds)
+    _grail_gc_at = now
+    return _grail_gc
+
+
 def _generate_title(studio, female, theme, plot, description=""):
-    """Generate a scene title using Claude based on script content."""
+    """Generate a scene title using Claude based on script content.
+    Returns (title, None) on success, (None, error_message) on failure."""
+    import anthropic as _anth_mod
     try:
-        _claude_key = st.secrets.get("ANTHROPIC_API_KEY", "") or os.environ.get("ANTHROPIC_API_KEY", "")
-    except Exception:
-        _claude_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not _claude_key:
-        return None
+        _ac = _get_anthropic_client()
+    except Exception as _e:
+        return None, f"API client error — check ANTHROPIC_API_KEY in app secrets. ({type(_e).__name__})"
+    if not _ac:
+        return None, "No API client available."
 
     # Map app studio names to system prompt keys
     _studio_map = {"VRHush": "VRHush", "FuckPassVR": "FuckPassVR",
@@ -233,40 +272,41 @@ Plot summary: {plot[:500] if plot else 'N/A'}
 Generate the title now."""
 
     try:
-        import anthropic as _anth
-        _ac = _anth.Anthropic(api_key=_claude_key)
         _resp = _ac.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=50,
             system=_sys,
             messages=[{"role": "user", "content": _user}]
         )
-        return _resp.content[0].text.strip().strip('"').strip("'")
-    except Exception:
-        return None
+        return _resp.content[0].text.strip().strip('"').strip("'"), None
+    except _anth_mod.AuthenticationError:
+        return None, "Authentication failed — check ANTHROPIC_API_KEY."
+    except _anth_mod.RateLimitError:
+        return None, "Rate limited — try again in a moment."
+    except _anth_mod.APIConnectionError:
+        return None, "Could not reach Claude API — check network."
+    except Exception as _e:
+        return None, f"Generation failed: {type(_e).__name__}"
 
 
 def _write_title_to_grail(studio, scene_num, title):
     """Write a generated title to the Grail spreadsheet."""
     try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-        creds = Credentials.from_service_account_file(
-            os.path.join(os.path.dirname(__file__), "service_account.json"),
-            scopes=["https://www.googleapis.com/auth/spreadsheets"]
-        )
-        gc = gspread.authorize(creds)
-        _GRAIL_ID = "1Eq5G5FU6A8EqeFZCnZjrEaMYS8F1DiK5vP5tCSINeJk"
+        gc = _get_grail_client()
         sh = gc.open_by_key(_GRAIL_ID)
         # Map studio to Grail tab
         _tab_map = {"VRHush": "VRH", "FuckPassVR": "FPVR", "VRAllure": "VRA", "NaughtyJOI": "NNJOI"}
         tab = _tab_map.get(studio, "VRH")
         ws = sh.worksheet(tab)
-        # Find row by scene number (col B = index 1)
-        cells = ws.col_values(2)  # col B = scene numbers
+        # Find row by scene number — cache col B per tab to avoid repeat full-column fetches
+        _cache_key = f"_grail_colB_{tab}"
+        if _cache_key not in st.session_state:
+            st.session_state[_cache_key] = ws.col_values(2)
+        cells = st.session_state[_cache_key]
         for i, val in enumerate(cells):
             if val.strip() == str(scene_num).strip():
                 ws.update_cell(i + 1, 4, title)  # col D = title
+                st.session_state.pop(_cache_key, None)  # invalidate after write
                 return True, f"Saved '{title}' → {tab} row {i + 1}"
         return False, f"Scene #{scene_num} not found in {tab}"
     except Exception as e:
@@ -278,14 +318,7 @@ def _write_grail_cell(grail_tab, grail_row, column_1based, value):
     grail_tab/grail_row come from asset_tracker scene data.
     Column mapping: Title=4, Categories=6, Tags=7 (1-based)."""
     try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-        creds = Credentials.from_service_account_file(
-            os.path.join(os.path.dirname(__file__), "service_account.json"),
-            scopes=["https://www.googleapis.com/auth/spreadsheets"]
-        )
-        gc = gspread.authorize(creds)
-        _GRAIL_ID = "1Eq5G5FU6A8EqeFZCnZjrEaMYS8F1DiK5vP5tCSINeJk"
+        gc = _get_grail_client()
         sh = gc.open_by_key(_GRAIL_ID)
         ws = sh.worksheet(grail_tab)
         ws.update_cell(grail_row, column_1based, value)
@@ -1233,7 +1266,7 @@ with tab_scripts:
                 with st.expander(f"Rule violations ({_viol_count})", expanded=True):
                     for v in violations:
                         st.markdown(
-                            f"<div style='background:{_C['red_dim']};border-left:3px solid {_C['red']};"
+                            f"<div style='background:{_C['red_dim']};border:1px solid {_C['red']};"
                             f"border-radius:4px;padding:6px 10px;margin:4px 0;font-size:0.82rem;"
                             f"color:{_C['text']}'>{v}</div>",
                             unsafe_allow_html=True)
@@ -1807,7 +1840,7 @@ with tab_scripts:
                                     st.checkbox("", key=f"sc_chk_{_ci}", label_visibility="collapsed")
                                 with _card_col:
                                     st.markdown(
-                                        f"<div style='background:{_card_bg};border-left:3px solid {_border};"
+                                        f"<div style='background:{_card_bg};border:1px solid {_border};"
                                         f"border-radius:5px;padding:7px 12px;margin:1px 0'>"
                                         f"{_card_inner}{_done_badge}{_theme_line}</div>",
                                         unsafe_allow_html=True
@@ -1816,7 +1849,7 @@ with tab_scripts:
                                 _card_col, _btn_col = st.columns([8, 3])
                                 with _card_col:
                                     st.markdown(
-                                        f"<div style='background:{_card_bg};border-left:3px solid {_border};"
+                                        f"<div style='background:{_card_bg};border:1px solid {_border};"
                                         f"border-radius:5px;padding:7px 12px;margin:1px 0'>"
                                         f"{_card_inner}{_done_badge_mini}{_theme_line}</div>",
                                         unsafe_allow_html=True
@@ -2003,9 +2036,11 @@ with tab_scripts:
                                     _bv   = _bres["violations"]
 
                                     # Compact script card
+                                    _bv_color = _C['amber'] if _bv else _C['green']
                                     st.markdown(
-                                        f"<div class='hub-card hub-card-accent' style='border-left-color:"
-                                        f"{_C['amber'] if _bv else _C['green']}'>"
+                                        f"<div class='hub-card' style='background:{_C['surface']};"
+                                        f"border:1px solid {_bv_color}44;border-radius:8px;"
+                                        f"padding:10px 14px;margin:4px 0'>"
                                         f"<span style='font-size:1.05rem;font-weight:700'>{_bres['label']}</span>"
                                         f"<span style='color:{_C['muted']};margin-left:10px;font-size:0.85rem'>"
                                         f"{_bf.get('theme','')}</span><br>"
@@ -4428,7 +4463,7 @@ with tab_tickets:
                             with _ic1:
                                 st.markdown(
                                     f"<div style='display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap'>"
-                                    f"<span style='width:3px;height:16px;border-radius:2px;"
+                                    f"<span style='width:4px;height:16px;border-radius:2px;"
                                     f"background:{_is_color};display:inline-block'></span>"
                                     f"<span style='font-family:DM Mono,monospace;font-size:0.78rem;"
                                     f"font-weight:600;color:{_C['text']}'>{_is['scene_id']}</span>"
@@ -4459,7 +4494,7 @@ with tab_tickets:
                 ) if _sc.get("is_compilation") else ""
                 st.markdown(
                     f"<div style='display:flex;align-items:center;gap:12px;margin:8px 0 4px'>"
-                    f"<div style='width:4px;height:28px;border-radius:2px;background:{_s_color}'></div>"
+                    f"<div style='width:5px;height:32px;border-radius:2px;background:{_s_color}'></div>"
                     f"<span style='font-family:DM Mono,monospace;font-size:1.1rem;font-weight:700;"
                     f"color:{_C['text']}'>{_sc['scene_id']}</span>"
                     f"<span style='background:{_s_color}22;color:{_s_color};font-size:0.72rem;"
@@ -4527,41 +4562,69 @@ with tab_tickets:
 
                 if _editing_title and _user_can_write_grail:
                     _edit_default = st.session_state.pop("at_generated_title", None) or _cur_title
+                    _title_v = st.session_state.get("at_title_v", 0)
+                    _title_is_ai = st.session_state.get("at_title_is_ai", False)
                     _new_title = st.text_input(
-                        "Title", value=_edit_default, key="at_title_input",
+                        "Title", value=_edit_default, key=f"at_title_input_{_title_v}",
                         placeholder="Enter scene title")
+                    if _title_is_ai:
+                        st.caption("AI-generated title — will go to Approvals before saving to Grail.")
                     _tc1, _tc2, _tc3 = st.columns(3)
                     with _tc1:
-                        if st.button("Save Title", key="at_title_save", width="stretch"):
+                        _save_label = "Submit for Approval" if _title_is_ai else "Save Title"
+                        if st.button(_save_label, key="at_title_save", width="stretch", type="primary" if _title_is_ai else "secondary"):
                             if _new_title.strip() and _grail_tab and _grail_row:
-                                _ok_t, _msg_t = _write_grail_cell(_grail_tab, _grail_row, 4, _new_title.strip())
-                                if _ok_t:
-                                    st.session_state.pop("at_editing_title", None)
-                                    st.session_state.pop("at_generated_title", None)
-                                    _cached_load_assets.clear()
-                                    st.rerun()
+                                if _title_is_ai:
+                                    try:
+                                        import approval_tools as _apr_t
+                                        import json as _json_t
+                                        _apr_id = _apr_t.submit_for_approval(
+                                            submitted_by=_user_name,
+                                            content_type="title_text",
+                                            scene_id=_sc["scene_id"],
+                                            studio=_sc.get("studio_name", ""),
+                                            content_preview=_new_title.strip(),
+                                            content_json=_json_t.dumps({"title": _new_title.strip()}),
+                                            target_sheet=f"Grail:{_grail_tab}:D{_grail_row}",
+                                        )
+                                        st.session_state.pop("at_editing_title", None)
+                                        st.session_state.pop("at_title_is_ai", None)
+                                        st.session_state.pop("at_title_v", None)
+                                        st.success(f"Submitted for approval: **{_apr_id}**")
+                                    except Exception as _apr_err:
+                                        st.error(f"Approval submission failed: {_apr_err}")
                                 else:
-                                    st.error(_msg_t)
+                                    _ok_t, _msg_t = _write_grail_cell(_grail_tab, _grail_row, 4, _new_title.strip())
+                                    if _ok_t:
+                                        st.session_state.pop("at_editing_title", None)
+                                        st.session_state.pop("at_generated_title", None)
+                                        st.session_state.pop("at_title_v", None)
+                                        _cached_load_assets.clear()
+                                        st.rerun()
+                                    else:
+                                        st.error(_msg_t)
                             else:
                                 st.warning("Title cannot be empty.")
                     with _tc2:
                         if st.button("Regenerate", key="at_title_regen", width="stretch"):
                             with st.spinner("Generating..."):
-                                _gen = _generate_title(
+                                _gen, _gen_err = _generate_title(
                                     _sc.get("studio_name", "VRHush"),
                                     _sc.get("female", ""),
                                     _sc.get("theme", ""),
                                     _sc.get("plot_preview", ""))
                                 if _gen:
                                     st.session_state["at_generated_title"] = _gen
-                                    st.session_state["at_title_input"] = _gen
+                                    st.session_state["at_title_v"] = _title_v + 1
                                     st.rerun()
                                 else:
-                                    st.error("Title generation failed. Check API key.")
+                                    st.error(_gen_err or "Title generation failed.")
                     with _tc3:
                         if st.button("Cancel", key="at_title_cancel", width="stretch"):
                             st.session_state.pop("at_editing_title", None)
                             st.session_state.pop("at_generated_title", None)
+                            st.session_state.pop("at_title_is_ai", None)
+                            st.session_state.pop("at_title_v", None)
                             st.rerun()
                 else:
                     _title_icon = f"<span style='color:{_C['green']}'>&#10003;</span>" if _cur_title else f"<span style='color:{_C['red']}'>&#10007;</span>"
@@ -4583,7 +4646,7 @@ with tab_tickets:
                         with _tb2:
                             if st.button("AI Generate Title", key="at_gen_title", width="stretch"):
                                 with st.spinner("Generating title..."):
-                                    _gen = _generate_title(
+                                    _gen, _gen_err = _generate_title(
                                         _sc.get("studio_name", "VRHush"),
                                         _sc.get("female", ""),
                                         _sc.get("theme", ""),
@@ -4591,11 +4654,12 @@ with tab_tickets:
                                     if _gen:
                                         st.session_state["at_generated_title"] = _gen
                                         st.session_state["at_editing_title"] = True
+                                        st.session_state["at_title_is_ai"] = True
                                         st.session_state.pop("at_editing_cats", None)
                                         st.session_state.pop("at_editing_tags", None)
                                         st.rerun()
                                     else:
-                                        st.error("Title generation failed. Check API key.")
+                                        st.error(_gen_err or "Title generation failed.")
 
                 # — Categories —
                 hub_ui.section("Categories")
@@ -4669,6 +4733,8 @@ with tab_tickets:
                             st.session_state["at_editing_cats"] = True
                             st.session_state.pop("at_editing_title", None)
                             st.session_state.pop("at_generated_title", None)
+                            st.session_state.pop("at_title_is_ai", None)
+                            st.session_state.pop("at_title_v", None)
                             st.session_state.pop("at_editing_tags", None)
                             st.rerun()
 
@@ -4731,6 +4797,8 @@ with tab_tickets:
                             st.session_state["at_editing_tags"] = True
                             st.session_state.pop("at_editing_title", None)
                             st.session_state.pop("at_generated_title", None)
+                            st.session_state.pop("at_title_is_ai", None)
+                            st.session_state.pop("at_title_v", None)
                             st.session_state.pop("at_editing_cats", None)
                             st.rerun()
 
@@ -4895,7 +4963,7 @@ with tab_tickets:
                         st.markdown(
                             f"<div style='display:flex;align-items:center;gap:10px;margin:16px 0 8px'>"
                             f"<div style='width:4px;height:20px;border-radius:2px;background:{_s_color}'></div>"
-                            f"<span style='font-family:Syne,sans-serif;font-size:1rem;font-weight:700;"
+                            f"<span style='font-family:\"Bricolage Grotesque\",sans-serif;font-size:1rem;font-weight:700;"
                             f"color:{_C['text']}'>{_studio_names.get(_grp_studio, _grp_studio)}</span>"
                             f"<span style='font-size:0.72rem;color:{_C['muted']}'>{len(_grp_scenes)} scenes</span>"
                             f"</div>",
@@ -4932,8 +5000,8 @@ with tab_tickets:
 
                                     _date_html = f"<span style='font-size:0.68rem;color:{_C['subtle']}'>{_date_display}</span>" if _date_display else ""
                                     st.markdown(
-                                        f"<div style='background:{_C['surface']};border:1px solid {_C['border']};"
-                                        f"border-left:3px solid {_s_color};border-radius:8px;padding:14px 16px;"
+                                        f"<div style='background:{_C['surface']};border:1px solid {_s_color}44;"
+                                        f"border-radius:8px;padding:14px 16px;"
                                         f"min-height:200px;display:flex;flex-direction:column'>"
                                         f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>"
                                         f"<span style='font-family:DM Mono,monospace;font-size:0.82rem;font-weight:600;"
@@ -5144,6 +5212,20 @@ with tab_tickets:
         elif _tk_mode == "Tickets":
             hub_ui.section("Ticket Dashboard")
 
+            # Workflow guide
+            with st.expander("Ticket workflow", expanded=False):
+                st.markdown(
+                    "**New** → *admin reviews* → **Approved** → *work begins* → "
+                    "**In Progress** → *QC marks fixed* → **In Review** → *admin verifies* → **Closed**\n\n"
+                    "| Status | Meaning |\n|--------|---------||\n"
+                    "| **New** | Submitted, awaiting admin review |\n"
+                    "| **Approved** | Accepted — work not yet started |\n"
+                    "| **In Progress** | Actively being worked on |\n"
+                    "| **In Review** | Fix submitted — needs verification |\n"
+                    "| **Closed** | Verified and done |\n"
+                    "| **Rejected** | Declined by admin (with reason) |"
+                )
+
             # Filters
             _tf1, _tf2 = st.columns(2)
             with _tf1:
@@ -5163,9 +5245,16 @@ with tab_tickets:
             # Load tickets (globally cached)
             _all_tickets = _cached_load_tickets()
 
-            # Refresh button
+            # Unread tracking: record when user first opened Tickets this session
+            import time as _time_mod
+            if "tk_list_ts" not in st.session_state:
+                st.session_state["tk_list_ts"] = _time_mod.time()
+            _tk_list_ts = st.session_state["tk_list_ts"]
+
+            # Refresh button (also resets unread baseline)
             if st.button("Refresh", key="tk_refresh"):
                 _cached_load_tickets.clear()
+                st.session_state["tk_list_ts"] = _time_mod.time()
                 st.rerun()
 
             # Apply filters
@@ -5203,6 +5292,39 @@ with tab_tickets:
             if _hidden_count:
                 st.caption(f"{_hidden_count} closed/rejected ticket{'s' if _hidden_count != 1 else ''} hidden — filter by status to view")
 
+            # Activity line helper: parse last timestamped note from admin_notes
+            import re as _re_act
+            from datetime import datetime as _dt_act
+
+            def _get_last_activity(admin_notes):
+                """Return (relative_time_str, author, datetime_obj) from last note, or (None, None, None)."""
+                if not admin_notes:
+                    return None, None, None
+                _matches = list(_re_act.finditer(
+                    r'\[(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s+([^\]]+)\]', admin_notes
+                ))
+                if not _matches:
+                    return None, None, None
+                _last = _matches[-1]
+                _author = _last.group(3).strip()
+                try:
+                    _ts = _dt_act.strptime(f"{_last.group(1)} {_last.group(2)}", "%Y-%m-%d %H:%M")
+                    _now = _dt_act.now()
+                    _mins = int((_now - _ts).total_seconds() / 60)
+                    if _mins < 2:
+                        _rel = "just now"
+                    elif _mins < 60:
+                        _rel = f"{_mins}m ago"
+                    elif _mins < 1440:
+                        _rel = f"{_mins // 60}h ago"
+                    elif _mins < 10080:
+                        _rel = f"{_mins // 1440}d ago"
+                    else:
+                        _rel = _last.group(1)
+                    return _rel, _author, _ts
+                except Exception:
+                    return _last.group(1), _author, None
+
             _pri_colors = {"Critical": _C["red"], "High": _C["amber"], "Medium": _C["blue"], "Low": _C["green"]}
             _st_colors = {
                 "New": _C["blue"], "Approved": _C["green"], "In Progress": _C["amber"],
@@ -5229,9 +5351,9 @@ with tab_tickets:
 
                 st.markdown(
                     f"<div style='display:flex;align-items:center;gap:12px;margin:8px 0 4px'>"
-                    f"<div style='width:4px;height:28px;border-radius:2px;background:{_pc}'></div>"
+                    f"<div style='width:5px;height:28px;border-radius:2px;background:{_pc}'></div>"
                     f"<span style='font-family:DM Mono,monospace;font-size:0.82rem;color:{_C['subtle']}'>{_t['id']}</span>"
-                    f"<span style='font-family:Syne,sans-serif;font-size:1.2rem;font-weight:700;color:{_C['text']}'>{_t['title']}</span>"
+                    f"<span style='font-family:\"Bricolage Grotesque\",sans-serif;font-size:1.2rem;font-weight:700;color:{_C['text']}'>{_t['title']}</span>"
                     f"<span style='background:{_sb};color:{_sc};font-size:0.72rem;font-weight:600;"
                     f"padding:3px 10px;border-radius:9999px;margin-left:auto'>{_t['status']}</span>"
                     f"</div>",
@@ -5279,13 +5401,13 @@ with tab_tickets:
                             else:
                                 _notes_html += f"<div style='font-size:0.82rem;color:{_C['text']};padding:4px 0'>{_ne}</div>"
                         st.markdown(
-                            f"<div class='hub-card hub-card-accent' style='border-left-color:{_C['accent']}'>"
+                            f"<div class='hub-card hub-card-accent'>"
                             f"{_notes_html}</div>",
                             unsafe_allow_html=True,
                         )
                     else:
                         st.markdown(
-                            f"<div class='hub-card hub-card-accent' style='border-left-color:{_C['accent']}'>"
+                            f"<div class='hub-card hub-card-accent'>"
                             f"<span style='font-size:0.85rem'>{_notes_raw}</span></div>",
                             unsafe_allow_html=True,
                         )
@@ -5293,151 +5415,183 @@ with tab_tickets:
                 if _t["date_resolved"]:
                     st.caption(f"Resolved: {_t['date_resolved']}")
 
-                # QC Feedback — anyone can report test results on active tickets
+                # ── QC Feedback — anyone can report test results on active tickets ──
                 if _t["status"] in ("New", "Approved", "In Progress"):
-                    hub_ui.section("QC Feedback")
-                    _qc_note = st.text_input("Notes (optional)", key="tk_qc_note",
-                                             placeholder="What did you find?")
-                    _qc1, _qc2 = st.columns(2)
-                    with _qc1:
-                        if st.button("Fixed", key="tk_qc_fixed", width="stretch"):
-                            with st.spinner("Updating..."):
-                                try:
-                                    _qc_text = f"QC passed" + (f": {_qc_note.strip()}" if _qc_note.strip() else "")
-                                    _tkt.update_ticket(
-                                        _t["row_index"], status="In Review",
-                                        admin_notes=_tkt.append_note(_t["admin_notes"], _user_name, _qc_text),
-                                    )
+                    _qc_expanded = _t["status"] in ("In Progress",)
+                    with st.expander("QC Feedback", expanded=_qc_expanded):
+                        _qc_note = st.text_input("Notes (optional)", key="tk_qc_note",
+                                                 placeholder="What did you find?")
+                        _qc1, _qc2 = st.columns(2)
+                        with _qc1:
+                            if st.button("Fixed — send to Review", key="tk_qc_fixed",
+                                         width="stretch", type="primary"):
+                                with st.spinner("Updating..."):
                                     try:
-                                        notification_tools.notify_ticket_status(
-                                            _t["id"], _t["title"], "In Review", _user_name,
-                                            submitted_by=_t.get("submitted_by", ""),
-                                            assigned_to=_t.get("assigned_to", ""))
-                                        _cached_unread_count.clear()
-                                    except Exception:
-                                        pass
-                                    st.success(f"Marked as fixed — moved to In Review.")
-                                    _cached_load_tickets.clear()
-                                    st.rerun()
-                                except Exception as _e:
-                                    st.error(f"Failed: {_e}")
-                    with _qc2:
-                        if st.button("Still Broken", key="tk_qc_broken", width="stretch"):
-                            with st.spinner("Updating..."):
-                                try:
-                                    _qc_text = f"QC failed" + (f": {_qc_note.strip()}" if _qc_note.strip() else "")
-                                    _tkt.update_ticket(
-                                        _t["row_index"],
-                                        admin_notes=_tkt.append_note(_t["admin_notes"], _user_name, _qc_text),
-                                    )
-                                    st.warning(f"Feedback recorded.")
-                                    _cached_load_tickets.clear()
-                                    st.rerun()
-                                except Exception as _e:
-                                    st.error(f"Failed: {_e}")
-
-                # Verify & Close for In Review tickets
-                if _t["status"] == "In Review":
-                    hub_ui.section("Verify This Change")
-                    _last_note = _t["admin_notes"].strip().split("\n")[-1] if _t["admin_notes"] else ""
-                    _verify_ctx = f"Change reported: **{_last_note}**" if _last_note else "No notes on what was changed."
-                    st.markdown(
-                        f"<div style='font-size:0.82rem;color:{_C['muted']};margin-bottom:8px'>"
-                        f"This ticket was marked as done. {_verify_ctx}</div>",
-                        unsafe_allow_html=True,
-                    )
-                    _vc1, _vc2 = st.columns(2)
-                    with _vc1:
-                        if st.button("Verified — Close", key="tk_verify_close", width="stretch"):
-                            with st.spinner("Closing..."):
-                                try:
-                                    _tkt.update_ticket(
-                                        _t["row_index"], status="Closed",
-                                        approved_by=_user_name,
-                                        admin_notes=(_t["admin_notes"] + f"\nVerified by {_user_name}").strip(),
-                                    )
-                                    try:
-                                        notification_tools.notify_ticket_status(
-                                            _t["id"], _t["title"], "Closed", _user_name,
-                                            submitted_by=_t.get("submitted_by", ""),
-                                            assigned_to=_t.get("assigned_to", ""))
-                                        _cached_unread_count.clear()
-                                    except Exception:
-                                        pass
-                                    st.success(f"Ticket {_t['id']} verified and closed.")
-                                    _cached_load_tickets.clear()
-                                    st.session_state.pop("tk_selected", None)
-                                    st.rerun()
-                                except Exception as _e:
-                                    st.error(f"Failed: {_e}")
-                    with _vc2:
-                        if st.button("Not Fixed — Reopen", key="tk_verify_reopen", width="stretch"):
-                            with st.spinner("Reopening..."):
-                                try:
-                                    _tkt.update_ticket(
-                                        _t["row_index"], status="In Progress",
-                                        admin_notes=(_t["admin_notes"] + f"\nReopened by {_user_name} — not fixed").strip(),
-                                    )
-                                    st.warning(f"Ticket {_t['id']} reopened.")
-                                    _cached_load_tickets.clear()
-                                    st.rerun()
-                                except Exception as _e:
-                                    st.error(f"Failed: {_e}")
-
-                # Quick approve/reject for New tickets
-                if _t["status"] == "New" and _user_is_admin:
-                    hub_ui.section("Review New Ticket")
-                    _qa1, _qa2 = st.columns(2)
-                    with _qa1:
-                        if st.button("Approve", key="tk_quick_approve", width="stretch"):
-                            with st.spinner("Approving..."):
-                                try:
-                                    _tkt.update_ticket(
-                                        _t["row_index"], status="Approved",
-                                        approved_by=_user_name,
-                                        admin_notes=_tkt.append_note(_t["admin_notes"], _user_name, "Approved"),
-                                    )
-                                    try:
-                                        notification_tools.notify_ticket_status(
-                                            _t["id"], _t["title"], "Approved", _user_name,
-                                            submitted_by=_t.get("submitted_by", ""))
-                                        _cached_unread_count.clear()
-                                    except Exception:
-                                        pass
-                                    st.success(f"Ticket {_t['id']} approved.")
-                                    _cached_load_tickets.clear()
-                                    st.rerun()
-                                except Exception as _e:
-                                    st.error(f"Failed: {_e}")
-                    with _qa2:
-                        _reject_reason = st.text_input("Rejection reason", key="tk_quick_rej_reason")
-                        if st.button("Reject", key="tk_quick_reject", width="stretch"):
-                            if not _reject_reason.strip():
-                                st.error("Please provide a reason.")
-                            else:
-                                with st.spinner("Rejecting..."):
-                                    try:
+                                        _qc_text = "QC passed" + (f": {_qc_note.strip()}" if _qc_note.strip() else "")
                                         _tkt.update_ticket(
-                                            _t["row_index"], status="Rejected",
-                                            approved_by=_user_name,
-                                            admin_notes=_tkt.append_note(_t["admin_notes"], _user_name, f"Rejected: {_reject_reason.strip()}"),
+                                            _t["row_index"], status="In Review",
+                                            admin_notes=_tkt.append_note(_t["admin_notes"], _user_name, _qc_text),
                                         )
                                         try:
                                             notification_tools.notify_ticket_status(
-                                                _t["id"], _t["title"], "Rejected", _user_name,
-                                                submitted_by=_t.get("submitted_by", ""))
+                                                _t["id"], _t["title"], "In Review", _user_name,
+                                                submitted_by=_t.get("submitted_by", ""),
+                                                assigned_to=_t.get("assigned_to", ""))
                                             _cached_unread_count.clear()
                                         except Exception:
                                             pass
-                                        st.warning(f"Ticket {_t['id']} rejected.")
+                                        st.success("Marked as fixed — moved to In Review.")
+                                        _cached_load_tickets.clear()
+                                        st.rerun()
+                                    except Exception as _e:
+                                        st.error(f"Failed: {_e}")
+                        with _qc2:
+                            if st.button("Still Broken", key="tk_qc_broken", width="stretch"):
+                                with st.spinner("Updating..."):
+                                    try:
+                                        _qc_text = "QC failed" + (f": {_qc_note.strip()}" if _qc_note.strip() else "")
+                                        _tkt.update_ticket(
+                                            _t["row_index"],
+                                            admin_notes=_tkt.append_note(_t["admin_notes"], _user_name, _qc_text),
+                                        )
+                                        st.warning("Feedback recorded.")
                                         _cached_load_tickets.clear()
                                         st.rerun()
                                     except Exception as _e:
                                         st.error(f"Failed: {_e}")
 
-                # Admin actions
+                # ── Verify & Close — for In Review tickets ────────────────────────
+                if _t["status"] == "In Review":
+                    with st.expander("Verify This Change", expanded=True):
+                        _last_note = _t["admin_notes"].strip().split("\n")[-1] if _t["admin_notes"] else ""
+                        _verify_ctx = f"Change reported: **{_last_note}**" if _last_note else "No notes on what was changed."
+                        st.markdown(
+                            f"<div style='font-size:0.82rem;color:{_C['muted']};margin-bottom:8px'>"
+                            f"This ticket was marked as done. {_verify_ctx}</div>",
+                            unsafe_allow_html=True,
+                        )
+                        _vc1, _vc2 = st.columns(2)
+                        with _vc1:
+                            if st.button("Verified — Close", key="tk_verify_close",
+                                         width="stretch", type="primary"):
+                                with st.spinner("Closing..."):
+                                    try:
+                                        _tkt.update_ticket(
+                                            _t["row_index"], status="Closed",
+                                            approved_by=_user_name,
+                                            admin_notes=(_t["admin_notes"] + f"\nVerified by {_user_name}").strip(),
+                                        )
+                                        try:
+                                            notification_tools.notify_ticket_status(
+                                                _t["id"], _t["title"], "Closed", _user_name,
+                                                submitted_by=_t.get("submitted_by", ""),
+                                                assigned_to=_t.get("assigned_to", ""))
+                                            _cached_unread_count.clear()
+                                        except Exception:
+                                            pass
+                                        st.success(f"Ticket {_t['id']} verified and closed.")
+                                        _cached_load_tickets.clear()
+                                        st.session_state.pop("tk_selected", None)
+                                        st.rerun()
+                                    except Exception as _e:
+                                        st.error(f"Failed: {_e}")
+                        with _vc2:
+                            if st.button("Not Fixed — Reopen", key="tk_verify_reopen", width="stretch"):
+                                with st.spinner("Reopening..."):
+                                    try:
+                                        _tkt.update_ticket(
+                                            _t["row_index"], status="In Progress",
+                                            admin_notes=(_t["admin_notes"] + f"\nReopened by {_user_name} — not fixed").strip(),
+                                        )
+                                        st.warning(f"Ticket {_t['id']} reopened.")
+                                        _cached_load_tickets.clear()
+                                        st.rerun()
+                                    except Exception as _e:
+                                        st.error(f"Failed: {_e}")
+
+                # ── Review New Ticket — admin only, auto-expanded ─────────────────
+                if _t["status"] == "New" and _user_is_admin:
+                    with st.expander("Review New Ticket", expanded=True):
+                        _qa1, _qa2 = st.columns(2)
+                        with _qa1:
+                            if st.button("Approve", key="tk_quick_approve",
+                                         width="stretch", type="primary"):
+                                with st.spinner("Approving..."):
+                                    try:
+                                        _tkt.update_ticket(
+                                            _t["row_index"], status="Approved",
+                                            approved_by=_user_name,
+                                            admin_notes=_tkt.append_note(_t["admin_notes"], _user_name, "Approved"),
+                                        )
+                                        try:
+                                            notification_tools.notify_ticket_status(
+                                                _t["id"], _t["title"], "Approved", _user_name,
+                                                submitted_by=_t.get("submitted_by", ""))
+                                            _cached_unread_count.clear()
+                                        except Exception:
+                                            pass
+                                        st.success(f"Ticket {_t['id']} approved.")
+                                        _cached_load_tickets.clear()
+                                        st.rerun()
+                                    except Exception as _e:
+                                        st.error(f"Failed: {_e}")
+                        with _qa2:
+                            _reject_reason = st.text_input(
+                                "Rejection reason", key="tk_quick_rej_reason",
+                                placeholder="Briefly explain why..."
+                            )
+                            _reject_confirm_key = f"tk_reject_confirm_{_t['id']}"
+                            if not st.session_state.get(_reject_confirm_key):
+                                if st.button("Reject", key="tk_quick_reject", width="stretch"):
+                                    if not _reject_reason.strip():
+                                        st.error("Please provide a reason.")
+                                    else:
+                                        st.session_state[_reject_confirm_key] = True
+                                        st.rerun()
+                            else:
+                                _submitter = _t.get("submitted_by", "submitter")
+                                st.markdown(
+                                    f"<div style='background:{_C['red_dim']};border:1px solid {_C['red']};"
+                                    f"border-radius:6px;padding:8px 12px;font-size:0.82rem;"
+                                    f"color:{_C['text']};margin-bottom:6px'>"
+                                    f"Reject and notify <strong>{_submitter}</strong>?</div>",
+                                    unsafe_allow_html=True,
+                                )
+                                _rc1, _rc2 = st.columns(2)
+                                with _rc1:
+                                    if st.button("Confirm Rejection", key="tk_reject_confirm_btn",
+                                                 width="stretch", type="primary"):
+                                        with st.spinner("Rejecting..."):
+                                            try:
+                                                _reason_to_use = st.session_state.get("tk_quick_rej_reason", "").strip()
+                                                _tkt.update_ticket(
+                                                    _t["row_index"], status="Rejected",
+                                                    approved_by=_user_name,
+                                                    admin_notes=_tkt.append_note(
+                                                        _t["admin_notes"], _user_name,
+                                                        f"Rejected: {_reason_to_use}"
+                                                    ),
+                                                )
+                                                try:
+                                                    notification_tools.notify_ticket_status(
+                                                        _t["id"], _t["title"], "Rejected", _user_name,
+                                                        submitted_by=_t.get("submitted_by", ""))
+                                                    _cached_unread_count.clear()
+                                                except Exception:
+                                                    pass
+                                                st.session_state.pop(_reject_confirm_key, None)
+                                                st.warning(f"Ticket {_t['id']} rejected.")
+                                                _cached_load_tickets.clear()
+                                                st.rerun()
+                                            except Exception as _e:
+                                                st.error(f"Failed: {_e}")
+                                with _rc2:
+                                    if st.button("Cancel", key="tk_reject_cancel_btn", width="stretch"):
+                                        st.session_state.pop(_reject_confirm_key, None)
+                                        st.rerun()
+
+                # ── Admin Actions — admins only, collapsed by default ─────────────
                 if _user_is_admin:
-                    hub_ui.section("Admin Actions")
                     # Valid status transitions
                     _TRANSITIONS = {
                         "New":         ["New", "Approved", "Rejected"],
@@ -5448,60 +5602,64 @@ with tab_tickets:
                         "Rejected":    ["Rejected", "New"],
                     }
                     _valid_statuses = _TRANSITIONS.get(_t["status"], _tkt.STATUSES)
-                    _ac1, _ac2 = st.columns(2)
-                    with _ac1:
-                        _new_status = st.selectbox(
-                            "Update Status", _valid_statuses,
-                            index=0,
-                            key="tk_detail_status",
-                        )
-                    with _ac2:
-                        _assign_opts = ["Unassigned"] + _tkt.EMPLOYEES
-                        _cur_assign = _t.get("assigned_to", "") or "Unassigned"
-                        _assign_idx = _assign_opts.index(_cur_assign) if _cur_assign in _assign_opts else 0
-                        _new_assignee = st.selectbox(
-                            "Assign To", _assign_opts, index=_assign_idx,
-                            key="tk_detail_assignee",
-                        )
-                    _add_note = st.text_input("Add Note", key="tk_detail_add_note", placeholder="Add a timestamped note...")
-                    if st.button("Update Ticket", key="tk_detail_save", width="stretch"):
-                        _final_notes = None
-                        if _add_note.strip():
-                            _final_notes = _tkt.append_note(_t["admin_notes"], _user_name, _add_note.strip())
-                        _final_assignee = _new_assignee if _new_assignee != "Unassigned" else ""
-                        _status_changed = _new_status != _t["status"]
-                        _assignee_changed = _final_assignee != (_t.get("assigned_to") or "")
-                        _has_note = _final_notes is not None
+                    with st.expander("Admin Actions", expanded=False):
+                        _ac1, _ac2 = st.columns(2)
+                        with _ac1:
+                            _new_status = st.selectbox(
+                                "Update Status", _valid_statuses,
+                                index=0,
+                                key="tk_detail_status",
+                            )
+                            _next_statuses = [s for s in _valid_statuses if s != _t["status"]]
+                            if _next_statuses:
+                                st.caption(f"Valid next: {', '.join(_next_statuses)}")
+                        with _ac2:
+                            _assign_opts = ["Unassigned"] + _tkt.EMPLOYEES
+                            _cur_assign = _t.get("assigned_to", "") or "Unassigned"
+                            _assign_idx = _assign_opts.index(_cur_assign) if _cur_assign in _assign_opts else 0
+                            _new_assignee = st.selectbox(
+                                "Assign To", _assign_opts, index=_assign_idx,
+                                key="tk_detail_assignee",
+                            )
+                        _add_note = st.text_input("Add Note", key="tk_detail_add_note", placeholder="Add a timestamped note...")
+                        if st.button("Update Ticket", key="tk_detail_save", width="stretch", type="primary"):
+                            _final_notes = None
+                            if _add_note.strip():
+                                _final_notes = _tkt.append_note(_t["admin_notes"], _user_name, _add_note.strip())
+                            _final_assignee = _new_assignee if _new_assignee != "Unassigned" else ""
+                            _status_changed = _new_status != _t["status"]
+                            _assignee_changed = _final_assignee != (_t.get("assigned_to") or "")
+                            _has_note = _final_notes is not None
 
-                        if not _status_changed and not _assignee_changed and not _has_note:
-                            st.warning("Nothing changed.")
-                        else:
-                            with st.spinner("Updating..."):
-                                try:
-                                    _tkt.update_ticket(
-                                        _t["row_index"],
-                                        status=_new_status if _status_changed else None,
-                                        approved_by=_user_name if _status_changed and _new_status in ("Approved", "Rejected", "Closed") else None,
-                                        admin_notes=_final_notes,
-                                        assigned_to=_final_assignee if _assignee_changed else None,
-                                    )
+                            if not _status_changed and not _assignee_changed and not _has_note:
+                                st.warning("Nothing changed.")
+                            else:
+                                with st.spinner("Updating..."):
                                     try:
-                                        if _status_changed:
-                                            notification_tools.notify_ticket_status(
-                                                _t["id"], _t["title"], _new_status, _user_name,
-                                                submitted_by=_t.get("submitted_by", ""),
-                                                assigned_to=_t.get("assigned_to", ""))
-                                        if _assignee_changed and _final_assignee:
-                                            notification_tools.notify_ticket_assigned(
-                                                _t["id"], _t["title"], _final_assignee, _user_name)
-                                        _cached_unread_count.clear()
-                                    except Exception:
-                                        pass
-                                    st.success(f"Ticket {_t['id']} updated.")
-                                    _cached_load_tickets.clear()
-                                    st.rerun()
-                                except Exception as _e:
-                                    st.error(f"Failed to update: {_e}")
+                                        _tkt.update_ticket(
+                                            _t["row_index"],
+                                            status=_new_status if _status_changed else None,
+                                            approved_by=_user_name if _status_changed and _new_status in ("Approved", "Rejected", "Closed") else None,
+                                            admin_notes=_final_notes,
+                                            assigned_to=_final_assignee if _assignee_changed else None,
+                                        )
+                                        try:
+                                            if _status_changed:
+                                                notification_tools.notify_ticket_status(
+                                                    _t["id"], _t["title"], _new_status, _user_name,
+                                                    submitted_by=_t.get("submitted_by", ""),
+                                                    assigned_to=_t.get("assigned_to", ""))
+                                            if _assignee_changed and _final_assignee:
+                                                notification_tools.notify_ticket_assigned(
+                                                    _t["id"], _t["title"], _final_assignee, _user_name)
+                                            _cached_unread_count.clear()
+                                        except Exception:
+                                            pass
+                                        st.success(f"Ticket {_t['id']} updated.")
+                                        _cached_load_tickets.clear()
+                                        st.rerun()
+                                    except Exception as _e:
+                                        st.error(f"Failed to update: {_e}")
 
             # ── Grid view (3 columns) ────────────────────────────────────────
             else:
@@ -5517,34 +5675,58 @@ with tab_tickets:
                                 _pc = _pri_colors.get(_ticket["priority"], _C["muted"])
                                 _sc = _st_colors.get(_ticket["status"], _C["muted"])
                                 _sb = _st_bg.get(_ticket["status"], "rgba(255,255,255,0.06)")
-                                _trunc_title = _ticket["title"][:60] + ("..." if len(_ticket["title"]) > 60 else "")
-                                _trunc_desc = _ticket["description"][:120] + ("..." if len(_ticket["description"]) > 120 else "")
-                                _ticket["_assignee_html"] = (
-                                    f"<span style='color:{_C['border']}'>&middot;</span>"
-                                    f"<span style='font-size:0.68rem;color:{_C['accent']}'>{_ticket.get('assigned_to', '')}</span>"
+                                _trunc_title = _ticket["title"][:65] + ("…" if len(_ticket["title"]) > 65 else "")
+
+                                # Activity line: last note timestamp + author
+                                _act_rel, _act_author, _act_dt = _get_last_activity(_ticket.get("admin_notes", ""))
+                                if _act_rel and _act_author:
+                                    _activity_str = f"Updated {_act_rel} by {_act_author}"
+                                else:
+                                    _activity_str = f"Submitted {_ticket['date'][:10]}"
+
+                                # Unread dot: last note is more recent than when Tickets tab was opened
+                                _is_unread = False
+                                if _act_dt is not None:
+                                    import time as _tmod2
+                                    _is_unread = _act_dt.timestamp() > _tk_list_ts
+
+                                _dot_html = (
+                                    f"<div style='width:6px;height:6px;border-radius:50%;"
+                                    f"background:{_C['accent']};flex-shrink:0;margin-top:1px'></div>"
+                                    if _is_unread else
+                                    "<div style='width:6px;flex-shrink:0'></div>"
+                                )
+
+                                # Assignee chip (if assigned)
+                                _assignee_chip = (
+                                    f"<span style='font-size:0.68rem;color:{_C['accent']};font-weight:500'>"
+                                    f"{_ticket.get('assigned_to','')}</span>"
                                 ) if _ticket.get("assigned_to") else ""
+
                                 st.markdown(
-                                    f"<div style='background:{_C['surface']};border:1px solid {_C['border']};"
-                                    f"border-top:3px solid {_pc};border-radius:8px;padding:14px 16px;"
-                                    f"min-height:160px;display:flex;flex-direction:column'>"
-                                    f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
-                                    f"<span style='font-family:DM Mono,monospace;font-size:0.7rem;color:{_C['subtle']}'>{_ticket['id']}</span>"
-                                    f"<span style='background:{_sb};color:{_sc};font-size:0.65rem;font-weight:600;"
-                                    f"padding:2px 8px;border-radius:9999px'>{_ticket['status']}</span>"
+                                    f"<div style='background:{_C['surface']};border:1px solid {_pc}33;"
+                                    f"border-radius:8px;padding:12px 14px;"
+                                    f"display:flex;flex-direction:column;gap:0'>"
+                                    # Top row: unread dot + ID + status badge
+                                    f"<div style='display:flex;align-items:center;gap:6px;margin-bottom:6px'>"
+                                    f"{_dot_html}"
+                                    f"<span style='font-family:DM Mono,monospace;font-size:0.68rem;"
+                                    f"color:{_C['subtle']}'>{_ticket['id']}</span>"
+                                    f"<span style='background:{_sb};color:{_sc};font-size:0.62rem;font-weight:600;"
+                                    f"padding:1px 7px;border-radius:9999px;margin-left:auto'>{_ticket['status']}</span>"
                                     f"</div>"
+                                    # Title row
                                     f"<div style='font-size:0.88rem;font-weight:600;color:{_C['text']};"
-                                    f"margin-bottom:6px;line-height:1.3'>{_trunc_title}</div>"
-                                    f"<div style='font-size:0.75rem;color:{_C['muted']};line-height:1.4;"
-                                    f"margin-bottom:auto;overflow:hidden;display:-webkit-box;"
-                                    f"-webkit-line-clamp:3;-webkit-box-orient:vertical'>{_trunc_desc}</div>"
-                                    f"<div style='display:flex;gap:6px;align-items:center;margin-top:10px;"
-                                    f"padding-top:8px;border-top:1px solid {_C['border']}'>"
+                                    f"line-height:1.3;margin-bottom:6px'>{_trunc_title}</div>"
+                                    # Activity line
+                                    f"<div style='font-size:0.72rem;color:{_C['muted']};margin-bottom:auto;"
+                                    f"line-height:1.4'>{_activity_str}</div>"
+                                    # Footer: project + assignee
+                                    f"<div style='display:flex;gap:6px;align-items:center;"
+                                    f"margin-top:8px;padding-top:7px;border-top:1px solid {_C['border']}'>"
                                     f"<span style='font-size:0.68rem;color:{_C['muted']}'>{_ticket['project']}</span>"
-                                    f"<span style='color:{_C['border']}'>&middot;</span>"
-                                    f"<span style='font-size:0.68rem;color:{_C['subtle']}'>{_ticket['submitted_by']}</span>"
-                                    f"{_ticket.get('_assignee_html', '')}"
-                                    f"<span style='font-size:0.68rem;color:{_C['subtle']};margin-left:auto'>{_ticket['date'][:10]}</span>"
-                                    f"</div>"
+                                    + (f"<span style='color:{_C['border']}'>&middot;</span>{_assignee_chip}" if _assignee_chip else "")
+                                    + f"</div>"
                                     f"</div>",
                                     unsafe_allow_html=True,
                                 )
@@ -5695,7 +5877,7 @@ with tab_tickets:
 
                         hub_ui.card(
                             f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:6px'>"
-                            f"<span style='font-family:Syne,sans-serif;font-size:0.95rem;font-weight:700;"
+                            f"<span style='font-family:\"Bricolage Grotesque\",sans-serif;font-size:0.95rem;font-weight:700;"
                             f"color:{_C['text']}'>{_um_name}</span>"
                             f"{_role_badge}{_writer_badge}"
                             f"</div>"

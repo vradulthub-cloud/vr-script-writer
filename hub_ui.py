@@ -13,8 +13,8 @@ COLORS = {
     "surface":      "#111113",
     "elevated":     "#18181b",
     # Borders
-    "border":       "rgba(255,255,255,0.07)",
-    "border_hover": "rgba(255,255,255,0.12)",
+    "border":       "rgba(255,255,255,0.09)",
+    "border_hover": "rgba(255,255,255,0.13)",
     # Text
     "text":         "#f0ede8",
     "muted":        "#888581",
@@ -39,18 +39,20 @@ COLORS = {
     "njoi":         "#f97316",
 }
 
+# Bricolage Grotesque (headings/display) + Figtree (body) via Google Fonts
+# DM Mono (code) also Google Fonts
 FONT_IMPORT = (
     "@import url('https://fonts.googleapis.com/css2?"
-    "family=Syne:wght@400;500;600;700;800&"
-    "family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600&"
-    "family=DM+Mono:wght@400;500&display=swap');"
+    "family=Bricolage+Grotesque:wdth,wght@75..100,400..800"
+    "&family=Figtree:wght@300;400;500;600;700"
+    "&family=DM+Mono:wght@400;500"
+    "&display=swap');"
 )
 
 
 # ── Logo (inline SVG recreation of the Eclatech icon + wordmark) ──────────────
 def _logo_svg(height=28, color_icon="#bed62f", color_text="#f0ede8"):
     """Inline SVG of the Eclatech icon — 3 horizontal bars with a curve."""
-    # Simplified geometric logo mark
     return (
         f'<svg height="{height}" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">'
         f'<rect x="2" y="4" width="20" height="5" rx="2.5" fill="{color_icon}"/>'
@@ -69,10 +71,11 @@ def global_css():
     return f"""<style>
 {FONT_IMPORT}
 
-/* ── Base theme overrides ──────────────────────────────────── */
+/* ── Base theme ────────────────────────────────────────────── */
 html, body, [data-testid="stAppViewContainer"] {{
-    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    font-family: 'Figtree', -apple-system, BlinkMacSystemFont, sans-serif !important;
     color: {c['text']} !important;
+    line-height: 1.65 !important;
 }}
 
 section[data-testid="stSidebar"] {{ display: none !important; }}
@@ -92,14 +95,33 @@ div[data-testid="stVerticalBlock"] > div {{ gap: 0.35rem; }}
 
 /* ── Typography ────────────────────────────────────────────── */
 h1, h2, h3 {{
-    font-family: 'Syne', sans-serif !important;
-    letter-spacing: -0.02em !important;
+    font-family: 'Bricolage Grotesque', sans-serif !important;
     color: {c['text']} !important;
+    line-height: 1.15 !important;
+}}
+
+h1 {{
+    font-size: 2.25rem !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.025em !important;
+}}
+
+h2 {{
+    font-size: 1.6rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.018em !important;
+}}
+
+h3 {{
+    font-size: 1.25rem !important;
+    font-weight: 600 !important;
+    letter-spacing: -0.010em !important;
 }}
 
 .stCaptionContainer p {{
     color: {c['muted']} !important;
     font-size: 0.78rem !important;
+    line-height: 1.5 !important;
 }}
 
 code, .stCodeBlock {{
@@ -112,8 +134,8 @@ code, .stCodeBlock {{
 }}
 
 [data-testid="stTabs"] button {{
-    font-family: 'DM Sans', sans-serif !important;
-    font-size: 0.82rem !important;
+    font-family: 'Figtree', sans-serif !important;
+    font-size: 0.85rem !important;
     font-weight: 500 !important;
     color: {c['muted']} !important;
     padding: 8px 16px !important;
@@ -129,6 +151,7 @@ code, .stCodeBlock {{
 
 [data-testid="stTabs"] button[aria-selected="true"] {{
     color: {c['text']} !important;
+    font-weight: 700 !important;
     border-bottom: 2px solid {c['accent']} !important;
     background: transparent !important;
 }}
@@ -143,8 +166,8 @@ code, .stCodeBlock {{
 
 /* ── Buttons ───────────────────────────────────────────────── */
 .stButton > button {{
-    font-family: 'DM Sans', sans-serif !important;
-    font-weight: 500 !important;
+    font-family: 'Figtree', sans-serif !important;
+    font-weight: 600 !important;
     font-size: 0.82rem !important;
     border-radius: 6px !important;
     border: 1px solid {c['border_hover']} !important;
@@ -155,15 +178,16 @@ code, .stCodeBlock {{
 
 .stButton > button:hover {{
     background: {c['elevated']} !important;
-    border-color: {c['accent']}44 !important;
+    border-color: rgba(190,214,47,0.26) !important;
 }}
 
 /* Primary / form submit buttons */
 .stFormSubmitButton > button {{
     background: {c['accent']} !important;
     color: #0a0a0b !important;
-    font-weight: 600 !important;
+    font-weight: 700 !important;
     border: none !important;
+    letter-spacing: 0.01em !important;
 }}
 
 .stFormSubmitButton > button:hover {{
@@ -174,7 +198,7 @@ code, .stCodeBlock {{
 [data-testid="stTextInput"] input,
 [data-testid="stTextArea"] textarea,
 .stSelectbox > div > div {{
-    font-family: 'DM Sans', sans-serif !important;
+    font-family: 'Figtree', sans-serif !important;
     border-radius: 6px !important;
 }}
 
@@ -186,7 +210,7 @@ code, .stCodeBlock {{
 }}
 
 [data-testid="stExpander"] summary {{
-    font-family: 'DM Sans', sans-serif !important;
+    font-family: 'Figtree', sans-serif !important;
     font-size: 0.85rem !important;
 }}
 
@@ -199,23 +223,24 @@ code, .stCodeBlock {{
 }}
 
 [data-testid="stMetric"] label {{
-    font-family: 'DM Sans', sans-serif !important;
+    font-family: 'Figtree', sans-serif !important;
     font-size: 0.72rem !important;
-    font-weight: 500 !important;
+    font-weight: 600 !important;
     color: {c['muted']} !important;
     text-transform: uppercase !important;
-    letter-spacing: 0.05em !important;
+    letter-spacing: 0.06em !important;
 }}
 
 [data-testid="stMetric"] [data-testid="stMetricValue"] {{
-    font-family: 'Syne', sans-serif !important;
-    font-weight: 700 !important;
+    font-family: 'Bricolage Grotesque', sans-serif !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.02em !important;
     color: {c['text']} !important;
 }}
 
 /* ── Download button ───────────────────────────────────────── */
 .stDownloadButton > button {{
-    font-family: 'DM Sans', sans-serif !important;
+    font-family: 'Figtree', sans-serif !important;
     font-weight: 500 !important;
     border-radius: 6px !important;
 }}
@@ -233,15 +258,15 @@ code, .stCodeBlock {{
 
 /* ── Custom component classes ──────────────────────────────── */
 .sh {{
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-size: 0.71rem;
+    font-weight: 800;
+    letter-spacing: 0.13em;
     text-transform: uppercase;
     color: {c['muted']};
-    border-bottom: 1px solid {c['border']};
-    padding-bottom: 4px;
-    margin: 16px 0 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+    padding-bottom: 5px;
+    margin: 20px 0 10px;
 }}
 
 .hub-card {{
@@ -252,18 +277,20 @@ code, .stCodeBlock {{
     margin: 4px 0;
 }}
 
+/* Full-border accent highlight — no left-stripe */
 .hub-card-accent {{
-    border-left: 3px solid {c['accent']};
+    border-color: rgba(190,214,47,0.28);
+    background: rgba(190,214,47,0.04);
 }}
 
 .hub-badge {{
     display: inline-block;
     padding: 2px 8px;
     border-radius: 9999px;
-    font-size: 0.7rem;
-    font-weight: 500;
-    font-family: 'DM Sans', sans-serif;
-    letter-spacing: 0.02em;
+    font-size: 0.68rem;
+    font-weight: 600;
+    font-family: 'Figtree', sans-serif;
+    letter-spacing: 0.03em;
 }}
 
 .hub-badge-green  {{ background: {c['green_dim']};  color: {c['green']}; }}
@@ -275,7 +302,7 @@ code, .stCodeBlock {{
 
 /* ── Segmented control (sub-nav) ──────────────────────────── */
 [data-testid="stSegmentedControl"] button {{
-    font-family: 'DM Sans', sans-serif !important;
+    font-family: 'Figtree', sans-serif !important;
     font-size: 0.8rem !important;
     font-weight: 500 !important;
     color: {c['muted']} !important;
@@ -285,7 +312,7 @@ code, .stCodeBlock {{
 
 [data-testid="stSegmentedControl"] button[aria-checked="true"] {{
     color: {c['text']} !important;
-    font-weight: 600 !important;
+    font-weight: 700 !important;
     background: {c['elevated']} !important;
 }}
 
@@ -296,7 +323,7 @@ code, .stCodeBlock {{
 
 /* ── Pills ─────────────────────────────────────────────────── */
 [data-testid="stPills"] button {{
-    font-family: 'DM Sans', sans-serif !important;
+    font-family: 'Figtree', sans-serif !important;
     font-size: 0.8rem !important;
 }}
 
@@ -310,6 +337,28 @@ code, .stCodeBlock {{
     border-color: {c['red']} !important;
 }}
 
+/* ── Accent button (primary action, lime) ─────────────────── */
+.accent-btn button {{
+    background: {c['accent']} !important;
+    color: #0a0a0b !important;
+    font-weight: 600 !important;
+    border: none !important;
+}}
+.accent-btn button:hover {{
+    background: #cce234 !important;
+}}
+
+/* ── st.button(type="primary") → lime ─────────────────────── */
+[data-testid="stBaseButton-primary"] {{
+    background: {c['accent']} !important;
+    color: #0a0a0b !important;
+    font-weight: 600 !important;
+    border: none !important;
+}}
+[data-testid="stBaseButton-primary"]:hover {{
+    background: #cce234 !important;
+}}
+
 </style>"""
 
 
@@ -319,7 +368,6 @@ def logo_header(user_name, unread_count=0):
     """Render the branded header bar: logo icon + ECLATECH HUB + bell + user + sign out."""
     c = COLORS
     icon = _logo_svg(height=24)
-    # Bell SVG icon (Heroicons outline bell)
     _bell_svg = (
         "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' "
         f"viewBox='0 0 24 24' stroke-width='1.8' stroke='{c['muted']}'>"
@@ -335,20 +383,20 @@ def logo_header(user_name, unread_count=0):
             f"<span style='position:absolute;top:-5px;right:-7px;min-width:15px;height:15px;"
             f"background:{c['red']};color:#fff;font-size:0.55rem;font-weight:700;"
             f"border-radius:8px;display:flex;align-items:center;justify-content:center;"
-            f"padding:0 3px;font-family:DM Sans,sans-serif'>{_count_text}</span>"
+            f"padding:0 3px;font-family:Figtree,sans-serif'>{_count_text}</span>"
         )
     st.markdown(
         f"<div style='display:flex;align-items:center;justify-content:space-between;"
         f"margin:0 0 8px;padding:4px 0;border-bottom:1px solid {c['border']}'>"
         f"<div style='display:flex;align-items:center;gap:10px'>"
         f"{icon}"
-        f"<span style='font-family:Syne,sans-serif;font-size:1.1rem;font-weight:700;"
-        f"letter-spacing:0.06em;color:{c['text']}'>ECLATECH</span>"
-        f"<span style='font-family:DM Sans,sans-serif;font-size:0.75rem;font-weight:400;"
+        f"<span style='font-family:\"Bricolage Grotesque\",sans-serif;font-size:1.2rem;font-weight:800;"
+        f"letter-spacing:0.04em;color:{c['text']}'>ECLATECH</span>"
+        f"<span style='font-family:Figtree,sans-serif;font-size:0.75rem;font-weight:400;"
         f"color:{c['muted']};margin-left:-4px'>HUB</span>"
         f"</div>"
         f"<div style='display:flex;align-items:center;gap:14px'>"
-        f"<span style='font-family:DM Sans,sans-serif;font-size:0.78rem;"
+        f"<span style='font-family:Figtree,sans-serif;font-size:0.78rem;"
         f"color:{c['muted']}'>{user_name}</span>"
         f"<div style='position:relative;cursor:pointer' class='notif-bell'>"
         f"{_bell_svg}{_badge_html}</div>"
@@ -368,8 +416,9 @@ def notification_panel(notifications, colors=None):
     for n in notifications:
         _is_read = n.get("read", False)
         _bg = c["surface"] if _is_read else c["elevated"]
-        _border_left = c["border"] if _is_read else c["accent"]
-        _opacity = "0.6" if _is_read else "1"
+        _dot_color = c["accent"] if not _is_read else "transparent"
+        _dot_border = f"border:1px solid {c['subtle']};" if _is_read else ""
+        _opacity = "0.65" if _is_read else "1"
         _time = n.get("timestamp", "")
         _type_icon = {
             "ticket_created": "🎟",
@@ -380,17 +429,22 @@ def notification_panel(notifications, colors=None):
             "qc_feedback": "🔍",
         }.get(n.get("type", ""), "🔔")
         st.markdown(
-            f"<div style='padding:8px 12px;margin-bottom:4px;background:{_bg};"
-            f"border-left:3px solid {_border_left};border-radius:4px;"
-            f"opacity:{_opacity};font-family:DM Sans,sans-serif'>"
+            f"<div style='display:flex;align-items:flex-start;gap:10px;"
+            f"padding:8px 10px;margin-bottom:4px;background:{_bg};"
+            f"border:1px solid {c['border']};border-radius:6px;"
+            f"opacity:{_opacity};font-family:Figtree,sans-serif'>"
+            f"<div style='flex-shrink:0;margin-top:5px;width:6px;height:6px;border-radius:50%;"
+            f"background:{_dot_color};{_dot_border}'></div>"
+            f"<div style='flex:1;min-width:0'>"
             f"<div style='display:flex;justify-content:space-between;align-items:center;"
             f"margin-bottom:2px'>"
             f"<span style='font-size:0.75rem;font-weight:600;color:{c['text']}'>"
             f"{_type_icon} {n.get('title', '')}</span>"
             f"<span style='font-size:0.62rem;color:{c['muted']}'>{_time}</span>"
             f"</div>"
-            f"<div style='font-size:0.7rem;color:{c['muted']}'>"
+            f"<div style='font-size:0.7rem;color:{c['muted']};line-height:1.4'>"
             f"{n.get('message', '')}</div>"
+            f"</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -403,9 +457,9 @@ def login_page():
     st.markdown(
         f"<div style='text-align:center;margin-top:140px'>"
         f"<div style='margin-bottom:16px'>{icon}</div>"
-        f"<div style='font-family:Syne,sans-serif;font-size:2rem;font-weight:800;"
+        f"<div style='font-family:\"Bricolage Grotesque\",sans-serif;font-size:2rem;font-weight:800;"
         f"letter-spacing:0.04em;color:{c['text']}'>ECLATECH</div>"
-        f"<div style='font-family:DM Sans,sans-serif;font-size:0.9rem;"
+        f"<div style='font-family:Figtree,sans-serif;font-size:0.9rem;"
         f"color:{c['muted']};margin:8px 0 40px'>Hub</div>"
         f"</div>",
         unsafe_allow_html=True,
@@ -417,11 +471,11 @@ def denied_page(email):
     c = COLORS
     st.markdown(
         f"<div style='text-align:center;margin-top:140px'>"
-        f"<div style='font-family:Syne,sans-serif;font-size:1.4rem;font-weight:700;"
+        f"<div style='font-family:\"Bricolage Grotesque\",sans-serif;font-size:1.4rem;font-weight:700;"
         f"color:{c['red']}'>Access Denied</div>"
-        f"<p style='font-family:DM Sans,sans-serif;color:{c['muted']};"
+        f"<p style='font-family:Figtree,sans-serif;color:{c['muted']};"
         f"margin:16px 0'>{email} is not authorized.</p>"
-        f"<p style='font-family:DM Sans,sans-serif;color:{c['subtle']};"
+        f"<p style='font-family:Figtree,sans-serif;color:{c['subtle']};"
         f"font-size:0.85rem'>Contact Drew for access.</p>"
         f"</div>",
         unsafe_allow_html=True,
@@ -434,9 +488,13 @@ def section(title):
 
 
 def card(html, accent=None):
-    """Bordered card container."""
+    """Bordered card container. Accent uses full-border highlight, not a left-stripe."""
     cls = "hub-card hub-card-accent" if accent else "hub-card"
-    border_style = f"border-left-color:{accent};" if accent else ""
+    if accent and accent != COLORS["accent"]:
+        # Custom studio color — full-border tint, no left-stripe
+        border_style = f"border-color:{accent}44;"
+    else:
+        border_style = ""
     st.markdown(f"<div class='{cls}' style='{border_style}'>{html}</div>",
                 unsafe_allow_html=True)
 
