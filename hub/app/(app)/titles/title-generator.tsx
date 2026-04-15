@@ -421,7 +421,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
               fontSize: 12,
             }}
           >
-            Title card{variations > 1 ? "s" : ""} will appear here
+            Your title cards will render here — cloud or local, your call.
           </div>
         )}
 

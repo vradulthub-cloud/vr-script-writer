@@ -567,7 +567,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
               fontSize: 12,
             }}
           >
-            Script output will appear here
+            Pick a studio, name your talent, and hit generate. The AI does the rest.
           </div>
         )}
 

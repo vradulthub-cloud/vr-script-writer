@@ -280,7 +280,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                   fontSize: 12,
                 }}
               >
-                Compilation ideas will appear here
+                Hit suggest and watch the ideas roll in. Pick one to start building.
               </div>
             )}
 

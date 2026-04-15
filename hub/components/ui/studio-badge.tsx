@@ -4,7 +4,7 @@ export function StudioBadge({ studio }: { studio: string }) {
   const color = studioColor(studio)
   return (
     <span
-      className="inline-flex items-center px-1.5 py-0.5 rounded-sm"
+      className="inline-flex items-center px-1.5 py-0.5 rounded-sm studio-badge-pop"
       style={{
         fontSize: 10,
         fontWeight: 600,

@@ -104,6 +104,7 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
               background: "var(--color-err)",
               color: "#fff",
               padding: "0 3px",
+              animation: "countBounce 0.4s var(--ease-out-quart)",
             }}
           >
             {unread > 99 ? "99+" : unread}

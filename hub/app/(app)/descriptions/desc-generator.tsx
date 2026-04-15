@@ -615,7 +615,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
               fontSize: 12,
             }}
           >
-            Description output will appear here
+            Add performers and categories, then generate. SEO-ready copy in seconds.
           </div>
         )}
 
