@@ -34,6 +34,12 @@ Thumbs.db
 
 # IDE / tools
 .claude/settings.local.json
+.claude/worktrees/
+
+# Next.js frontend
+hub/.next/
+hub/node_modules/
+hub/.env.local
 
 # Netlify
 .netlify/
@@ -44,3 +50,6 @@ pixoo-calendar/render.log
 pixoo-calendar/venv/
 pixoo-calendar/__pycache__/
 pixoo-calendar/*.json
+eclatech_hub.db*
+mega_scan_backup_*.json
+.env

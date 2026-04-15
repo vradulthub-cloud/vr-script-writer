@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+/* ─── Design tokens ───────────────────────────────────────────────────────── */
+@theme {
+  /* Surfaces */
+  --color-base:     #0d0d0d;
+  --color-surface:  #141414;
+  --color-elevated: #1c1c1c;
+  --color-border:   #242424;
+  --color-border-subtle: #1a1a1a;
+
+  /* Text */
+  --color-text:       #e8e8e8;
+  --color-text-muted: #888888;
+  --color-text-faint: #4a4a4a;
+
+  /* Primary action — lime green, use sparingly */
+  --color-lime:      #bed62f;
+  --color-lime-dim:  #8fa820;
+
+  /* Studio identity */
+  --color-fpvr:  #3b82f6;
+  --color-vrh:   #8b5cf6;
+  --color-vra:   #ec4899;
+  --color-njoi:  #f97316;
+
+  /* Status */
+  --color-ok:   #22c55e;
+  --color-warn: #eab308;
+  --color-err:  #ef4444;
+
+  /* Typography */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Spacing */
+  --spacing-sidebar: 220px;
+  --spacing-topbar:  48px;
+}
+
+/* ─── Base ────────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  height: 100%;
+  background-color: var(--color-base);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ─── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #333; }
+
+/* ─── Focus ring ──────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 1.5px solid var(--color-lime);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* ─── Selection ───────────────────────────────────────────────────────────── */
+::selection {
+  background: color-mix(in srgb, var(--color-lime) 25%, transparent);
+}
