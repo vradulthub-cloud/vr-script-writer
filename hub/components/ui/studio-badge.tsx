@@ -4,14 +4,14 @@ export function StudioBadge({ studio }: { studio: string }) {
   const color = studioColor(studio)
   return (
     <span
-      className="inline-flex items-center px-1.5 py-0.5 rounded-sm studio-badge-pop"
+      className="inline-flex items-center px-2 py-0.5 rounded studio-badge-pop"
       style={{
         fontSize: 10,
-        fontWeight: 600,
-        letterSpacing: "0.04em",
-        background: `color-mix(in srgb, ${color} 15%, transparent)`,
+        fontWeight: 700,
+        letterSpacing: "0.06em",
+        background: `color-mix(in srgb, ${color} 18%, transparent)`,
         color,
-        border: `1px solid color-mix(in srgb, ${color} 25%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`,
         textTransform: "uppercase",
       }}
     >

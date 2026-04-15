@@ -50,27 +50,34 @@ export default async function TicketsPage() {
             {/* Stats row */}
             {!error && (
               <div className="flex gap-3 mb-6 flex-wrap">
-                {STAT_CONFIGS.map(({ key, label, color }) => (
-                  <div
-                    key={key}
-                    className="rounded px-3 py-2"
-                    style={{
-                      background: "var(--color-surface)",
-                      border: "1px solid var(--color-border)",
-                      minWidth: 80,
-                    }}
-                  >
-                    <p
-                      className="font-semibold tabular-nums"
-                      style={{ fontSize: 20, color }}
+                {STAT_CONFIGS.map(({ key, label, color }) => {
+                  const count = stats[key] ?? 0
+                  return (
+                    <div
+                      key={key}
+                      className="rounded-lg px-4 py-3"
+                      style={{
+                        background: count > 0
+                          ? `color-mix(in srgb, ${color} 6%, var(--color-surface))`
+                          : "var(--color-surface)",
+                        border: `1px solid ${count > 0
+                          ? `color-mix(in srgb, ${color} 20%, transparent)`
+                          : "var(--color-border)"}`,
+                        minWidth: 90,
+                      }}
                     >
-                      {stats[key] ?? 0}
-                    </p>
-                    <p style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 1 }}>
-                      {label}
-                    </p>
-                  </div>
-                ))}
+                      <p
+                        className="font-bold tabular-nums"
+                        style={{ fontSize: 28, color, lineHeight: 1, letterSpacing: "-0.02em" }}
+                      >
+                        {count}
+                      </p>
+                      <p style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 4, fontWeight: 500, letterSpacing: "0.02em" }}>
+                        {label}
+                      </p>
+                    </div>
+                  )
+                })}
               </div>
             )}
 

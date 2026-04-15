@@ -70,13 +70,13 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
         }}
       >
         <span
-          className="font-bold tracking-tight"
-          style={{ fontSize: 14, color: "var(--color-lime)" }}
+          className="font-bold"
+          style={{ fontSize: 15, color: "var(--color-lime)", letterSpacing: "0.08em" }}
         >
           <span className="xl:hidden">E</span>
           <span className="hidden xl:inline">ECLATECH</span>
         </span>
-        <span className="hidden xl:inline" style={{ fontSize: 14, color: "var(--color-text-muted)" }}>
+        <span className="hidden xl:inline" style={{ fontSize: 13, color: "var(--color-text-faint)", fontWeight: 400, letterSpacing: "0.12em" }}>
           HUB
         </span>
       </div>
