@@ -1,14 +1,19 @@
 """
 Titles API router.
 
-Provides AI-powered title card generation via fal.ai Ideogram V3.
+Provides AI-powered title card generation via fal.ai Ideogram V3
+and local PIL-based model name card generation.
 
 Routes:
-  POST /api/titles/cloud — generate title card image via fal.ai Ideogram V3
+  POST /api/titles/cloud      — generate title card image via fal.ai Ideogram V3
+  POST /api/titles/model-name — generate model name PNG (VRA/VRH PIL renderer)
 """
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import io
 import logging
 
 import httpx
@@ -92,3 +97,46 @@ async def generate_cloud_title(body: TitleRequest, user: CurrentUser):
         results = await asyncio.gather(*tasks)
 
     return list(results)
+
+
+# ---------------------------------------------------------------------------
+# Model Name Generator
+# ---------------------------------------------------------------------------
+
+class ModelNameRequest(BaseModel):
+    name: str
+    studio: str = "VRH"   # "VRA" or "VRH"
+
+
+class ModelNameResponse(BaseModel):
+    data_url: str   # data:image/png;base64,...
+    error: str | None = None
+
+
+@router.post("/model-name", response_model=ModelNameResponse)
+async def generate_model_name(body: ModelNameRequest, user: CurrentUser):
+    """
+    Generate a styled model name PNG using the local PIL renderer (cta_generator).
+
+    VRA — BebasNeue, cyan fill, white stroke, drop shadow, bevel
+    VRH — Ethnocentric/Audiowide, teal fill, black stroke, bevel, inner glow
+
+    Returns a base64 data URL for direct use in <img src="..."/>.
+    """
+    def _render() -> bytes:
+        import sys
+        import os
+        # cta_generator lives in the project root (parent of api/)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        from cta_generator import generate_model_name_png
+        return generate_model_name_png(body.name.strip(), body.studio.upper())
+
+    try:
+        png_bytes = await asyncio.get_event_loop().run_in_executor(None, _render)
+        b64 = base64.b64encode(png_bytes).decode()
+        return ModelNameResponse(data_url=f"data:image/png;base64,{b64}")
+    except Exception as exc:
+        _log.exception("Model name render failed")
+        return ModelNameResponse(data_url="", error=str(exc))

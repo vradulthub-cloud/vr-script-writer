@@ -7,6 +7,8 @@ import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 
 const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
+const NAME_STUDIOS = ["VRA", "VRH"] as const
+type NameStudio = typeof NAME_STUDIOS[number]
 const STYLES = ["cinematic", "bold", "minimal"] as const
 type Style = typeof STYLES[number]
 
@@ -36,6 +38,13 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [results, setResults] = useState<TitleResult[]>([])
+
+  // Model name generator state
+  const [mnName, setMnName] = useState("")
+  const [mnStudio, setMnStudio] = useState<NameStudio>("VRH")
+  const [mnLoading, setMnLoading] = useState(false)
+  const [mnError, setMnError] = useState<string | null>(null)
+  const [mnDataUrl, setMnDataUrl] = useState<string | null>(null)
 
   const activeStudioColor = studio ? STUDIO_COLOR[studio] : undefined
 
@@ -72,6 +81,39 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function generateModelName() {
+    if (!mnName.trim()) return
+    setMnLoading(true)
+    setMnError(null)
+    setMnDataUrl(null)
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/titles/model-name`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
+        body: JSON.stringify({ name: mnName.trim(), studio: mnStudio }),
+      })
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => "")}`)
+      const data = await res.json() as { data_url: string; error?: string }
+      if (data.error) throw new Error(data.error)
+      setMnDataUrl(data.data_url)
+    } catch (e) {
+      setMnError(e instanceof Error ? e.message : "Render failed")
+    } finally {
+      setMnLoading(false)
+    }
+  }
+
+  function downloadModelName() {
+    if (!mnDataUrl) return
+    const a = document.createElement("a")
+    a.href = mnDataUrl
+    a.download = `${mnStudio}-${mnName.trim().replace(/\s+/g, "")}.png`
+    a.click()
   }
 
   function downloadImage(url: string, index: number) {
@@ -219,7 +261,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
       </div>
 
       {/* ── Right — output ── */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 24 }}>
         {error && <ErrorAlert className="mb-3">{error}</ErrorAlert>}
 
         {loading && (
@@ -298,6 +340,118 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
             ))}
           </div>
         )}
+
+        {/* ── Model Name Generator ── */}
+        <div style={{ borderTop: "1px solid var(--color-border)", paddingTop: 20 }}>
+          <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>
+            Model Name Generator
+          </p>
+
+          {/* Controls row */}
+          <div className="flex gap-2 items-end mb-3">
+            {/* Studio toggle */}
+            <div>
+              <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Studio</label>
+              <div className="flex gap-1">
+                {NAME_STUDIOS.map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setMnStudio(s)}
+                    className="px-3 py-1.5 rounded text-xs transition-colors font-semibold"
+                    style={{
+                      background: mnStudio === s ? "var(--color-elevated)" : "transparent",
+                      color: mnStudio === s
+                        ? s === "VRA" ? "#ec4899" : "#8b5cf6"
+                        : "var(--color-text-faint)",
+                      border: `1px solid ${mnStudio === s ? "var(--color-border)" : "transparent"}`,
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Name input */}
+            <div style={{ flex: 1 }}>
+              <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Model name</label>
+              <input
+                type="text"
+                value={mnName}
+                onChange={e => setMnName(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && generateModelName()}
+                placeholder="e.g. Emma Rosie"
+                className="w-full px-2.5 py-1.5 rounded text-xs outline-none"
+                style={{
+                  background: "var(--color-surface)",
+                  border: "1px solid var(--color-border)",
+                  color: "var(--color-text)",
+                }}
+              />
+            </div>
+
+            {/* Generate button */}
+            <button
+              onClick={generateModelName}
+              disabled={mnLoading || !mnName.trim()}
+              className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+              style={{
+                background: mnLoading ? "var(--color-elevated)" : "var(--color-lime)",
+                color: mnLoading ? "var(--color-text-muted)" : "#0d0d0d",
+                cursor: mnLoading ? "wait" : "pointer",
+                opacity: (!mnName.trim() && !mnLoading) ? 0.5 : 1,
+                whiteSpace: "nowrap",
+                marginBottom: 1,
+              }}
+            >
+              {mnLoading ? "Rendering…" : "Generate"}
+            </button>
+          </div>
+
+          {mnError && <ErrorAlert className="mb-3">{mnError}</ErrorAlert>}
+
+          {/* Result */}
+          {mnDataUrl && (
+            <div>
+              {/* Transparent bg preview — dark checkerboard */}
+              <div
+                className="rounded overflow-hidden mb-2"
+                style={{
+                  border: "1px solid var(--color-border)",
+                  background: "repeating-conic-gradient(#1a1a1a 0% 25%, #111 0% 50%) 0 0 / 16px 16px",
+                }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={mnDataUrl}
+                  alt={`${mnStudio} name card: ${mnName}`}
+                  style={{ width: "100%", display: "block" }}
+                />
+              </div>
+              <button
+                onClick={downloadModelName}
+                className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+                style={{ background: "var(--color-lime)", color: "#0d0d0d" }}
+              >
+                Download {mnStudio} — {mnName}
+              </button>
+            </div>
+          )}
+
+          {!mnDataUrl && !mnLoading && (
+            <div
+              className="rounded flex items-center justify-center"
+              style={{
+                height: 80,
+                border: "1px dashed var(--color-border)",
+                color: "var(--color-text-faint)",
+                fontSize: 12,
+              }}
+            >
+              Name card will appear here
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
