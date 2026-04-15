@@ -24,7 +24,7 @@ export default async function DescriptionsPage() {
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="page-header">
         <h1 className="tracking-tight">
           Description Generator
         </h1>

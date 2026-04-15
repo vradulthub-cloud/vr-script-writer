@@ -24,7 +24,7 @@ export default async function ScriptsPage() {
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="page-header">
         <h1 className="tracking-tight">
           Script Generator
         </h1>

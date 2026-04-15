@@ -33,7 +33,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           minHeight: "100vh",
         }}
       >
-        <div className="p-6">{children}</div>
+        <div style={{ padding: "28px 32px 40px" }}>{children}</div>
       </main>
     </div>
   )

@@ -19,7 +19,7 @@ export default async function CompilationsPage() {
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="page-header">
         <h1 className="tracking-tight">
           Compilation Builder
         </h1>

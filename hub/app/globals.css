@@ -175,6 +175,21 @@ main > div {
   animation: fadeIn var(--duration-slow) var(--ease-out-expo) both;
 }
 
+/* Sticky table headers */
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--color-surface);
+}
+
+/* Page header spacing — generous gap before content */
+.page-header {
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+
 /* Dropdown menus */
 [data-dropdown] {
   animation: dropdownIn var(--duration-base) var(--ease-out-expo) both;

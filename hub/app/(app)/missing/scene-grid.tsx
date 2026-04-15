@@ -109,7 +109,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error, idToken: server
   return (
     <div>
       {/* Filter bar */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
+      <div className="flex items-center gap-3 mb-5 flex-wrap">
         <FilterTabs
           options={STUDIOS}
           value={studio}
