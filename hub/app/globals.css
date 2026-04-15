@@ -250,11 +250,81 @@ button[style*="color-lime"]:hover:not(:disabled) {
   animation: shimmer 1.5s infinite;
 }
 
-/* ─── Responsive sidebar ──────────────────────────────────────────────────── */
-/* Below 1280px: collapse to icon-only rail (sidebar.tsx hides labels) */
+/* ─── Responsive ─────────────────────────────────────────────────────────── */
+
+/* Tablet: icon-only sidebar rail */
 @media (max-width: 1279px) {
   :root {
     --spacing-sidebar: 52px;
+  }
+}
+
+/* Mobile: hide sidebar entirely, stack layout */
+@media (max-width: 767px) {
+  :root {
+    --spacing-sidebar: 0px;
+    --spacing-topbar: 56px;
+  }
+
+  /* Hide the sidebar on mobile */
+  aside {
+    display: none !important;
+  }
+
+  /* Full-width topbar */
+  header {
+    left: 0 !important;
+  }
+
+  /* Tighter content padding */
+  main > div {
+    padding: 20px 16px 32px !important;
+  }
+
+  /* Scale down headings */
+  h1 {
+    font-size: 1.375rem !important; /* 22px instead of 28px */
+  }
+
+  /* Subtitle wrapping */
+  h1 + p {
+    font-size: 0.625rem !important; /* 10px */
+  }
+
+  /* Tables scroll horizontally */
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  thead, tbody, tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  /* Filter tabs wrap tighter */
+  .flex-wrap {
+    gap: 6px !important;
+  }
+
+  /* Smaller stat cards */
+  .tabular-nums {
+    font-size: 22px !important;
+  }
+
+  /* Bottom padding for mobile nav */
+  main > div {
+    padding-bottom: 80px !important;
+  }
+
+  /* Two-panel layouts stack on mobile */
+  .flex.gap-6 {
+    flex-direction: column !important;
+  }
+  .flex.gap-6 > div:first-child {
+    width: 100% !important;
   }
 }
 
