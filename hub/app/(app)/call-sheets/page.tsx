@@ -301,7 +301,7 @@ export default function CallSheetsPage() {
     <div>
       <div className="mb-5 flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-semibold tracking-tight" style={{ fontSize: 16, color: "var(--color-text)" }}>
+          <h1 className="tracking-tight">
             Call Sheets
           </h1>
           <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>

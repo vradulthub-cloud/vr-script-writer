@@ -17,7 +17,7 @@ export function ApprovalsPageShell({ pendingCount, children }: Props) {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="font-semibold tracking-tight" style={{ fontSize: 16, color: "var(--color-text)" }}>
+          <h1 className="tracking-tight">
             {tab === "review" ? "Approvals" : "Submit for Approval"}
           </h1>
           <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>

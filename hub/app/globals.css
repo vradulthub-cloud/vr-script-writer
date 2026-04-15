@@ -31,7 +31,15 @@
 
   /* Typography */
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display), var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Type scale — 1.25 ratio, 5 steps */
+  --text-xs:    0.6875rem;   /* 11px — captions, metadata */
+  --text-sm:    0.75rem;     /* 12px — secondary, labels */
+  --text-base:  0.875rem;    /* 14px — body */
+  --text-lg:    1.125rem;    /* 18px — subheadings */
+  --text-xl:    1.375rem;    /* 22px — page headings */
 
   /* Spacing */
   --spacing-sidebar: 220px;
@@ -53,9 +61,22 @@ body {
   background-color: var(--color-base);
   color: var(--color-text);
   font-family: var(--font-sans);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: var(--text-base);
+  line-height: 1.4;
+  font-feature-settings: "kern" 1, "liga" 1;
+  text-rendering: optimizeLegibility;
 }
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+h1 { font-size: var(--text-xl); }
+h2 { font-size: var(--text-lg); }
+h3 { font-size: var(--text-base); font-weight: 600; }
 
 /* ─── Scrollbar ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

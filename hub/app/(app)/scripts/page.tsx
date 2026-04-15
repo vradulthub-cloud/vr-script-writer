@@ -25,7 +25,7 @@ export default async function ScriptsPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="font-semibold tracking-tight" style={{ fontSize: 16, color: "var(--color-text)" }}>
+        <h1 className="tracking-tight">
           Script Generator
         </h1>
         <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>

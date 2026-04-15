@@ -25,7 +25,7 @@ export default async function MissingPage() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="font-semibold tracking-tight" style={{ fontSize: 16, color: "var(--color-text)" }}>
+          <h1 className="tracking-tight">
             Missing Assets
           </h1>
           <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
