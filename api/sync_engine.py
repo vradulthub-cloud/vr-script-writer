@@ -482,10 +482,19 @@ def sync_bookings() -> int:
                 if location:     parts.append(f"Location: {location}")
                 info = " · ".join(parts)
 
+                # Store all sheet columns as a header-keyed dict so the API
+                # can expose platform stats (SLR/VRP followers, etc.) without re-syncing.
+                row_dict = {
+                    header_row[i].strip().lower(): row[i].strip()
+                    for i in range(min(len(header_row), len(row)))
+                    if i < len(header_row) and header_row[i].strip()
+                    and i < len(row) and row[i].strip()
+                }
+
                 conn.execute(
                     """INSERT INTO bookings (name, agency, agency_link, rate, rank, notes, info, raw_json)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (name, agency_name, agency_link, rate, rank, notes, info, json.dumps(row)),
+                    (name, agency_name, agency_link, rate, rank, notes, info, json.dumps(row_dict)),
                 )
                 total_count += 1
 

@@ -1,100 +1,64 @@
 "use client"
 
-import { useState, useMemo, useDeferredValue, useCallback } from "react"
-import { ErrorAlert } from "@/components/ui/error-alert"
-import { api, type Model, type ModelProfile } from "@/lib/api"
+import { useState, useMemo, useCallback, useRef } from "react"
+import { api, type Model, type ModelProfile, type TrendingModel } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 
-// ─── Rank config ─────────────────────────────────────────────────────────────
+// ─── Priority outreach (hardcoded) ───────────────────────────────────────────
 
-const RANK_CONFIG: Record<string, { label: string; color: string }> = {
-  great:    { label: "Great",    color: "#22c55e" },
-  good:     { label: "Good",     color: "#bed62f" },
-  moderate: { label: "Mod",      color: "#eab308" },
-  poor:     { label: "Poor",     color: "#ef4444" },
-}
-
-// ─── Bio fields to display (in order) ────────────────────────────────────────
-
-const BIO_FIELDS: { key: string; label: string }[] = [
-  { key: "age",          label: "Age"          },
-  { key: "birthday",     label: "Born"         },
-  { key: "ethnicity",    label: "Ethnicity"    },
-  { key: "height",       label: "Height"       },
-  { key: "weight",       label: "Weight"       },
-  { key: "measurements", label: "Measurements" },
-  { key: "hair",         label: "Hair"         },
-  { key: "eyes",         label: "Eyes"         },
-  { key: "nationality",  label: "Nationality"  },
-  { key: "birthplace",   label: "From"         },
-  { key: "years active", label: "Active"       },
-  { key: "sexuality",    label: "Sexuality"    },
-  { key: "body type",    label: "Body type"    },
+const PRIORITY: { name: string; agency: string }[] = [
+  { name: "Leah Gotti",       agency: "Invision Models"   },
+  { name: "Alex Blake",       agency: "Hussie Models"     },
+  { name: "Melissa Stratton", agency: "Hussie Models"     },
+  { name: "Kenzie Reeves",    agency: "East Coast Talent" },
+  { name: "Kali Roses",       agency: "The Model Service" },
+  { name: "Haley Reed",       agency: "ATMLA"             },
+  { name: "Karma RX",         agency: "ATMLA"             },
+  { name: "Cory Chase",       agency: "ATMLA"             },
+  { name: "Valentina Nappi",  agency: "Speigler"          },
+  { name: "Karlee Grey",      agency: "ATMLA"             },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function scoreColor(score: number): string {
-  if (score >= 75) return "#22c55e"
-  if (score >= 50) return "#bed62f"
-  if (score >= 30) return "#eab308"
+function scoreColor(s: number) {
+  if (s >= 70) return "#22c55e"
+  if (s >= 50) return "#bed62f"
+  if (s >= 30) return "#eab308"
   return "#6b7280"
 }
 
-function parseActs(notes: string): string[] {
-  if (!notes) return []
-  if (notes.includes(",")) return notes.split(",").map(a => a.trim()).filter(Boolean)
-  return [notes.trim()]
+function babepediaUrl(name: string) {
+  return `https://www.babepedia.com/pics/${name.trim().split(/\s+/).map(w => w[0].toUpperCase() + w.slice(1).toLowerCase()).join("_")}.jpg`
 }
 
-function urgencyLabel(lastBooked: string): { text: string; color: string } {
-  if (!lastBooked) return { text: "Never booked", color: "#22c55e" }
-  const match = lastBooked.match(/(\w+)\s+(\d{4})/)
-  if (!match) return { text: lastBooked, color: "var(--color-text-muted)" }
-  const months = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"]
-  const mIdx = months.indexOf(match[1].toLowerCase().slice(0, 3))
-  const yr = parseInt(match[2])
-  if (mIdx === -1 || isNaN(yr)) return { text: lastBooked, color: "var(--color-text-muted)" }
-  const now = new Date()
-  const ago = (now.getFullYear() - yr) * 12 + (now.getMonth() - mIdx)
-  if (ago > 36) return { text: lastBooked, color: "#22c55e" }
-  if (ago > 24) return { text: lastBooked, color: "#bed62f" }
-  if (ago > 12) return { text: lastBooked, color: "#eab308" }
-  if (ago > 6)  return { text: lastBooked, color: "#f97316" }
-  return { text: lastBooked, color: "#ef4444" }
+function initials(name: string) {
+  return name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase()).join("")
 }
 
-// ─── Babepedia portrait URL (Title_Case_Underscores.jpg) ─────────────────────
-
-function buildPhotoUrl(name: string): string {
-  const slug = name.trim().split(/\s+/)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join("_")
-  return `https://www.babepedia.com/pics/${slug}.jpg`
+const RANK_COLOR: Record<string, string> = {
+  great: "#22c55e", good: "#bed62f", moderate: "#eab308", poor: "#ef4444",
 }
 
-// ─── Circular photo with initials fallback ────────────────────────────────────
+// ─── Photo component ──────────────────────────────────────────────────────────
 
-function ModelPhoto({ name, photoUrl, size = 28 }: { name: string; photoUrl?: string; size?: number }) {
+function Photo({ src, name, width, height, radius = 4, objectPos = "50% 15%" }: {
+  src: string; name: string; width: number | string; height: number; radius?: number; objectPos?: string
+}) {
   const [failed, setFailed] = useState(false)
-  const initials = name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase()).join("")
-  const src = photoUrl || buildPhotoUrl(name)
+  const ini = initials(name)
 
-  if (failed) {
+  if (failed || !src) {
     return (
-      <div
-        aria-hidden="true"
-        style={{
-          width: size, height: size, borderRadius: "50%",
-          background: "var(--color-elevated)",
-          border: "1px solid var(--color-border)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: Math.round(size * 0.38), fontWeight: 600,
-          color: "var(--color-text-faint)",
-          flexShrink: 0, userSelect: "none",
-        }}
-      >
-        {initials}
+      <div style={{
+        width, height, borderRadius: radius,
+        background: "var(--color-elevated)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: typeof width === "number" ? Math.round(Number(width) * 0.28) : 28,
+        fontWeight: 700, color: "var(--color-text-faint)",
+        flexShrink: 0,
+      }}>
+        {ini}
       </div>
     )
   }
@@ -106,443 +70,599 @@ function ModelPhoto({ name, photoUrl, size = 28 }: { name: string; photoUrl?: st
       aria-hidden="true"
       onError={() => setFailed(true)}
       style={{
-        width: size, height: size, borderRadius: "50%",
-        objectFit: "cover", objectPosition: "50% 10%",
-        flexShrink: 0,
-        border: "1px solid var(--color-border)",
+        width, height, borderRadius: radius, flexShrink: 0,
+        objectFit: "cover", objectPosition: objectPos, display: "block",
       }}
     />
   )
 }
 
-// ─── Top Outreach card ─────────────────────────────────────────────────────────
+// ─── Model card (trending / priority) ────────────────────────────────────────
 
-function OutreachCard({
-  model, isActive, onClick,
-}: {
-  model: Model
-  isActive: boolean
-  onClick: () => void
+function ModelCard({ name, photoSrc, statLine, score, onView }: {
+  name: string; photoSrc: string; statLine: string; score?: number; onView: () => void
 }) {
-  const [imgFailed, setImgFailed] = useState(false)
-  const initials = model.name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase()).join("")
-  const urgency = urgencyLabel(model.last_booked)
-  const rankCfg = RANK_CONFIG[model.rank.toLowerCase()]
-
   return (
-    <button
-      onClick={onClick}
-      aria-pressed={isActive}
-      className="text-left w-full"
-      style={{
-        position: "relative",
-        borderRadius: 8,
-        overflow: "hidden",
-        background: "var(--color-surface)",
-        border: `1px solid ${isActive ? "var(--color-lime)" : "var(--color-border)"}`,
-        cursor: "pointer",
-        padding: 0,
-        transition: "border-color 0.15s",
-        display: "block",
-      }}
-      onMouseEnter={e => {
-        if (!isActive) (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.18)"
-      }}
-      onMouseLeave={e => {
-        if (!isActive) (e.currentTarget as HTMLElement).style.borderColor = "var(--color-border)"
-      }}
-    >
-      {imgFailed ? (
-        <div style={{
-          height: 150,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          background: "var(--color-elevated)",
-          fontSize: 30, fontWeight: 700, color: "var(--color-text-faint)",
-        }}>
-          {initials}
-        </div>
-      ) : (
-        <img
-          src={buildPhotoUrl(model.name)}
-          alt=""
-          aria-hidden="true"
-          onError={() => setImgFailed(true)}
-          style={{
-            width: "100%", height: 150,
-            objectFit: "cover", objectPosition: "50% 10%",
-            display: "block",
-          }}
-        />
-      )}
+    <div style={{
+      borderRadius: 8, overflow: "hidden",
+      background: "var(--color-surface)",
+      border: "1px solid var(--color-border)",
+      display: "flex", flexDirection: "column",
+    }}>
+      {/* Photo */}
+      <div style={{ position: "relative", flexShrink: 0 }}>
+        <Photo src={photoSrc} name={name} width="100%" height={180} radius={0} objectPos="50% 15%" />
 
-      <div style={{
-        position: "absolute", top: 6, right: 6,
-        background: scoreColor(model.opportunity_score),
-        color: "#000",
-        borderRadius: 10, padding: "1px 6px",
-        fontSize: 10, fontWeight: 700, lineHeight: "16px",
-      }}>
-        {model.opportunity_score}
-      </div>
-
-      {rankCfg && model.rank.toLowerCase() !== "moderate" && model.rank.toLowerCase() !== "poor" && (
-        <div style={{
-          position: "absolute", top: 6, left: 6,
-          background: `color-mix(in srgb, ${rankCfg.color} 18%, rgba(0,0,0,0.7))`,
-          color: rankCfg.color,
-          border: `1px solid color-mix(in srgb, ${rankCfg.color} 35%, transparent)`,
-          borderRadius: 4, padding: "1px 5px",
-          fontSize: 9, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase",
-        }}>
-          {rankCfg.label}
-        </div>
-      )}
-
-      <div style={{
-        position: "absolute", bottom: 0, left: 0, right: 0,
-        background: "linear-gradient(transparent, rgba(0,0,0,0.88))",
-        padding: "24px 8px 8px",
-      }}>
-        <div style={{
-          fontSize: 11, fontWeight: 700, color: "#f0ede8",
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-        }}>
-          {model.name}
-        </div>
-        <div style={{
-          fontSize: 10, marginTop: 1,
-          color: urgency.color,
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-        }}>
-          {urgency.text === "Never booked" ? "Never booked" : model.agency || urgency.text}
-        </div>
-      </div>
-    </button>
-  )
-}
-
-// ─── Scene strip (horizontal scroll row) ─────────────────────────────────────
-
-function SceneStrip({ scenes, platform }: {
-  scenes: ModelProfile["slr_scenes"]
-  platform: "SLR" | "VRP"
-}) {
-  if (!scenes.length) {
-    return (
-      <p style={{ fontSize: 11, color: "var(--color-text-faint)", padding: "4px 0" }}>
-        No scenes found
-      </p>
-    )
-  }
-
-  return (
-    <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
-      {scenes.map((scene, i) => (
-        <a
-          key={i}
-          href={scene.url || undefined}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={e => { if (!scene.url) e.preventDefault() }}
-          style={{
-            flexShrink: 0,
-            width: 140,
-            borderRadius: 4,
-            overflow: "hidden",
-            background: "var(--color-elevated)",
-            border: "1px solid var(--color-border-subtle)",
-            textDecoration: "none",
-            display: "block",
-          }}
-        >
-          {scene.thumb ? (
-            <img
-              src={scene.thumb}
-              alt=""
-              aria-hidden="true"
-              style={{ width: "100%", height: 78, objectFit: "cover", display: "block" }}
-              onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
-            />
-          ) : (
-            <div style={{
-              width: "100%", height: 78,
-              background: "var(--color-border)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              <span style={{ fontSize: 9, color: "var(--color-text-faint)" }}>{platform}</span>
-            </div>
-          )}
-          <div style={{ padding: "5px 6px 6px" }}>
-            <div className="line-clamp-2" style={{
-              fontSize: 10, fontWeight: 500,
-              color: "var(--color-text-muted)",
-              lineHeight: 1.35,
-            }}>
-              {scene.title}
-            </div>
-            {(scene.date || scene.duration) && (
-              <div style={{ fontSize: 9, color: "var(--color-text-faint)", marginTop: 3 }}>
-                {[scene.date, scene.duration].filter(Boolean).join(" · ")}
-              </div>
-            )}
+        {score !== undefined && (
+          <div style={{
+            position: "absolute", top: 6, right: 6,
+            background: scoreColor(score), color: "#000",
+            borderRadius: 10, padding: "2px 7px",
+            fontSize: 10, fontWeight: 700, lineHeight: "16px",
+          }}>
+            {score}
           </div>
-        </a>
-      ))}
+        )}
+
+        {/* Gradient overlay */}
+        <div style={{
+          position: "absolute", bottom: 0, left: 0, right: 0,
+          background: "linear-gradient(transparent, rgba(0,0,0,0.85))",
+          padding: "28px 8px 8px",
+        }}>
+          <div style={{
+            fontSize: 12, fontWeight: 700, color: "#f0ede8",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {name}
+          </div>
+          <div style={{
+            fontSize: 10, color: "rgba(255,255,255,0.6)", marginTop: 1,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {statLine}
+          </div>
+        </div>
+      </div>
+
+      {/* View button */}
+      <button
+        onClick={onView}
+        style={{
+          background: "var(--color-elevated)",
+          border: "none", borderTop: "1px solid var(--color-border-subtle)",
+          color: "var(--color-text-muted)",
+          fontSize: 11, fontWeight: 500,
+          padding: "7px 0", cursor: "pointer", width: "100%",
+          transition: "background 0.12s, color 0.12s",
+        }}
+        onMouseEnter={e => {
+          (e.currentTarget as HTMLElement).style.background = "var(--color-lime)"
+          ;(e.currentTarget as HTMLElement).style.color = "#000"
+        }}
+        onMouseLeave={e => {
+          (e.currentTarget as HTMLElement).style.background = "var(--color-elevated)"
+          ;(e.currentTarget as HTMLElement).style.color = "var(--color-text-muted)"
+        }}
+      >
+        View
+      </button>
     </div>
   )
 }
 
-// ─── Expanded profile panel ───────────────────────────────────────────────────
+// ─── Scene card ───────────────────────────────────────────────────────────────
 
-function ProfilePanel({
-  model,
-  profile,
-  loading,
-  onRefresh,
-}: {
+function SceneCard({ scene }: { scene: ModelProfile["slr_scenes"][0] }) {
+  return (
+    <div style={{
+      display: "flex", gap: 10,
+      padding: "10px 0",
+      borderBottom: "1px solid var(--color-border-subtle)",
+    }}>
+      {/* Thumb */}
+      {scene.thumb ? (
+        <a href={scene.url || undefined} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0 }}>
+          <img
+            src={scene.thumb} alt=""
+            style={{ width: 120, height: 68, objectFit: "cover", borderRadius: 4, display: "block" }}
+            onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
+          />
+        </a>
+      ) : (
+        <div style={{
+          width: 120, height: 68, borderRadius: 4,
+          background: "var(--color-elevated)", flexShrink: 0,
+        }} />
+      )}
+
+      {/* Info */}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        {scene.url ? (
+          <a
+            href={scene.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text)", textDecoration: "none",
+                     display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" } as React.CSSProperties}
+          >
+            {scene.title}
+          </a>
+        ) : (
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text)" }}>
+            {scene.title}
+          </div>
+        )}
+
+        <div style={{ fontSize: 11, color: "var(--color-text-faint)", marginTop: 3 }}>
+          {[scene.studio && `🎬 ${scene.studio}`, scene.date && `📅 ${scene.date}`, scene.duration && `⏱ ${scene.duration}`]
+            .filter(Boolean).join("  ·  ")}
+        </div>
+        {(scene.views || scene.likes || scene.comments) && (
+          <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 2 }}>
+            {[scene.views && `👁 ${scene.views}`, scene.likes && `❤️ ${scene.likes}`, scene.comments && `💬 ${scene.comments}`]
+              .filter(Boolean).join("  ·  ")}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Profile view ─────────────────────────────────────────────────────────────
+
+function ProfileView({ model, profile, loading, onBack, onRefresh, onBrief, briefText, briefLoading }: {
   model: Model
   profile: ModelProfile | null
   loading: boolean
+  onBack: () => void
   onRefresh: () => void
+  onBrief: (ctx: Record<string, string>) => void
+  briefText: string
+  briefLoading: boolean
 }) {
-  const urgency = urgencyLabel(model.last_booked)
-  const rankCfg = RANK_CONFIG[model.rank.toLowerCase()]
-  const acts = parseActs(model.notes)
-  const isActualActList = model.notes.includes(",")
+  const [briefOpen, setBriefOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<"slr" | "vrp">("slr")
 
-  // Bio fields with values
-  const bioRows = BIO_FIELDS
-    .map(f => ({ label: f.label, value: profile?.bio[f.key] ?? "" }))
-    .filter(r => r.value)
+  const sd = model.sheet_data
+  const bio = profile?.bio ?? {}
+  const bh  = profile?.booking_history
 
-  const hasScrapedData = profile && (
-    profile.photo_url || bioRows.length > 0 ||
-    profile.slr_scenes.length > 0 || profile.vrp_scenes.length > 0
-  )
+  const rankColor = RANK_COLOR[(model.rank || "").toLowerCase()] || "var(--color-text-faint)"
+
+  // Stats table rows
+  const bookingStats = [
+    sd["avg rate"] && ["💰 Rate", sd["avg rate"]],
+    model.bookings_count && ["📋 Bookings", model.bookings_count],
+    model.last_booked && ["📅 Last Booked", model.last_booked],
+    model.location && ["📍 Location", model.location],
+    sd["status"] && ["✅ Status", sd["status"]],
+  ].filter(Boolean) as [string, string][]
+
+  const platformStats = [
+    sd["slr followers"] && ["👥 SLR Followers", sd["slr followers"]],
+    sd["slr scenes"]    && ["🎬 SLR Scenes",    sd["slr scenes"]],
+    sd["slr views"]     && ["👁 SLR Views",      sd["slr views"]],
+    sd["vrp followers"] && ["👥 VRP Followers",  sd["vrp followers"]],
+    sd["vrp views"]     && ["👁 VRP Views",       sd["vrp views"]],
+    sd["povr views"]    && ["👁 POVR Views",      sd["povr views"]],
+  ].filter(Boolean) as [string, string][]
+
+  const socialStats = [
+    sd["onlyfans"]  && ["🔞 OnlyFans",  sd["onlyfans"]],
+    sd["twitter"]   && ["𝕏 Twitter",    sd["twitter"]],
+    sd["instagram"] && ["📸 Instagram", sd["instagram"]],
+  ].filter(Boolean) as [string, string][]
+
+  const BIO_KEYS: [string | null, string | null, string][] = [
+    [null,             "birthday",    "Born"],
+    [null,             "birthplace",  "Birthplace"],
+    [null,             "nationality", "Nationality"],
+    [null,             "ethnicity",   "Ethnicity"],
+    ["height",         "height",      "Height"],
+    ["weight",         "weight",      "Weight"],
+    ["measurements",   "measurements","Measurements"],
+    [null,             "bra/cup size","Bra / Cup"],
+    ["hair",           "hair",        "Hair"],
+    ["eyes",           "eyes",        "Eyes"],
+    [null,             "years active","Years Active"],
+  ]
+  const physStats = BIO_KEYS.map(([bk, bk2, label]) => {
+    const val = (bk ? sd[bk] : "") || (bk2 ? bio[bk2] : "")
+    return val ? [label, val] as [string, string] : null
+  }).filter(Boolean) as [string, string][]
+
+  // Competitor activity
+  const ourStudios = new Set(["fuckpassvr","vrhush","vrallure","blowjobnow","fpvr","vr hush","njoi","naughty joi"])
+  const allScenes = [...(profile?.slr_scenes ?? []), ...(profile?.vrp_scenes ?? [])]
+  const competitors: { studio: string; title: string; date: string }[] = []
+  const seenStud: Record<string, { studio: string; title: string; date: string }> = {}
+  for (const sc of allScenes) {
+    const sk = (sc.studio || "").toLowerCase().replace(/\s/g, "")
+    if (!sc.studio || ourStudios.has(sk)) continue
+    if (!seenStud[sc.studio] || sc.date > seenStud[sc.studio].date)
+      seenStud[sc.studio] = { studio: sc.studio, title: sc.title, date: sc.date }
+  }
+  Object.values(seenStud).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8).forEach(c => competitors.push(c))
+
+  function StatTable({ rows, title }: { rows: [string, string][]; title?: string }) {
+    if (!rows.length) return null
+    return (
+      <>
+        {title && (
+          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
+                        textTransform: "uppercase", color: "var(--color-text-faint)",
+                        marginTop: 10, marginBottom: 3 }}>
+            {title}
+          </div>
+        )}
+        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+          <tbody>
+            {rows.map(([label, value]) => (
+              <tr key={label}>
+                <td style={{ fontSize: 11, color: "var(--color-text-faint)", padding: "3px 10px 3px 0", whiteSpace: "nowrap" }}>
+                  {label}
+                </td>
+                <td style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text)" }}>
+                  {value}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </>
+    )
+  }
+
+  function buildBriefCtx(): Record<string, string> {
+    const ctx: Record<string, string> = {}
+    if (model.rank) ctx["Booking rank"] = model.rank
+    if (model.agency) ctx["Agency"] = model.agency
+    if (sd["slr followers"]) ctx["SLR followers"] = sd["slr followers"]
+    if (sd["slr scenes"]) ctx["SLR scenes"] = sd["slr scenes"]
+    if (sd["vrp followers"]) ctx["VRP followers"] = sd["vrp followers"]
+    if (sd["vrp views"]) ctx["VRPorn views"] = sd["vrp views"]
+    if (sd["available for"]) ctx["Available for"] = sd["available for"]
+    if (model.rate) ctx["Rate"] = model.rate
+    if (bh?.total) ctx["Booked with our studio"] = `${bh.total} times`
+    if (bh?.last_display) ctx["Last booked"] = bh.last_display
+    if (model.last_booked && !bh?.total) ctx["Never booked with your studio"] = "true"
+    return ctx
+  }
+
+  const slr = profile?.slr_scenes ?? []
+  const vrp = profile?.vrp_scenes ?? []
 
   return (
-    <div style={{
-      padding: "14px 12px 16px",
-      background: "var(--color-surface)",
-      display: "flex", flexDirection: "column", gap: 14,
-    }}>
+    <div>
+      {/* ── Back + Refresh ───────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <button
+          onClick={onBack}
+          style={{ fontSize: 12, color: "var(--color-lime)", background: "none", border: "none",
+                   cursor: "pointer", padding: 0 }}
+        >
+          ← Back to list
+        </button>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          style={{ fontSize: 11, color: loading ? "var(--color-text-faint)" : "var(--color-text-muted)",
+                   background: "none", border: "none", cursor: loading ? "default" : "pointer", padding: 0 }}
+        >
+          {loading ? "Refreshing…" : "🔄 Refresh"}
+        </button>
+      </div>
 
-      {/* ── Top row: photo + bio + booking ─────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+      {/* ── Header: photo | info | booking history ───────────────────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "140px 1fr 200px", gap: 20, marginBottom: 16 }}>
 
         {/* Photo */}
-        <div style={{ flexShrink: 0 }}>
-          <ModelPhoto
+        <div>
+          <Photo
+            src={profile?.photo_url || babepediaUrl(model.name)}
             name={model.name}
-            photoUrl={profile?.photo_url || undefined}
-            size={88}
+            width={140}
+            height={190}
+            radius={6}
+            objectPos="50% 10%"
           />
         </div>
 
-        {/* Bio facts */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {loading && !profile && (
-            <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
-              <div style={{
-                width: 12, height: 12, borderRadius: "50%",
-                border: "2px solid var(--color-lime)",
-                borderTopColor: "transparent",
-                animation: "spin 0.7s linear infinite",
-              }} />
-              <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-                Fetching profile…
+        {/* Info column */}
+        <div>
+          {/* Name + age + rank */}
+          <div className="flex items-baseline gap-2 flex-wrap" style={{ marginBottom: 6 }}>
+            <span style={{ fontSize: 22, fontWeight: 700, color: "var(--color-text)", lineHeight: 1.2 }}>
+              {model.name}
+            </span>
+            {model.age && (
+              <span style={{ fontSize: 14, color: "var(--color-text-muted)" }}>{model.age}</span>
+            )}
+            {model.rank && (
+              <span style={{
+                fontSize: 11, fontWeight: 600, color: rankColor,
+                background: `color-mix(in srgb, ${rankColor} 12%, transparent)`,
+                border: `1px solid color-mix(in srgb, ${rankColor} 25%, transparent)`,
+                borderRadius: 4, padding: "2px 7px",
+              }}>
+                {model.rank.charAt(0).toUpperCase() + model.rank.slice(1).toLowerCase()}
               </span>
+            )}
+          </div>
+
+          {/* Agency + profile links */}
+          <div style={{ fontSize: 12, marginBottom: 6 }}>
+            {model.agency_link ? (
+              <a href={model.agency_link} target="_blank" rel="noopener noreferrer"
+                style={{ color: "var(--color-lime)", textDecoration: "none" }}>
+                {model.agency || "Agency"}
+              </a>
+            ) : (
+              <span style={{ color: "var(--color-text-muted)" }}>
+                {model.agency || <em style={{ color: "var(--color-text-faint)" }}>Not in booking sheet</em>}
+              </span>
+            )}
+            {profile?.slr_profile_url && (
+              <a href={profile.slr_profile_url} target="_blank" rel="noopener noreferrer"
+                style={{ marginLeft: 12, fontSize: 11, color: "var(--color-text-faint)", textDecoration: "none" }}>
+                SLR ↗
+              </a>
+            )}
+            {profile?.vrp_profile_url && (
+              <a href={profile.vrp_profile_url} target="_blank" rel="noopener noreferrer"
+                style={{ marginLeft: 8, fontSize: 11, color: "var(--color-text-faint)", textDecoration: "none" }}>
+                VRPorn ↗
+              </a>
+            )}
+          </div>
+
+          {/* Rate · status · location */}
+          {[model.rate && `💰 ${model.rate}`, sd["status"], model.location && `📍 ${model.location}`]
+            .filter(Boolean).length > 0 && (
+            <div style={{ fontSize: 11, color: "var(--color-text-faint)", marginBottom: 8 }}>
+              {[model.rate && `💰 ${model.rate}`, sd["status"], model.location && `📍 ${model.location}`]
+                .filter(Boolean).join("  ·  ")}
             </div>
           )}
 
-          {bioRows.length > 0 && (
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
-              gap: "3px 16px",
-              marginBottom: 8,
-            }}>
-              {bioRows.map(r => (
-                <div key={r.label} style={{ display: "flex", gap: 4, alignItems: "baseline" }}>
-                  <span style={{
-                    fontSize: 9, fontWeight: 600, letterSpacing: "0.06em",
-                    textTransform: "uppercase", color: "var(--color-text-faint)",
-                    flexShrink: 0, whiteSpace: "nowrap",
-                  }}>
-                    {r.label}
-                  </span>
-                  <span style={{
-                    fontSize: 11, color: "var(--color-text-muted)",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>
-                    {r.value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* About */}
-          {profile?.bio.about && (
-            <p style={{
-              fontSize: 11, color: "var(--color-text-faint)",
-              lineHeight: 1.5, fontStyle: "italic",
-              marginBottom: 8,
-              display: "-webkit-box",
-              WebkitLineClamp: 3,
-              WebkitBoxOrient: "vertical",
-              overflow: "hidden",
-            } as React.CSSProperties}>
-              {profile.bio.about}
-            </p>
-          )}
-
-          {/* Acts (when no scraped data yet) */}
-          {!hasScrapedData && isActualActList && acts.length > 0 && (
+          {/* Available For tags */}
+          {(sd["available for"] || model.notes) && (
             <div className="flex flex-wrap gap-1">
-              {acts.map(act => (
-                <span key={act} style={{
+              {((sd["available for"] || model.notes) ?? "").split(",").map(t => t.trim()).filter(Boolean).map(tag => (
+                <span key={tag} style={{
                   fontSize: 10, color: "var(--color-text-muted)",
                   background: "var(--color-elevated)",
                   border: "1px solid var(--color-border-subtle)",
-                  borderRadius: 3, padding: "2px 6px", whiteSpace: "nowrap",
+                  borderRadius: 3, padding: "2px 6px",
                 }}>
-                  {act}
+                  {tag}
                 </span>
               ))}
             </div>
           )}
+
+          {/* Notes warning */}
+          {sd["notes"] && (
+            <div style={{
+              marginTop: 8, padding: "6px 10px", borderRadius: 4,
+              background: "color-mix(in srgb, #eab308 10%, transparent)",
+              border: "1px solid color-mix(in srgb, #eab308 25%, transparent)",
+              fontSize: 11, color: "#eab308",
+            }}>
+              ⚠️ {sd["notes"]}
+            </div>
+          )}
         </div>
 
-        {/* Booking history (right column) */}
+        {/* Booking history card */}
         <div style={{
-          flexShrink: 0, width: 140,
-          background: "var(--color-elevated)",
-          border: "1px solid var(--color-border-subtle)",
-          borderRadius: 5, padding: "8px 10px",
+          background: bh?.total
+            ? "color-mix(in srgb, #22c55e 8%, transparent)"
+            : "color-mix(in srgb, #ef4444 8%, transparent)",
+          border: `1px solid color-mix(in srgb, ${bh?.total ? "#22c55e" : "#ef4444"} 20%, transparent)`,
+          borderRadius: 8, padding: "12px 14px",
         }}>
-          <div style={{
-            fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
-            textTransform: "uppercase", color: "var(--color-text-faint)",
-            marginBottom: 6,
-          }}>
-            Our bookings
+          {bh?.total ? (
+            <>
+              <div style={{ color: "#22c55e", fontSize: 20, fontWeight: 700, lineHeight: 1 }}>
+                {bh.total}× booked
+              </div>
+              <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 6 }}>
+                Last: {bh.last_display || bh.last_date}
+              </div>
+              {model.rate && (
+                <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
+                  Rate: {model.rate}
+                </div>
+              )}
+              {bh.studios && Object.keys(bh.studios).length > 0 && (
+                <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 6 }}>
+                  {Object.entries(bh.studios)
+                    .sort(([, a], [, b]) => b - a)
+                    .map(([s, n]) => `${s} (${n}×)`)
+                    .join(" · ")}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ color: "#ef4444", fontSize: 12 }}>
+              🔴 Never booked with your studio
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--color-border)", marginBottom: 16 }} />
+
+      {/* ── AI Booking Brief ─────────────────────────────────────────────────── */}
+      <div style={{
+        marginBottom: 16,
+        border: "1px solid var(--color-border)",
+        borderRadius: 6, overflow: "hidden",
+      }}>
+        <button
+          onClick={() => setBriefOpen(o => !o)}
+          style={{
+            width: "100%", textAlign: "left",
+            padding: "8px 12px",
+            background: briefOpen ? "var(--color-elevated)" : "var(--color-surface)",
+            border: "none", cursor: "pointer",
+            fontSize: 12, color: "var(--color-text-muted)",
+            display: "flex", alignItems: "center", gap: 6,
+          }}
+        >
+          <span style={{ color: "var(--color-lime)" }}>✦</span>
+          Generate Booking Brief
+          <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--color-text-faint)" }}>
+            {briefOpen ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {briefOpen && (
+          <div style={{ padding: "10px 12px", background: "var(--color-surface)" }}>
+            <button
+              onClick={() => onBrief(buildBriefCtx())}
+              disabled={briefLoading}
+              style={{
+                fontSize: 11, padding: "5px 12px", borderRadius: 4,
+                background: briefLoading ? "var(--color-elevated)" : "var(--color-lime)",
+                color: briefLoading ? "var(--color-text-faint)" : "#000",
+                border: "none", cursor: briefLoading ? "default" : "pointer", fontWeight: 600,
+              }}
+            >
+              {briefLoading ? "Generating…" : "Generate"}
+            </button>
+
+            {briefText && (
+              <div style={{
+                marginTop: 10, fontSize: 12, lineHeight: 1.65,
+                color: "var(--color-text)", padding: "10px 12px",
+                background: "var(--color-elevated)", borderRadius: 4,
+              }}>
+                {briefText}
+              </div>
+            )}
           </div>
+        )}
+      </div>
 
-          {model.bookings_count && (
-            <div style={{ marginBottom: 6 }}>
-              <span style={{ fontSize: 18, fontWeight: 700, color: "var(--color-text)", lineHeight: 1 }}>
-                {model.bookings_count}
-              </span>
-              <span style={{ fontSize: 10, color: "var(--color-text-faint)", marginLeft: 3 }}>
-                total
-              </span>
-            </div>
+      {/* ── Two-column body ──────────────────────────────────────────────────── */}
+      {loading && !profile && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+          <div style={{
+            width: 12, height: 12, borderRadius: "50%",
+            border: "2px solid var(--color-lime)",
+            borderTopColor: "transparent",
+            animation: "spin 0.7s linear infinite",
+          }} />
+          <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>Fetching profile data…</span>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "5fr 7fr", gap: 24, alignItems: "start" }}>
+
+        {/* ── Left: stats + bio ──────────────────────────────────────────────── */}
+        <div>
+          <StatTable rows={bookingStats} />
+          {platformStats.length > 0 && <StatTable rows={platformStats} title="Platform" />}
+          {socialStats.length > 0 && <StatTable rows={socialStats} title="Social" />}
+
+          {physStats.length > 0 && (
+            <>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
+                            textTransform: "uppercase", color: "var(--color-text-faint)",
+                            marginTop: 12, marginBottom: 3 }}>
+                Physical Stats
+              </div>
+              <StatTable rows={physStats} />
+            </>
           )}
 
-          {model.last_booked && (
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 9, color: "var(--color-text-faint)" }}>Last</div>
-              <div style={{ fontSize: 11, color: urgency.color, fontWeight: 500 }}>
-                {model.last_booked}
-              </div>
-            </div>
+          {bio["about"] && (
+            <p style={{
+              fontSize: 12, color: "var(--color-text)", lineHeight: 1.55,
+              marginTop: 10, fontStyle: "italic",
+            }}>
+              {bio["about"]}
+            </p>
           )}
 
-          {profile && Object.keys(profile.booking_studios).length > 0 && (
-            <div>
-              <div style={{ fontSize: 9, color: "var(--color-text-faint)", marginBottom: 3 }}>
-                By studio
+          {/* Competitor activity */}
+          {competitors.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
+                            textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 4 }}>
+                Competitor Activity
               </div>
-              {Object.entries(profile.booking_studios).map(([studio, count]) => (
-                <div key={studio} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
-                  <span style={{ fontSize: 10, color: "var(--color-text-muted)" }}>{studio}</span>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-text-faint)" }}>{count}</span>
+              {competitors.map((c, i) => (
+                <div key={i} style={{ fontSize: 11, color: "var(--color-text-faint)", marginBottom: 3 }}>
+                  <span style={{ fontWeight: 600, color: "var(--color-text-muted)" }}>{c.studio}</span>
+                  {c.date && ` · ${c.date}`}
+                  {c.title && ` — `}
+                  {c.title && <em>{c.title.slice(0, 50)}</em>}
                 </div>
               ))}
             </div>
           )}
         </div>
-      </div>
 
-      {/* ── Scene strips ────────────────────────────────────────────────────── */}
-      {(profile?.slr_scenes.length || 0) > 0 && (
+        {/* ── Right: scene tabs ──────────────────────────────────────────────── */}
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-            <span style={{
-              fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
-              textTransform: "uppercase", color: "var(--color-text-faint)",
-            }}>
-              SexLikeReal
-            </span>
-            {profile!.slr_profile_url && (
-              <a
-                href={profile!.slr_profile_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ fontSize: 9, color: "var(--color-lime)", textDecoration: "none" }}
-              >
-                Profile ↗
-              </a>
+          {/* Tab bar */}
+          <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--color-border)", marginBottom: 0 }}>
+            {(["slr", "vrp"] as const).map(tab => {
+              const count = tab === "slr" ? slr.length : vrp.length
+              const label = tab === "slr" ? `SexLikeReal${count ? ` (${count})` : ""}` : `VRPorn${count ? ` (${count})` : ""}`
+              const active = activeTab === tab
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  style={{
+                    fontSize: 12, fontWeight: active ? 600 : 400,
+                    color: active ? "var(--color-text)" : "var(--color-text-faint)",
+                    background: "none", border: "none",
+                    borderBottom: active ? "2px solid var(--color-lime)" : "2px solid transparent",
+                    padding: "6px 14px", cursor: "pointer",
+                    marginBottom: -1,
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+
+          <div style={{ paddingTop: 4 }}>
+            {activeTab === "slr" && (
+              slr.length
+                ? slr.map((sc, i) => <SceneCard key={i} scene={sc} />)
+                : <p style={{ fontSize: 12, color: "var(--color-text-faint)", padding: "12px 0" }}>
+                    {loading ? "Loading…" : "No SLR scenes found."}
+                  </p>
+            )}
+            {activeTab === "vrp" && (
+              vrp.length
+                ? vrp.map((sc, i) => <SceneCard key={i} scene={sc} />)
+                : <p style={{ fontSize: 12, color: "var(--color-text-faint)", padding: "12px 0" }}>
+                    {loading ? "Loading…" : "No VRPorn scenes found."}
+                  </p>
             )}
           </div>
-          <SceneStrip scenes={profile!.slr_scenes} platform="SLR" />
-        </div>
-      )}
 
-      {(profile?.vrp_scenes.length || 0) > 0 && (
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-            <span style={{
-              fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
-              textTransform: "uppercase", color: "var(--color-text-faint)",
-            }}>
-              VRPorn
-            </span>
-            {profile!.vrp_profile_url && (
-              <a
-                href={profile!.vrp_profile_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ fontSize: 9, color: "var(--color-lime)", textDecoration: "none" }}
-              >
-                Profile ↗
-              </a>
-            )}
-          </div>
-          <SceneStrip scenes={profile!.vrp_scenes} platform="VRP" />
+          {profile?.cached_at && (
+            <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 10 }}>
+              Cached {new Date(profile.cached_at).toLocaleDateString()}
+            </div>
+          )}
         </div>
-      )}
-
-      {/* ── Footer: cache info + refresh ────────────────────────────────────── */}
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        borderTop: "1px solid var(--color-border-subtle)", paddingTop: 8,
-      }}>
-        <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
-          {profile?.cached_at
-            ? `Cached ${new Date(profile.cached_at).toLocaleDateString()}`
-            : loading ? "Fetching…" : "Not yet fetched"}
-        </span>
-        <button
-          onClick={onRefresh}
-          disabled={loading}
-          style={{
-            fontSize: 10, color: loading ? "var(--color-text-faint)" : "var(--color-lime)",
-            background: "none", border: "none", cursor: loading ? "default" : "pointer",
-            padding: "2px 0",
-          }}
-        >
-          {loading ? "Refreshing…" : "Refresh ↺"}
-        </button>
       </div>
     </div>
   )
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
-
-type SortKey = "score" | "name" | "last_booked" | "rank"
+// ─── Main component ───────────────────────────────────────────────────────────
 
 interface Props {
   models: Model[]
@@ -551,369 +671,230 @@ interface Props {
 }
 
 export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
-  const idToken                               = useIdToken(serverIdToken)
-  const [search, setSearch]                  = useState("")
-  const [rankFilter, setRankFilter]          = useState("All")
-  const [locationFilter, setLocationFilter]  = useState("All")
-  const [sortKey, setSortKey]                = useState<SortKey>("score")
-  const [expanded, setExpanded]              = useState<string | null>(null)
-  const [profiles, setProfiles]              = useState<Record<string, ModelProfile>>({})
-  const [loadingProfiles, setLoadingProfiles] = useState<Set<string>>(new Set())
-  const deferredSearch                        = useDeferredValue(search)
+  const idToken = useIdToken(serverIdToken)
+  const client  = useMemo(() => api(idToken ?? null), [idToken])
 
-  const client = useMemo(() => api(idToken ?? null), [idToken])
+  const [searchInput, setSearchInput]     = useState("")
+  const [currentModel, setCurrentModel]   = useState<Model | null>(null)
+  const [profile, setProfile]             = useState<ModelProfile | null>(null)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [trending, setTrending]           = useState<TrendingModel[] | null>(null)
+  const [trendingLoading, setTrendingLoading] = useState(false)
+  const [trendingLoaded, setTrendingLoaded] = useState(false)
+  const [briefText, setBriefText]         = useState("")
+  const [briefLoading, setBriefLoading]   = useState(false)
 
-  const fetchProfile = useCallback(async (name: string, refresh = false) => {
-    setLoadingProfiles(prev => new Set(prev).add(name))
+  // Load trending on first render
+  const loadTrending = useCallback(async (refresh = false) => {
+    setTrendingLoading(true)
     try {
-      const data = await client.models.profile(name, refresh)
-      setProfiles(prev => ({ ...prev, [name]: data }))
+      const data = await client.models.trending(10, refresh)
+      setTrending(data)
     } catch {
-      // silently ignore — profile panel degrades to booking-sheet data only
+      setTrending([])
     } finally {
-      setLoadingProfiles(prev => {
-        const next = new Set(prev)
-        next.delete(name)
-        return next
-      })
+      setTrendingLoading(false)
+      setTrendingLoaded(true)
     }
   }, [client])
 
-  const handleExpand = useCallback((name: string) => {
-    setExpanded(prev => {
-      if (prev === name) return null
-      // Fetch profile if not already cached
-      if (!profiles[name]) {
-        fetchProfile(name)
-      }
-      return name
-    })
-  }, [profiles, fetchProfile])
+  // Lazy-load trending when default view first renders
+  const hasFetchedTrending = useRef(false)
+  if (!hasFetchedTrending.current && !currentModel) {
+    hasFetchedTrending.current = true
+    loadTrending()
+  }
 
-  const isFiltered = search !== "" || rankFilter !== "All" || locationFilter !== "All"
+  const openProfile = useCallback(async (name: string, refresh = false) => {
+    const m = models.find(mo => mo.name.toLowerCase() === name.toLowerCase())
+      ?? { name, agency: "", agency_link: "", rate: "", rank: "", notes: "",
+           info: "", age: "", last_booked: "", bookings_count: "", location: "",
+           opportunity_score: 0, sheet_data: {} }
 
-  const topOutreach = useMemo(
-    () => [...models].sort((a, b) => b.opportunity_score - a.opportunity_score).slice(0, 8),
-    [models]
-  )
+    setCurrentModel(m)
+    setProfile(null)
+    setBriefText("")
+    setProfileLoading(true)
 
-  const locations = useMemo(() => {
-    const locs = new Set<string>()
-    models.forEach(m => { if (m.location) locs.add(m.location) })
-    return ["All", ...Array.from(locs).sort()]
+    try {
+      const data = await client.models.profile(name, refresh)
+      setProfile(data)
+    } catch {
+      // profile stays null; panel still shows booking-sheet data
+    } finally {
+      setProfileLoading(false)
+    }
+  }, [models, client])
+
+  const handleSearch = useCallback((e: React.FormEvent) => {
+    e.preventDefault()
+    const q = searchInput.trim()
+    if (!q) return
+    openProfile(q)
+  }, [searchInput, openProfile])
+
+  const handleBrief = useCallback(async (ctx: Record<string, string>) => {
+    if (!currentModel) return
+    setBriefLoading(true)
+    try {
+      const res = await client.models.brief(currentModel.name, ctx)
+      setBriefText(res.brief)
+    } catch {
+      setBriefText("Could not generate brief — check API key.")
+    } finally {
+      setBriefLoading(false)
+    }
+  }, [currentModel, client])
+
+  // Opportunity score for a name based on booking list
+  const scoreFor = useCallback((name: string) => {
+    const m = models.find(mo => mo.name.toLowerCase() === name.toLowerCase())
+    return m?.opportunity_score
   }, [models])
 
-  const filtered = useMemo(() => {
-    let list = models
-    const q = deferredSearch.toLowerCase()
-    if (q) {
-      list = list.filter(m =>
-        m.name.toLowerCase().includes(q) ||
-        m.agency.toLowerCase().includes(q) ||
-        m.notes.toLowerCase().includes(q)
-      )
-    }
-    if (rankFilter !== "All") list = list.filter(m => m.rank.toLowerCase() === rankFilter.toLowerCase())
-    if (locationFilter !== "All") list = list.filter(m => m.location === locationFilter)
-    return list
-  }, [models, deferredSearch, rankFilter, locationFilter])
+  // ── Profile view ───────────────────────────────────────────────────────────
+  if (currentModel) {
+    return (
+      <>
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+        <ProfileView
+          model={currentModel}
+          profile={profile}
+          loading={profileLoading}
+          onBack={() => { setCurrentModel(null); setProfile(null) }}
+          onRefresh={() => openProfile(currentModel.name, true)}
+          onBrief={handleBrief}
+          briefText={briefText}
+          briefLoading={briefLoading}
+        />
+      </>
+    )
+  }
 
-  const sorted = useMemo(() => {
-    const list = [...filtered]
-    if (sortKey === "score")      return list.sort((a, b) => b.opportunity_score - a.opportunity_score)
-    if (sortKey === "name")       return list.sort((a, b) => a.name.localeCompare(b.name))
-    if (sortKey === "last_booked") {
-      return list.sort((a, b) => {
-        if (!a.last_booked && !b.last_booked) return 0
-        if (!a.last_booked) return -1
-        if (!b.last_booked) return 1
-        return a.last_booked.localeCompare(b.last_booked)
-      })
-    }
-    if (sortKey === "rank") {
-      const order: Record<string, number> = { great: 0, good: 1, moderate: 2, poor: 3 }
-      return list.sort((a, b) => (order[a.rank.toLowerCase()] ?? 9) - (order[b.rank.toLowerCase()] ?? 9))
-    }
-    return list
-  }, [filtered, sortKey])
+  // ── Default view: search + trending + priority ─────────────────────────────
+
+  // Priority cards: find photo from trending list or babepedia guess
+  const trendingPhotoMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    trending?.forEach(t => { map[t.name.toLowerCase()] = t.photo_url })
+    return map
+  }, [trending])
 
   return (
     <div>
-      {/* ── Spin keyframe (injected once) ─────────────────────────────────────── */}
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
 
-      {/* ── Top Outreach grid ─────────────────────────────────────────────────── */}
-      {!isFiltered && topOutreach.length > 0 && (
-        <div className="mb-7">
-          <div className="flex items-center gap-2 mb-3">
-            <span style={{
-              fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
-              textTransform: "uppercase", color: "#22c55e",
-            }}>
-              Top Outreach
-            </span>
-            <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
-              Highest opportunity scores — click to expand
-            </span>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-            {topOutreach.map(model => (
-              <OutreachCard
-                key={model.name}
-                model={model}
-                isActive={expanded === model.name}
-                onClick={() => handleExpand(model.name)}
-              />
-            ))}
-          </div>
+      {/* ── Search bar ─────────────────────────────────────────────────────── */}
+      <form onSubmit={handleSearch} style={{ display: "flex", gap: 8, marginBottom: 24 }}>
+        <input
+          type="text"
+          placeholder="Search any performer…"
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
+          style={{
+            flex: 1, padding: "8px 12px", borderRadius: 4, fontSize: 13,
+            background: "var(--color-surface)",
+            border: "1px solid var(--color-border)",
+            color: "var(--color-text)", outline: "none",
+          }}
+        />
+        <button
+          type="submit"
+          style={{
+            padding: "8px 18px", borderRadius: 4, fontSize: 13, fontWeight: 600,
+            background: "var(--color-lime)", color: "#000", border: "none", cursor: "pointer",
+          }}
+        >
+          Search
+        </button>
+      </form>
+
+      {/* ── Trending Now ───────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <span style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+          textTransform: "uppercase", color: "#f97316",
+        }}>
+          🔥 Trending Now
+        </span>
+        <button
+          onClick={() => loadTrending(true)}
+          disabled={trendingLoading}
+          style={{
+            fontSize: 11, background: "none", border: "none",
+            color: trendingLoading ? "var(--color-text-faint)" : "var(--color-text-muted)",
+            cursor: trendingLoading ? "default" : "pointer", padding: 0,
+          }}
+        >
+          {trendingLoading ? "Loading…" : "↺"}
+        </button>
+      </div>
+
+      {trendingLoading && !trending && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 20, paddingTop: 4 }}>
+          <div style={{
+            width: 11, height: 11, borderRadius: "50%",
+            border: "2px solid #f97316", borderTopColor: "transparent",
+            animation: "spin 0.7s linear infinite",
+          }} />
+          <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>Loading trending models…</span>
         </div>
       )}
 
-      {/* ── Controls bar ─────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-2 mb-5" style={{ alignItems: "center" }}>
-        <input
-          type="text"
-          placeholder="Search name, agency, acts…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="px-2.5 py-1.5 rounded text-xs outline-none"
-          style={{
-            width: 240,
-            background: "var(--color-surface)",
-            border: "1px solid var(--color-border)",
-            color: "var(--color-text)",
-          }}
-        />
-
-        <div className="flex gap-1">
-          {["All", "Great", "Good", "Moderate", "Poor"].map(r => {
-            const cfg = RANK_CONFIG[r.toLowerCase()]
-            const active = rankFilter === r
-            return (
-              <button
-                key={r}
-                onClick={() => setRankFilter(r)}
-                className="px-2 py-1 rounded text-xs transition-colors"
-                style={{
-                  background: active ? (cfg ? `color-mix(in srgb, ${cfg.color} 15%, transparent)` : "var(--color-elevated)") : "transparent",
-                  color: active ? (cfg?.color ?? "var(--color-text)") : "var(--color-text-faint)",
-                  border: `1px solid ${active ? (cfg ? `color-mix(in srgb, ${cfg.color} 30%, transparent)` : "var(--color-border)") : "transparent"}`,
-                  fontWeight: active ? 600 : 400,
-                }}
-              >
-                {r}
-              </button>
-            )
-          })}
+      {trending && trending.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 24 }}>
+          {trending.slice(0, 10).map(t => (
+            <ModelCard
+              key={t.name}
+              name={t.name}
+              photoSrc={t.photo_url}
+              statLine={[t.platform, t.scenes ? `${t.scenes} scenes` : "", t.followers].filter(Boolean).join(" · ")}
+              score={scoreFor(t.name)}
+              onView={() => openProfile(t.name)}
+            />
+          ))}
         </div>
+      )}
 
-        {locations.length > 2 && (
-          <select
-            value={locationFilter}
-            onChange={e => setLocationFilter(e.target.value)}
-            className="px-2 py-1.5 rounded text-xs outline-none"
-            style={{
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: locationFilter !== "All" ? "var(--color-text)" : "var(--color-text-faint)",
-            }}
-          >
-            {locations.map(l => <option key={l} value={l}>{l === "All" ? "All locations" : l}</option>)}
-          </select>
-        )}
-
-        <select
-          value={sortKey}
-          onChange={e => setSortKey(e.target.value as SortKey)}
-          className="px-2.5 py-1.5 rounded text-xs outline-none ml-auto"
-          style={{
-            background: "var(--color-surface)",
-            border: "1px solid var(--color-border)",
-            color: "var(--color-text-muted)",
-          }}
-        >
-          <option value="score">Sort: Opportunity</option>
-          <option value="rank">Sort: Rank</option>
-          <option value="last_booked">Sort: Last Booked</option>
-          <option value="name">Sort: Name</option>
-        </select>
-
-        <span style={{ fontSize: 11, color: "var(--color-text-faint)", whiteSpace: "nowrap" }}>
-          {isFiltered ? `${sorted.length} of ${models.length}` : `${models.length} models`}
-        </span>
-      </div>
-
-      {/* ── Error ────────────────────────────────────────────────────────────── */}
-      {error && <ErrorAlert className="mb-4">{error}</ErrorAlert>}
-
-      {/* ── Empty ────────────────────────────────────────────────────────────── */}
-      {!error && sorted.length === 0 && (
-        <p style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
-          No models match the current filters.
+      {trendingLoaded && (!trending || trending.length === 0) && (
+        <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginBottom: 20 }}>
+          Could not load trending models — check connection or click ↺.
         </p>
       )}
 
-      {/* ── Table ────────────────────────────────────────────────────────────── */}
-      {!error && sorted.length > 0 && (
-        <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-          {/* Header */}
-          <div
-            className="grid"
-            style={{
-              gridTemplateColumns: "52px 1fr 140px 72px 80px 80px",
-              background: "var(--color-surface)",
-              borderBottom: "1px solid var(--color-border)",
-              padding: "6px 12px",
-            }}
-          >
-            {["Score", "Name", "Agency", "Rate", "Location", "Last Booked"].map(h => (
-              <span key={h} style={{
-                fontSize: 10, fontWeight: 600, letterSpacing: "0.06em",
-                textTransform: "uppercase", color: "var(--color-text-faint)",
-              }}>
-                {h}
-              </span>
-            ))}
-          </div>
+      {/* ── Priority Outreach ──────────────────────────────────────────────── */}
+      <div style={{ marginBottom: 10 }}>
+        <span style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+          textTransform: "uppercase", color: "#22c55e",
+        }}>
+          ⭐ Priority Outreach
+        </span>
+      </div>
 
-          {sorted.map((model, i) => {
-            const isExpanded = expanded === model.name
-            const isLast = i === sorted.length - 1
-            const rankCfg = RANK_CONFIG[model.rank.toLowerCase()]
-            const urgency = urgencyLabel(model.last_booked)
-            const profile = profiles[model.name] ?? null
-            const isLoading = loadingProfiles.has(model.name)
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+        {PRIORITY.map(p => {
+          const m = models.find(mo => mo.name.toLowerCase() === p.name.toLowerCase())
+          const score = m?.opportunity_score
+          const photo = trendingPhotoMap[p.name.toLowerCase()] || babepediaUrl(p.name)
+          const statLine = m
+            ? [p.agency, m.last_booked ? `Last: ${m.last_booked}` : "Never booked"].join(" · ")
+            : [p.agency, "Never booked"].join(" · ")
+          return (
+            <ModelCard
+              key={p.name}
+              name={p.name}
+              photoSrc={photo}
+              statLine={statLine}
+              score={score}
+              onView={() => openProfile(p.name)}
+            />
+          )
+        })}
+      </div>
 
-            return (
-              <div key={model.name}>
-                {/* Row */}
-                <div
-                  className="grid cursor-pointer transition-colors"
-                  style={{
-                    gridTemplateColumns: "52px 1fr 140px 72px 80px 80px",
-                    padding: "8px 12px",
-                    borderBottom: (!isExpanded && !isLast) ? "1px solid var(--color-border-subtle)" : undefined,
-                    background: isExpanded ? "var(--color-surface)" : undefined,
-                    alignItems: "center",
-                  }}
-                  onClick={() => handleExpand(model.name)}
-                  onMouseEnter={e => { if (!isExpanded) (e.currentTarget as HTMLElement).style.background = "var(--color-elevated)" }}
-                  onMouseLeave={e => { if (!isExpanded) (e.currentTarget as HTMLElement).style.background = "" }}
-                >
-                  {/* Score */}
-                  <span style={{
-                    fontSize: 18, fontWeight: 700, lineHeight: 1,
-                    fontVariantNumeric: "tabular-nums",
-                    color: scoreColor(model.opportunity_score),
-                  }}>
-                    {model.opportunity_score}
-                  </span>
-
-                  {/* Photo + Name + rank */}
-                  <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                    <ModelPhoto
-                      name={model.name}
-                      photoUrl={profile?.photo_url || undefined}
-                      size={26}
-                    />
-                    <div style={{ minWidth: 0 }}>
-                      <div className="flex items-center gap-2">
-                        <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text)" }}>
-                          {model.name}
-                        </span>
-                        {rankCfg && (
-                          <span style={{
-                            fontSize: 9, fontWeight: 700, letterSpacing: "0.06em",
-                            textTransform: "uppercase", color: rankCfg.color,
-                            background: `color-mix(in srgb, ${rankCfg.color} 12%, transparent)`,
-                            border: `1px solid color-mix(in srgb, ${rankCfg.color} 25%, transparent)`,
-                            borderRadius: 2, padding: "1px 4px",
-                          }}>
-                            {rankCfg.label}
-                          </span>
-                        )}
-                        {model.age && (
-                          <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
-                            {model.age}
-                          </span>
-                        )}
-                        {isLoading && (
-                          <div style={{
-                            width: 8, height: 8, borderRadius: "50%",
-                            border: "1.5px solid var(--color-lime)",
-                            borderTopColor: "transparent",
-                            animation: "spin 0.7s linear infinite",
-                            flexShrink: 0,
-                          }} />
-                        )}
-                      </div>
-                      {model.notes && !model.notes.includes(",") && (
-                        <p className="line-clamp-1" style={{
-                          fontSize: 10, color: "var(--color-text-faint)", marginTop: 1,
-                        }}>
-                          {model.notes}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Agency */}
-                  <div style={{ minWidth: 0 }}>
-                    {model.agency_link ? (
-                      <a
-                        href={model.agency_link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={e => e.stopPropagation()}
-                        className="line-clamp-1 block"
-                        style={{ fontSize: 11, color: "var(--color-lime)", textDecoration: "none" }}
-                      >
-                        {model.agency || "—"}
-                      </a>
-                    ) : (
-                      <span className="line-clamp-1 block" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                        {model.agency || "—"}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Rate */}
-                  <span className="font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                    {model.rate || "—"}
-                  </span>
-
-                  {/* Location */}
-                  <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                    {model.location || "—"}
-                  </span>
-
-                  {/* Last booked */}
-                  <span style={{
-                    fontSize: 11,
-                    color: urgency.color,
-                    fontWeight: urgency.color === "#22c55e" ? 500 : 400,
-                  }}>
-                    {urgency.text}
-                  </span>
-                </div>
-
-                {/* Expanded profile panel */}
-                {isExpanded && (
-                  <div style={{
-                    borderBottom: !isLast ? "1px solid var(--color-border-subtle)" : undefined,
-                  }}>
-                    <ProfilePanel
-                      model={model}
-                      profile={profile}
-                      loading={isLoading}
-                      onRefresh={() => fetchProfile(model.name, true)}
-                    />
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
+      {error && (
+        <p style={{ fontSize: 12, color: "#ef4444", marginTop: 16 }}>{error}</p>
       )}
     </div>
   )

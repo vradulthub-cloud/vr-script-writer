@@ -157,6 +157,24 @@ export interface Model {
   bookings_count: string
   location: string
   opportunity_score: number  // 0–100
+  sheet_data: Record<string, string>  // all booking sheet columns
+}
+
+export interface TrendingModel {
+  name: string
+  photo_url: string
+  platform: string       // "SLR" | "VRP"
+  profile_url: string
+  scenes: string
+  followers: string
+  views: string
+}
+
+export interface BookingHistory {
+  total: number
+  last_date: string
+  last_display: string
+  studios: Record<string, number>
 }
 
 export interface ShootScene {
@@ -195,12 +213,12 @@ export interface ProfileScene {
 export interface ModelProfile {
   name: string
   photo_url: string
-  bio: Record<string, string>       // age, birthday, ethnicity, height, measurements, hair, eyes, about, …
+  bio: Record<string, string>
   slr_profile_url: string
   slr_scenes: ProfileScene[]
   vrp_profile_url: string
   vrp_scenes: ProfileScene[]
-  booking_studios: Record<string, number>  // studio → shoot count from our scripts table
+  booking_history: BookingHistory
   cached_at: string
 }
 
@@ -304,10 +322,17 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         return get<Model[]>(`/models/${params}`)
       },
       get: (name: string) => get<Model>(`/models/${encodeURIComponent(name)}`),
+      trending: (n = 10, refresh = false) => {
+        const params = new URLSearchParams({ n: String(n) })
+        if (refresh) params.set("refresh", "true")
+        return get<TrendingModel[]>(`/models/trending?${params}`)
+      },
       profile: (name: string, refresh = false) => {
         const params = refresh ? "?refresh=true" : ""
         return get<ModelProfile>(`/models/${encodeURIComponent(name)}/profile${params}`)
       },
+      brief: (name: string, context: Record<string, string>) =>
+        post<{ brief: string }>(`/models/${encodeURIComponent(name)}/brief`, { context }),
     },
 
     approvals: {
