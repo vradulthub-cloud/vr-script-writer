@@ -7,8 +7,8 @@ import { api, API_BASE_URL, type Script, type Ticket } from "@/lib/api"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
-
-const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
+import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
+import { CopyButton } from "@/components/ui/copy-button"
 const SCENE_TYPES = ["BG", "BGCP"]
 
 // Parse structured sections from generated output
@@ -99,7 +99,9 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
 
   // Load tickets for linking dropdown
   useEffect(() => {
-    client.tickets.list({ status: "In Progress" }).then(setTickets).catch(() => {})
+    client.tickets.list({ status: "In Progress" }).then(setTickets).catch((e) => {
+      console.warn("[scripts] Failed to load tickets for linking:", e)
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -259,6 +261,23 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
 
   const studioColor = STUDIO_COLOR[studio] ?? "var(--color-text-muted)"
 
+  // Cmd+Enter to generate, Cmd+S to save
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault()
+        if (!stream.streaming && female) generate()
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault()
+        if (!stream.streaming && stream.output && selectedRow && !saving) save()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stream.streaming, stream.output, female, selectedRow, saving])
+
   return (
     <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
       {/* Left panel — inputs */}
@@ -402,27 +421,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
             {/* Studio */}
             <div>
               <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Studio</label>
-              <div className="flex gap-1 flex-wrap">
-                {STUDIOS.map(s => (
-                  <button
-                    key={s}
-                    onClick={() => setStudio(s)}
-                    className="px-2 py-1 rounded text-xs transition-colors"
-                    style={{
-                      background: studio === s
-                        ? `color-mix(in srgb, ${STUDIO_COLOR[s]} 20%, transparent)`
-                        : "transparent",
-                      color: studio === s ? STUDIO_COLOR[s] : "var(--color-text-muted)",
-                      border: `1px solid ${studio === s
-                        ? `color-mix(in srgb, ${STUDIO_COLOR[s]} 35%, transparent)`
-                        : "var(--color-border)"}`,
-                    }}
-                  >
-                    {s === "FuckPassVR" ? "FPVR" : s === "NaughtyJOI" ? "NJOI" :
-                     s === "VRHush" ? "VRH" : "VRA"}
-                  </button>
-                ))}
-              </div>
+              <StudioSelector value={studio} onChange={setStudio} />
             </div>
 
             {/* Scene type */}
@@ -573,13 +572,18 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
 
         {(stream.output || stream.streaming) && (
           <>
-            {/* Word count indicator while streaming */}
-            {stream.streaming && stream.output && (
-              <div className="flex items-center gap-3 mb-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+            {/* Word count + copy button */}
+            <div className="flex items-center gap-3 mb-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+              {stream.output && (
                 <span className="tabular-nums">{stream.output.split(/\s+/).filter(Boolean).length} words</span>
-                <span style={{ color: "var(--color-text-faint)", opacity: 0.5 }}>generating...</span>
-              </div>
-            )}
+              )}
+              {stream.streaming && (
+                <span style={{ opacity: 0.5 }}>generating...</span>
+              )}
+              {!stream.streaming && stream.output && (
+                <CopyButton text={stream.output} label="Copy script" />
+              )}
+            </div>
 
             {/* Raw streaming output */}
             <div
@@ -593,8 +597,8 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
             >
               <pre
                 style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 11,
+                  fontFamily: "var(--font-sans)",
+                  fontSize: 12,
                   lineHeight: 1.7,
                   color: "var(--color-text)",
                   whiteSpace: "pre-wrap",

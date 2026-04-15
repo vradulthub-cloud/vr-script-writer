@@ -17,16 +17,12 @@ export function ApprovalsPageShell({ pendingCount, children }: Props) {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="tracking-tight">
+          <h1>
             {tab === "review" ? "Approvals" : "Submit for Approval"}
           </h1>
-          <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
-            {tab === "review"
-              ? pendingCount > 0
-                ? `${pendingCount} pending decision${pendingCount !== 1 ? "s" : ""}`
-                : "No pending approvals"
-              : "Submit content for admin review"}
-          </p>
+          {tab === "review" && pendingCount > 0 && (
+            <p data-subtitle>{pendingCount} pending decision{pendingCount !== 1 ? "s" : ""}</p>
+          )}
         </div>
 
         <div className="flex rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>

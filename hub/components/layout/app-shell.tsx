@@ -4,6 +4,7 @@ import { api, type UserProfile } from "@/lib/api"
 import { Sidebar } from "./sidebar"
 import { Topbar } from "./topbar"
 import { MobileNav } from "./mobile-nav"
+import { CommandPalette } from "@/components/ui/command-palette"
 
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const session = await auth()
@@ -37,6 +38,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         <div style={{ padding: "28px 32px 40px" }}>{children}</div>
       </main>
       <MobileNav />
+      <CommandPalette />
     </div>
   )
 }

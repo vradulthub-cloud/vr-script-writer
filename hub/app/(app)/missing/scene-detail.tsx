@@ -52,7 +52,9 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
     client.scenes.namingIssues(scene.id).then((data) => {
       setNamingIssues(data.issues)
       setNamingOk(data.ok)
-    }).catch(() => {})
+    }).catch((e) => {
+      console.warn("[scene-detail] Failed to load naming issues:", e)
+    })
   }, [scene.id])
 
   function startEdit(field: "title" | "categories" | "tags") {

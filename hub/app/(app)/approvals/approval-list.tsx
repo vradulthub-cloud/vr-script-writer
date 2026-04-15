@@ -801,26 +801,29 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
           )}
         </div>
 
-        {/* Panel wrapper — animates width open/closed */}
+        {/* Panel wrapper — slides in with transform (no layout thrash) */}
         <div
           style={{
-            width: selectedApproval ? 420 : 0,
+            width: 420,
             flexShrink: 0,
             overflow: "hidden",
-            marginLeft: selectedApproval ? 12 : 0,
-            transition: "width 260ms cubic-bezier(0.16, 1, 0.3, 1), margin-left 260ms cubic-bezier(0.16, 1, 0.3, 1)",
+            marginLeft: 12,
+            transform: selectedApproval ? "translateX(0)" : "translateX(calc(100% + 12px))",
+            opacity: selectedApproval ? 1 : 0,
+            transition: "transform 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 260ms cubic-bezier(0.16, 1, 0.3, 1)",
+            pointerEvents: selectedApproval ? "auto" : "none",
+            position: selectedApproval ? "relative" : "absolute",
+            right: selectedApproval ? undefined : 0,
           }}
         >
           {selectedApproval && (
-            <div style={{ width: 420 }}>
-              <ApprovalPanel
-                key={selectedApproval.approval_id}
-                approval={selectedApproval}
-                onClose={() => setSelectedId(null)}
-                onApprove={() => decide("Approved")}
-                onReject={(reason) => decide("Rejected", reason)}
-              />
-            </div>
+            <ApprovalPanel
+              key={selectedApproval.approval_id}
+              approval={selectedApproval}
+              onClose={() => setSelectedId(null)}
+              onApprove={() => decide("Approved")}
+              onReject={(reason) => decide("Rejected", reason)}
+            />
           )}
         </div>
       </div>

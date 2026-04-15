@@ -1,17 +1,18 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Bell } from "lucide-react"
+import { Bell, Ticket, RefreshCw, UserCheck, ClipboardList, CheckCircle, Pin } from "lucide-react"
 import { api, type Notification } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 
-const TYPE_ICONS: Record<string, string> = {
-  ticket_created: "🎟️",
-  ticket_status: "🔄",
-  ticket_assigned: "👤",
-  approval_submitted: "📋",
-  approval_decided: "✅",
+const TYPE_ICONS: Record<string, typeof Bell> = {
+  ticket_created: Ticket,
+  ticket_status: RefreshCw,
+  ticket_assigned: UserCheck,
+  approval_submitted: ClipboardList,
+  approval_decided: CheckCircle,
 }
+const FallbackIcon = Pin
 
 interface NotificationBellProps {
   idToken: string | undefined
@@ -50,7 +51,10 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
     client.notifications.list(30).then((data) => {
       setNotifications(data)
       setLoading(false)
-    }).catch(() => setLoading(false))
+    }).catch((e) => {
+      console.warn("[notifications] Failed to load list:", e)
+      setLoading(false)
+    })
   }, [open, idToken])
 
   // Close on outside click
@@ -172,9 +176,10 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
                 }}
               >
                 <div className="flex items-start gap-2">
-                  <span style={{ fontSize: 13, lineHeight: 1 }}>
-                    {TYPE_ICONS[n.type] ?? "📌"}
-                  </span>
+                  {(() => {
+                    const Icon = TYPE_ICONS[n.type] ?? FallbackIcon
+                    return <Icon size={13} style={{ color: "var(--color-text-muted)", flexShrink: 0, marginTop: 1 }} />
+                  })()}
                   <div className="flex-1 min-w-0">
                     <div
                       className="font-medium truncate"

@@ -27,7 +27,9 @@ export function ApprovalSubmit({ idToken: serverToken }: Props) {
   const [submitMsg, setSubmitMsg] = useState("")
 
   useEffect(() => {
-    client.tickets.list({ status: "In Progress" }).then(setTickets).catch(() => {})
+    client.tickets.list({ status: "In Progress" }).then(setTickets).catch((e) => {
+      console.warn("[approvals] Failed to load tickets:", e)
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

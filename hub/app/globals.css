@@ -31,7 +31,7 @@
 
   /* Typography */
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-display), var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-general-sans), var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
   /* Type scale — amplified for drama */
@@ -40,7 +40,7 @@
   --text-base:  0.875rem;    /* 14px — body */
   --text-lg:    1.125rem;    /* 18px — subheadings */
   --text-xl:    1.75rem;     /* 28px — page headings */
-  --text-2xl:   2.25rem;     /* 36px — hero moments */
+  /* --text-2xl removed: contradicts density-first principle */
 
   /* Spacing */
   --spacing-sidebar: 220px;
@@ -80,13 +80,13 @@ h2 { font-size: var(--text-lg); }
 h3 { font-size: var(--text-base); font-weight: 600; }
 
 /* Page subtitle — the muted line under headings */
-h1 + p {
-  font-size: var(--text-sm) !important;
-  color: var(--color-text-faint) !important;
+h1 + [data-subtitle] {
+  font-size: var(--text-sm);
+  color: var(--color-text-faint);
   letter-spacing: 0.02em;
   text-transform: uppercase;
   font-weight: 500;
-  margin-top: 4px !important;
+  margin-top: 4px;
 }
 
 /* ─── Scrollbar ───────────────────────────────────────────────────────────── */
@@ -204,14 +204,14 @@ thead th {
   animation: successFlash 1.2s var(--ease-out-expo) both;
 }
 
-/* Complete row accent — subtle left glow for 100% scenes */
+/* Complete row accent — subtle background tint for 100% scenes */
 tr[data-complete="true"] {
-  box-shadow: inset 3px 0 0 0 color-mix(in srgb, var(--color-ok) 40%, transparent);
+  background: color-mix(in srgb, var(--color-ok) 4%, transparent);
 }
 
-/* Sidebar active indicator */
+/* Sidebar active indicator — background fill, not left-stripe */
 nav a[data-active="true"] {
-  box-shadow: inset 3px 0 0 0 var(--color-lime);
+  background: color-mix(in srgb, var(--color-lime) 8%, transparent);
 }
 
 /* Primary button hover lift */
@@ -221,11 +221,7 @@ button[style*="color-lime"]:hover:not(:disabled) {
   box-shadow: 0 4px 12px color-mix(in srgb, var(--color-lime) 25%, transparent);
 }
 
-/* Studio badge hover pop */
-.studio-badge-pop:hover {
-  transform: scale(1.08);
-  transition: transform 0.15s var(--ease-out-quart);
-}
+/* Studio badge — no decorative bounce, just color transition */
 
 /* Notification count bounce on update */
 @keyframes countBounce {
@@ -287,8 +283,8 @@ button[style*="color-lime"]:hover:not(:disabled) {
   }
 
   /* Subtitle wrapping */
-  h1 + p {
-    font-size: 0.625rem !important; /* 10px */
+  h1 + [data-subtitle] {
+    font-size: 0.625rem; /* 10px */
   }
 
   /* Tables scroll horizontally */

@@ -5,8 +5,7 @@ import { api, API_BASE_URL, type Treatment, type LocalTitleResult } from "@/lib/
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
-
-const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
+import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 const NAME_STUDIOS = ["VRA", "VRH"] as const
 type NameStudio = typeof NAME_STUDIOS[number]
 const STYLES = ["cinematic", "bold", "minimal"] as const
@@ -53,7 +52,9 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
   // Load treatments on first switch to local mode
   useEffect(() => {
     if (engine !== "local" || allTreatments.length > 0) return
-    client.titles.treatments().then(setAllTreatments).catch(() => {})
+    client.titles.treatments().then(setAllTreatments).catch((e) => {
+      console.warn("[titles] Failed to load treatments:", e)
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine])
 
@@ -215,7 +216,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
                 border: `1px solid ${engine === e ? "var(--color-border)" : "transparent"}`,
               }}
             >
-              {e === "cloud" ? "☁️ Cloud" : "🖥️ Local"}
+              {e === "cloud" ? "Cloud" : "Local"}
             </button>
           ))}
         </div>
@@ -263,19 +264,16 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
               <div>
                 <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Studio <span style={{ color: "var(--color-text-faint)" }}>(optional)</span></label>
                 <div className="flex gap-1 flex-wrap">
-                  {["", ...STUDIOS].map(s => {
-                    const active = studio === s
-                    const color = s ? STUDIO_COLOR[s] : "var(--color-text-muted)"
-                    return (
-                      <button key={s || "none"} onClick={() => setStudio(s)} className="px-2 py-1 rounded text-xs transition-colors"
-                        style={{
-                          background: active ? (s ? `color-mix(in srgb, ${color} 20%, transparent)` : "var(--color-elevated)") : "transparent",
-                          color: active ? (s ? color : "var(--color-text)") : "var(--color-text-faint)",
-                          border: `1px solid ${active ? (s ? `color-mix(in srgb, ${color} 35%, transparent)` : "var(--color-border)") : "transparent"}`,
-                        }}
-                      >{s === "" ? "None" : s === "FuckPassVR" ? "FPVR" : s === "NaughtyJOI" ? "NJOI" : s === "VRHush" ? "VRH" : "VRA"}</button>
-                    )
-                  })}
+                  <button
+                    onClick={() => setStudio("")}
+                    className="px-2 py-1 rounded text-xs transition-colors"
+                    style={{
+                      background: !studio ? "var(--color-elevated)" : "transparent",
+                      color: !studio ? "var(--color-text)" : "var(--color-text-faint)",
+                      border: `1px solid ${!studio ? "var(--color-border)" : "transparent"}`,
+                    }}
+                  >None</button>
+                  <StudioSelector value={studio} onChange={setStudio} />
                 </div>
               </div>
 

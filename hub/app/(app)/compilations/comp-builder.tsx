@@ -7,8 +7,7 @@ import { StudioBadge } from "@/components/ui/studio-badge"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
-
-const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
+import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 
 type Mode = "ideas" | "builder" | "existing"
 
@@ -74,7 +73,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
   useEffect(() => {
     if (mode !== "existing") return
     setExistingLoading(true)
-    client.compilations.existing(studio).then(setExistingComps).catch(() => setExistingComps([])).finally(() => setExistingLoading(false))
+    client.compilations.existing(studio).then(setExistingComps).catch((e) => { console.warn("[comps] Failed to load existing:", e); setExistingComps([]) }).finally(() => setExistingLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, studio])
 
@@ -168,26 +167,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
     <div>
       {/* Studio selector */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <div className="flex gap-1">
-          {STUDIOS.map(s => (
-            <button
-              key={s}
-              onClick={() => { setStudio(s); setSelected([]) }}
-              className="px-2.5 py-1.5 rounded text-xs transition-colors"
-              style={{
-                background: studio === s
-                  ? `color-mix(in srgb, ${STUDIO_COLOR[s]} 20%, transparent)`
-                  : "transparent",
-                color: studio === s ? STUDIO_COLOR[s] : "var(--color-text-muted)",
-                border: `1px solid ${studio === s
-                  ? `color-mix(in srgb, ${STUDIO_COLOR[s]} 35%, transparent)`
-                  : "var(--color-border)"}`,
-              }}
-            >
-              {s === "FuckPassVR" ? "FPVR" : s === "NaughtyJOI" ? "NJOI" : s === "VRHush" ? "VRH" : "VRA"}
-            </button>
-          ))}
-        </div>
+        <StudioSelector value={studio} onChange={(s) => { setStudio(s); setSelected([]) }} />
 
         {/* Mode tabs */}
         <div

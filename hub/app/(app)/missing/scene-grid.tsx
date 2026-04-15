@@ -1,13 +1,14 @@
 "use client"
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import { FilterTabs } from "@/components/ui/filter-tabs"
 import { StudioBadge } from "@/components/ui/studio-badge"
-import { ErrorAlert } from "@/components/ui/error-alert"
+import { RetryError } from "@/components/ui/retry-error"
 import { useIdToken } from "@/hooks/use-id-token"
 import type { Scene, SceneStats } from "@/lib/api"
 import { API_BASE_URL } from "@/lib/api"
 import { SceneDetail } from "./scene-detail"
+import { ChevronUp, ChevronDown } from "lucide-react"
 
 const STUDIOS = ["All", "FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
 
@@ -24,6 +25,12 @@ function completionPct(scene: Scene): number {
   return Math.round((present / ASSET_COLS.length) * 100)
 }
 
+type SortKey = "studio" | "id" | "title" | "performers" | "completion"
+type SortDir = "asc" | "desc"
+
+const ROW_HEIGHT = 36
+const OVERSCAN = 8
+
 interface Props {
   scenes: Scene[]
   stats: SceneStats
@@ -31,7 +38,7 @@ interface Props {
   idToken?: string | undefined
 }
 
-export function SceneGrid({ scenes: initialScenes, stats, error, idToken: serverIdToken }: Props) {
+export function SceneGrid({ scenes: initialScenes, stats, error: initialError, idToken: serverIdToken }: Props) {
   const idToken = useIdToken(serverIdToken)
   const [scenes, setScenes] = useState(initialScenes)
   const [studio, setStudio] = useState("All")
@@ -40,6 +47,16 @@ export function SceneGrid({ scenes: initialScenes, stats, error, idToken: server
   const [megaRefreshing, setMegaRefreshing] = useState(false)
   const [megaMsg, setMegaMsg] = useState<string | null>(null)
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null)
+  const [error, setError] = useState(initialError)
+
+  // Sort state
+  const [sortKey, setSortKey] = useState<SortKey>("completion")
+  const [sortDir, setSortDir] = useState<SortDir>("asc")
+
+  // Virtual scroll refs
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [containerHeight, setContainerHeight] = useState(600)
 
   const handleSceneUpdate = useCallback((updated: Scene) => {
     setScenes((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
@@ -55,7 +72,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error, idToken: server
   }, [scenes])
 
   const filtered = useMemo(() => {
-    return scenes.filter(s => {
+    let result = scenes.filter(s => {
       if (studio !== "All" && s.studio !== studio) return false
       if (missingOnly) {
         const complete = ASSET_COLS.every(a => s[a.key])
@@ -71,7 +88,58 @@ export function SceneGrid({ scenes: initialScenes, stats, error, idToken: server
       }
       return true
     })
-  }, [scenes, studio, missingOnly, search])
+
+    // Sort
+    result = [...result].sort((a, b) => {
+      let cmp = 0
+      switch (sortKey) {
+        case "studio":     cmp = a.studio.localeCompare(b.studio); break
+        case "id":         cmp = a.id.localeCompare(b.id); break
+        case "title":      cmp = (a.title || "").localeCompare(b.title || ""); break
+        case "performers": cmp = (a.performers || "").localeCompare(b.performers || ""); break
+        case "completion":  cmp = completionPct(a) - completionPct(b); break
+      }
+      return sortDir === "asc" ? cmp : -cmp
+    })
+
+    return result
+  }, [scenes, studio, missingOnly, search, sortKey, sortDir])
+
+  // Virtual scroll calculation
+  const totalHeight = filtered.length * ROW_HEIGHT
+  const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN)
+  const endIdx = Math.min(filtered.length, Math.ceil((scrollTop + containerHeight) / ROW_HEIGHT) + OVERSCAN)
+  const visibleRows = filtered.slice(startIdx, endIdx)
+  const offsetY = startIdx * ROW_HEIGHT
+
+  // Measure container
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setContainerHeight(entry.contentRect.height)
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir(d => d === "asc" ? "desc" : "asc")
+    } else {
+      setSortKey(key)
+      setSortDir(key === "completion" ? "asc" : "asc")
+    }
+  }
+
+  function SortIcon({ col }: { col: SortKey }) {
+    if (sortKey !== col) return null
+    return sortDir === "asc"
+      ? <ChevronUp size={10} style={{ marginLeft: 2, opacity: 0.7 }} />
+      : <ChevronDown size={10} style={{ marginLeft: 2, opacity: 0.7 }} />
+  }
 
   async function triggerMegaRefresh() {
     setMegaRefreshing(true)
@@ -168,12 +236,14 @@ export function SceneGrid({ scenes: initialScenes, stats, error, idToken: server
 
       {/* Error */}
       {error && (
-        <ErrorAlert className="p-4 text-sm mb-4">
-          {error}
-          <p className="mt-1 text-xs opacity-70">
-            Could not reach the API. Check that the backend service is running.
-          </p>
-        </ErrorAlert>
+        <RetryError
+          message={error}
+          onRetry={() => {
+            setError(null)
+            window.location.reload()
+          }}
+          className="mb-4"
+        />
       )}
 
       {/* Empty */}
@@ -186,107 +256,151 @@ export function SceneGrid({ scenes: initialScenes, stats, error, idToken: server
             color: "var(--color-text-faint)",
           }}
         >
-          <span style={{ fontSize: 24 }}>&#9673;</span>
           <span style={{ fontSize: 13 }}>
             {search ? `No scenes matching "${search}"` : missingOnly ? "All assets accounted for" : "No scenes loaded"}
           </span>
           {missingOnly && !search && (
-            <span style={{ fontSize: 11, color: "var(--color-ok)" }}>Every scene has its assets. Nice.</span>
+            <span style={{ fontSize: 11, color: "var(--color-ok)" }}>Every scene has its assets.</span>
           )}
         </div>
       )}
 
-      {/* Table */}
+      {/* Table with virtual scroll */}
       {!error && filtered.length > 0 && (
         <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
           <table className="w-full" style={{ borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
-                <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Studio</th>
-                <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>ID</th>
-                <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Title</th>
-                <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Performers</th>
+                <th
+                  className="text-left px-3 py-2 font-medium cursor-pointer select-none"
+                  style={{ fontSize: 11, color: "var(--color-text-muted)" }}
+                  onClick={() => handleSort("studio")}
+                >
+                  <span className="inline-flex items-center">Studio<SortIcon col="studio" /></span>
+                </th>
+                <th
+                  className="text-left px-3 py-2 font-medium cursor-pointer select-none"
+                  style={{ fontSize: 11, color: "var(--color-text-muted)" }}
+                  onClick={() => handleSort("id")}
+                >
+                  <span className="inline-flex items-center">ID<SortIcon col="id" /></span>
+                </th>
+                <th
+                  className="text-left px-3 py-2 font-medium cursor-pointer select-none"
+                  style={{ fontSize: 11, color: "var(--color-text-muted)" }}
+                  onClick={() => handleSort("title")}
+                >
+                  <span className="inline-flex items-center">Title<SortIcon col="title" /></span>
+                </th>
+                <th
+                  className="text-left px-3 py-2 font-medium cursor-pointer select-none"
+                  style={{ fontSize: 11, color: "var(--color-text-muted)" }}
+                  onClick={() => handleSort("performers")}
+                >
+                  <span className="inline-flex items-center">Performers<SortIcon col="performers" /></span>
+                </th>
                 {ASSET_COLS.map(col => (
                   <th key={col.key} className="text-center px-2 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
                     {col.label}
                   </th>
                 ))}
-                <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Done</th>
+                <th
+                  className="text-left px-3 py-2 font-medium cursor-pointer select-none"
+                  style={{ fontSize: 11, color: "var(--color-text-muted)" }}
+                  onClick={() => handleSort("completion")}
+                >
+                  <span className="inline-flex items-center">Done<SortIcon col="completion" /></span>
+                </th>
               </tr>
             </thead>
-            <tbody>
-              {filtered.map((scene, i) => {
-                const pct = completionPct(scene)
-                return (
-                  <tr
-                    key={scene.id}
-                    onClick={() => setSelectedScene(scene)}
-                    data-complete={pct === 100 || undefined}
-                    className="transition-colors cursor-pointer hover:bg-[--color-elevated]"
-                    style={{
-                      borderBottom: i < filtered.length - 1 ? "1px solid var(--color-border-subtle)" : undefined,
-                    }}
-                  >
-                    <td className="px-3 py-1.5 whitespace-nowrap">
-                      <StudioBadge studio={scene.studio} />
-                    </td>
-                    <td className="px-3 py-1.5 font-mono whitespace-nowrap" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                      {scene.id}
-                    </td>
-                    <td className="px-3 py-1.5" style={{ fontSize: 12, maxWidth: 280 }}>
-                      <span className="line-clamp-1">{scene.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}</span>
-                    </td>
-                    <td className="px-3 py-1.5" style={{ fontSize: 11, color: "var(--color-text-muted)", maxWidth: 180 }}>
-                      <span className="line-clamp-1">{scene.performers || "—"}</span>
-                    </td>
-                    {ASSET_COLS.map(col => (
-                      <td key={col.key} className="px-2 py-1.5 text-center">
-                        <span
-                          className="inline-flex items-center justify-center rounded-full"
-                          style={{
-                            width: 18,
-                            height: 18,
-                            fontSize: 10,
-                            fontWeight: 600,
-                            background: scene[col.key]
-                              ? "color-mix(in srgb, var(--color-ok) 18%, transparent)"
-                              : "color-mix(in srgb, var(--color-err) 12%, transparent)",
-                            color: scene[col.key] ? "var(--color-ok)" : "var(--color-err)",
-                          }}
-                        >
-                          {scene[col.key] ? "✓" : "✗"}
-                        </span>
-                      </td>
-                    ))}
-                    <td className="px-3 py-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <div
-                          className="rounded-full overflow-hidden"
-                          style={{ width: 56, height: 5, background: "var(--color-border)" }}
-                        >
-                          <div
-                            className="h-full rounded-full transition-all"
-                            style={{
-                              width: `${pct}%`,
-                              background: pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)",
-                            }}
-                          />
-                        </div>
-                        <span style={{
-                          fontSize: 10,
-                          fontWeight: 600,
-                          minWidth: 28,
-                          color: pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : pct > 0 ? "var(--color-err)" : "var(--color-text-faint)",
-                        }}>
-                          {pct}%
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
           </table>
+
+          {/* Virtual scroll body */}
+          <div
+            ref={containerRef}
+            className="overflow-y-auto"
+            style={{ maxHeight: "calc(100vh - 280px)" }}
+            onScroll={(e) => setScrollTop((e.target as HTMLElement).scrollTop)}
+          >
+            <div style={{ height: totalHeight, position: "relative" }}>
+              <table className="w-full" style={{ borderCollapse: "collapse", position: "absolute", top: offsetY, left: 0, right: 0 }}>
+                <tbody>
+                  {visibleRows.map((scene, i) => {
+                    const pct = completionPct(scene)
+                    const rowIdx = startIdx + i
+                    return (
+                      <tr
+                        key={scene.id}
+                        onClick={() => setSelectedScene(scene)}
+                        data-complete={pct === 100 || undefined}
+                        className="transition-colors cursor-pointer hover:bg-[--color-elevated]"
+                        style={{
+                          height: ROW_HEIGHT,
+                          borderBottom: rowIdx < filtered.length - 1 ? "1px solid var(--color-border-subtle)" : undefined,
+                        }}
+                      >
+                        <td className="px-3 py-1.5 whitespace-nowrap">
+                          <StudioBadge studio={scene.studio} />
+                        </td>
+                        <td className="px-3 py-1.5 font-mono whitespace-nowrap" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                          {scene.id}
+                        </td>
+                        <td className="px-3 py-1.5" style={{ fontSize: 12, maxWidth: 280 }}>
+                          <span className="line-clamp-1">{scene.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}</span>
+                        </td>
+                        <td className="px-3 py-1.5" style={{ fontSize: 11, color: "var(--color-text-muted)", maxWidth: 180 }}>
+                          <span className="line-clamp-1">{scene.performers || "—"}</span>
+                        </td>
+                        {ASSET_COLS.map(col => (
+                          <td key={col.key} className="px-2 py-1.5 text-center">
+                            <span
+                              className="inline-flex items-center justify-center rounded-full"
+                              style={{
+                                width: 18,
+                                height: 18,
+                                fontSize: 10,
+                                fontWeight: 600,
+                                background: scene[col.key]
+                                  ? "color-mix(in srgb, var(--color-ok) 18%, transparent)"
+                                  : "color-mix(in srgb, var(--color-err) 12%, transparent)",
+                                color: scene[col.key] ? "var(--color-ok)" : "var(--color-err)",
+                              }}
+                            >
+                              {scene[col.key] ? "✓" : "✗"}
+                            </span>
+                          </td>
+                        ))}
+                        <td className="px-3 py-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <div
+                              className="rounded-full overflow-hidden"
+                              style={{ width: 56, height: 5, background: "var(--color-border)" }}
+                            >
+                              <div
+                                className="h-full rounded-full"
+                                style={{
+                                  width: `${pct}%`,
+                                  background: pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)",
+                                }}
+                              />
+                            </div>
+                            <span style={{
+                              fontSize: 10,
+                              fontWeight: 600,
+                              minWidth: 28,
+                              color: pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : pct > 0 ? "var(--color-err)" : "var(--color-text-faint)",
+                            }}>
+                              {pct}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
     </div>

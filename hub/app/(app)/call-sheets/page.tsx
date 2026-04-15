@@ -4,32 +4,8 @@ import { useState, useEffect } from "react"
 import { API_BASE_URL } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
-import { STUDIO_COLOR } from "@/lib/studio-colors"
+import { StudioBadge } from "@/components/ui/studio-badge"
 import type { ShootDate, ShootScene } from "@/lib/api"
-
-// ---------------------------------------------------------------------------
-// Studio badge colors for scene type rows
-// ---------------------------------------------------------------------------
-
-function StudioChip({ studio }: { studio: string }) {
-  const color = STUDIO_COLOR[studio]
-  return (
-    <span
-      className="px-1.5 py-0.5 rounded text-xs"
-      style={{
-        background: color ? `color-mix(in srgb, ${color} 15%, transparent)` : "var(--color-elevated)",
-        color: color ?? "var(--color-text-muted)",
-        fontSize: 10,
-      }}
-    >
-      {studio === "FuckPassVR" ? "FPVR" :
-       studio === "NaughtyJOI" ? "NJOI" :
-       studio === "VRHush" ? "VRH" :
-       studio === "VRAllure" ? "VRA" :
-       studio}
-    </span>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // Date row component
@@ -100,7 +76,7 @@ function DateRow({ date, doorCode, idToken, tabName }: DateRowProps) {
         </span>
         <div className="flex gap-1 flex-wrap">
           {[...new Set(date.scenes.map(s => s.studio))].map(s => (
-            <StudioChip key={s} studio={s} />
+            <StudioBadge key={s} studio={s} />
           ))}
         </div>
         <span style={{ fontSize: 12, color: "var(--color-text-muted)", marginLeft: 4 }}>
@@ -175,7 +151,7 @@ function DateRow({ date, doorCode, idToken, tabName }: DateRowProps) {
                   key={i}
                   style={{ borderTop: "1px solid var(--color-border-subtle)" }}
                 >
-                  <td className="px-4 py-1.5"><StudioChip studio={scene.studio} /></td>
+                  <td className="px-4 py-1.5"><StudioBadge studio={scene.studio} /></td>
                   <td className="px-4 py-1.5" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{scene.type || "—"}</td>
                   <td className="px-4 py-1.5" style={{ fontSize: 12, color: "var(--color-text)" }}>{scene.female || "—"}</td>
                   <td className="px-4 py-1.5" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{scene.male || "—"}</td>

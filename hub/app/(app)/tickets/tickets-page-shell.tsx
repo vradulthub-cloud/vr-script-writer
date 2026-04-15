@@ -23,17 +23,9 @@ export function TicketsPageShell({ isAdmin, children }: TicketsPageShellProps) {
       {/* Page header with tab toggle */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1
-            className="font-semibold tracking-tight"
-            style={{ fontSize: 16, color: "var(--color-text)" }}
-          >
+          <h1>
             {activeTab === "tickets" ? "Tickets" : "User Management"}
           </h1>
-          <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
-            {activeTab === "tickets"
-              ? "Bug reports, feature requests, and tasks"
-              : "Manage user roles and tab permissions"}
-          </p>
         </div>
 
         {/* Sub-tab toggle (only show if admin) */}

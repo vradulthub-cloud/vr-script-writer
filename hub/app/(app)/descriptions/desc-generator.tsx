@@ -6,6 +6,8 @@ import { api, API_BASE_URL, type Scene } from "@/lib/api"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
+import { StudioSelector } from "@/components/ui/studio-selector"
+import { CopyButton } from "@/components/ui/copy-button"
 
 // ---------------------------------------------------------------------------
 // Per-studio category lists
@@ -409,26 +411,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
           {/* Studio */}
           <div>
             <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Studio</label>
-            <div className="flex gap-1 flex-wrap">
-              {STUDIOS.map(s => (
-                <button
-                  key={s}
-                  onClick={() => { setStudio(s); setSelectedCats([]) }}
-                  className="px-2 py-1 rounded text-xs transition-colors"
-                  style={{
-                    background: studio === s
-                      ? `color-mix(in srgb, ${STUDIO_COLOR[s]} 20%, transparent)`
-                      : "transparent",
-                    color: studio === s ? STUDIO_COLOR[s] : "var(--color-text-muted)",
-                    border: `1px solid ${studio === s
-                      ? `color-mix(in srgb, ${STUDIO_COLOR[s]} 35%, transparent)`
-                      : "var(--color-border)"}`,
-                  }}
-                >
-                  {s === "FuckPassVR" ? "FPVR" : s === "NaughtyJOI" ? "NJOI" : s === "VRHush" ? "VRH" : "VRA"}
-                </button>
-              ))}
-            </div>
+            <StudioSelector value={studio} onChange={(s) => { setStudio(s); setSelectedCats([]) }} />
           </div>
 
           {/* Is compilation */}

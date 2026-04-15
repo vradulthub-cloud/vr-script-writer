@@ -101,7 +101,6 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
               )}
               style={{
                 color: active ? "var(--color-text)" : "var(--color-text-muted)",
-                background: active ? "var(--color-elevated)" : undefined,
               }}
             >
               <Icon
