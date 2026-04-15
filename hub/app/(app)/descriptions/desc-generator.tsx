@@ -10,40 +10,36 @@ import { StudioSelector } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
 
 // ---------------------------------------------------------------------------
-// Per-studio category lists
+// Per-studio category lists — grouped for visual structure
 // ---------------------------------------------------------------------------
 
-const STUDIO_CATEGORIES: Record<string, string[]> = {
+const STUDIO_CATEGORY_GROUPS: Record<string, { label: string; cats: string[] }[]> = {
   FuckPassVR: [
-    "Blowjob", "Cowgirl", "Reverse Cowgirl", "Creampie", "Cumshot", "Doggy Style",
-    "Facial", "Handjob", "Missionary", "Standing Missionary",
-    "Big Tits", "Natural Tits", "Small Tits", "Big Ass", "Petite", "Curvy", "Athletic",
-    "Blonde", "Brunette", "Redhead", "Ebony", "Latina", "Asian",
-    "Teen", "Milf", "POV", "Travel", "VR Porn", "8K VR",
+    { label: "Acts",  cats: ["Blowjob", "Cowgirl", "Reverse Cowgirl", "Creampie", "Cumshot", "Doggy Style", "Facial", "Handjob", "Missionary", "Standing Missionary"] },
+    { label: "Body",  cats: ["Big Tits", "Natural Tits", "Small Tits", "Big Ass", "Petite", "Curvy", "Athletic"] },
+    { label: "Look",  cats: ["Blonde", "Brunette", "Redhead", "Ebony", "Latina", "Asian"] },
+    { label: "Tags",  cats: ["Teen", "Milf", "POV", "Travel", "VR Porn", "8K VR"] },
   ],
   VRHush: [
-    "Blowjob", "Cowgirl", "Reverse Cowgirl", "Creampie", "Cumshot", "Doggy Style",
-    "Facial", "Handjob", "Missionary", "Standing Missionary",
-    "Big Tits", "Natural Tits", "Small Tits", "Big Ass", "Petite", "Curvy", "Athletic",
-    "Blonde", "Brunette", "Redhead", "Ebony", "Latina",
-    "Teen", "Milf", "American", "European", "POV", "VR Porn", "8K VR",
+    { label: "Acts",  cats: ["Blowjob", "Cowgirl", "Reverse Cowgirl", "Creampie", "Cumshot", "Doggy Style", "Facial", "Handjob", "Missionary", "Standing Missionary"] },
+    { label: "Body",  cats: ["Big Tits", "Natural Tits", "Small Tits", "Big Ass", "Petite", "Curvy", "Athletic"] },
+    { label: "Look",  cats: ["Blonde", "Brunette", "Redhead", "Ebony", "Latina"] },
+    { label: "Tags",  cats: ["Teen", "Milf", "American", "European", "POV", "VR Porn", "8K VR"] },
   ],
   VRAllure: [
-    "Solo", "Masturbation", "Vibrator", "Dildo", "Fingering", "Squirting",
-    "Lesbian", "Lingerie", "Striptease", "Nude",
-    "Big Tits", "Natural Tits", "Small Tits",
-    "Blonde", "Brunette", "Redhead", "Teen", "Milf",
-    "VR Porn", "8K VR",
+    { label: "Acts",  cats: ["Solo", "Masturbation", "Vibrator", "Dildo", "Fingering", "Squirting"] },
+    { label: "Style", cats: ["Lesbian", "Lingerie", "Striptease", "Nude"] },
+    { label: "Body",  cats: ["Big Tits", "Natural Tits", "Small Tits"] },
+    { label: "Look",  cats: ["Blonde", "Brunette", "Redhead", "Teen", "Milf"] },
+    { label: "Tags",  cats: ["VR Porn", "8K VR"] },
   ],
   NaughtyJOI: [
-    "JOI", "Countdown", "Tease", "Instruction", "Dirty Talk", "Edging",
-    "Lingerie", "Striptease", "Solo", "Masturbation",
-    "Blonde", "Brunette", "Natural Tits", "Small Tits",
-    "VR Porn",
+    { label: "Acts",  cats: ["JOI", "Countdown", "Tease", "Instruction", "Dirty Talk", "Edging"] },
+    { label: "Style", cats: ["Lingerie", "Striptease", "Solo", "Masturbation"] },
+    { label: "Look",  cats: ["Blonde", "Brunette", "Natural Tits", "Small Tits"] },
+    { label: "Tags",  cats: ["VR Porn"] },
   ],
 }
-
-const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
 
 interface Props {
   scenes: Scene[]
@@ -174,6 +170,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const [docxLoading, setDocxLoading] = useState(false)
+  const [docxError, setDocxError] = useState<string | null>(null)
 
   const client = api(idToken ?? null)
 
@@ -238,7 +235,10 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
     }
   }
 
-  const availableCategories = STUDIO_CATEGORIES[studio] ?? []
+  const availableCategories = useMemo(
+    () => (STUDIO_CATEGORY_GROUPS[studio] ?? []).flatMap(g => g.cats),
+    [studio]
+  )
 
   function toggleCat(cat: string) {
     setSelectedCats(prev =>
@@ -326,6 +326,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
     const desc = getFullDescription()
     if (!desc) return
     setDocxLoading(true)
+    setDocxError(null)
     try {
       const res = await fetch(`${API_BASE_URL}/api/descriptions/docx`, {
         method: "POST",
@@ -339,7 +340,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
           meta_description: metaDesc || undefined,
         }),
       })
-      if (!res.ok) throw new Error(`${res.status}`)
+      if (!res.ok) throw new Error(`Server ${res.status}`)
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
@@ -348,7 +349,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
-      // silent — user sees nothing changed
+      setDocxError(e instanceof Error ? e.message : "Download failed")
     } finally {
       setDocxLoading(false)
     }
@@ -466,7 +467,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
             />
           </div>
 
-          {/* Categories — per-studio chips */}
+          {/* Categories — grouped chips */}
           <div>
             <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
               Categories
@@ -479,24 +480,33 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                 </button>
               )}
             </label>
-            <div className="flex flex-wrap gap-1">
-              {availableCategories.map(cat => {
-                const active = selectedCats.includes(cat)
-                return (
-                  <button
-                    key={cat}
-                    onClick={() => toggleCat(cat)}
-                    className="px-2 py-0.5 rounded text-xs transition-colors"
-                    style={{
-                      background: active ? `color-mix(in srgb, ${studioColor} 15%, transparent)` : "transparent",
-                      color: active ? studioColor : "var(--color-text-faint)",
-                      border: `1px solid ${active ? `color-mix(in srgb, ${studioColor} 30%, transparent)` : "var(--color-border)"}`,
-                    }}
-                  >
-                    {cat}
-                  </button>
-                )
-              })}
+            <div className="flex flex-col gap-2">
+              {(STUDIO_CATEGORY_GROUPS[studio] ?? []).map(({ label, cats }) => (
+                <div key={label}>
+                  <p style={{ fontSize: 9, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginBottom: 3 }}>
+                    {label}
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {cats.map(cat => {
+                      const active = selectedCats.includes(cat)
+                      return (
+                        <button
+                          key={cat}
+                          onClick={() => toggleCat(cat)}
+                          className="px-2 py-0.5 rounded text-xs transition-colors"
+                          style={{
+                            background: active ? `color-mix(in srgb, ${studioColor} 15%, transparent)` : "transparent",
+                            color: active ? studioColor : "var(--color-text-faint)",
+                            border: `1px solid ${active ? `color-mix(in srgb, ${studioColor} 30%, transparent)` : "var(--color-border)"}`,
+                          }}
+                        >
+                          {cat}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -598,7 +608,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
               fontSize: 12,
             }}
           >
-            Add performers and categories, then generate. SEO-ready copy in seconds.
+            Select performers and categories to generate the description.
           </div>
         )}
 
@@ -781,6 +791,11 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                   {docxLoading ? "…" : "Download DOCX"}
                 </button>
 
+                {docxError && (
+                  <span style={{ fontSize: 11, color: "var(--color-err)" }}>
+                    DOCX failed: {docxError}
+                  </span>
+                )}
                 {saveMsg && (
                   <span style={{ fontSize: 11, color: saveMsg === "Saved." ? "var(--color-ok)" : "var(--color-err)" }}>
                     {saveMsg}

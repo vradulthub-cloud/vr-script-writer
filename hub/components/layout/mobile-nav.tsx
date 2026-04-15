@@ -17,7 +17,7 @@ import {
 } from "lucide-react"
 
 const PRIMARY_ITEMS = [
-  { href: "/missing",      label: "Assets",    icon: LayoutGrid },
+  { href: "/missing",      label: "Missing",   icon: LayoutGrid },
   { href: "/scripts",      label: "Scripts",   icon: FileText },
   { href: "/titles",       label: "Titles",    icon: Image },
   { href: "/descriptions", label: "Desc",      icon: AlignLeft },

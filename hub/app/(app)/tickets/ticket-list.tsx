@@ -340,7 +340,7 @@ export function TicketList({ tickets: initialTickets, error, idToken: serverIdTo
                                     {saving ? "Saving…" : "Save Changes"}
                                   </button>
                                   {saveMsg && (
-                                    <span style={{ fontSize: 11, color: saveMsg === "Saved." || saveMsg === "No changes." ? "var(--color-ok)" : "var(--color-err)" }}>
+                                    <span style={{ fontSize: 11, color: saveMsg === "Saved." ? "var(--color-ok)" : saveMsg === "No changes." ? "var(--color-text-muted)" : "var(--color-err)" }}>
                                       {saveMsg}
                                     </span>
                                   )}
@@ -369,7 +369,7 @@ export function TicketList({ tickets: initialTickets, error, idToken: serverIdTo
           <div
             className="rounded-lg"
             style={{
-              background: "var(--color-bg)",
+              background: "var(--color-base)",
               border: "1px solid var(--color-border)",
               width: 480,
               maxWidth: "calc(100vw - 32px)",

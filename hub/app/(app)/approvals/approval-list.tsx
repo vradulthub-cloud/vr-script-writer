@@ -92,14 +92,16 @@ function UndoToast({ decision, progress, onUndo, onDismiss }: UndoToastProps) {
         animation: "toastSlideUp 200ms cubic-bezier(0.16, 1, 0.3, 1) both",
       }}
     >
-      {/* Countdown bar */}
+      {/* Countdown bar — scaleX avoids layout reflow on every tick */}
       <div
         aria-hidden="true"
         style={{
           height: 2,
           background: barColor,
-          width: `${progress}%`,
-          transition: "width 60ms linear",
+          width: "100%",
+          transform: `scaleX(${progress / 100})`,
+          transformOrigin: "left",
+          transition: "transform 60ms linear",
         }}
       />
       <div

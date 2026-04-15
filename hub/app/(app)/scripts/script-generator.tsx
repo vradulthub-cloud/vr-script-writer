@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { Download, Sparkles, Link2, RotateCcw } from "lucide-react"
+import { Download, Wand2, Link2, RotateCcw } from "lucide-react"
 import { useStream } from "@/lib/sse"
 import { api, API_BASE_URL, type Script, type Ticket } from "@/lib/api"
 import { ErrorAlert } from "@/components/ui/error-alert"
@@ -566,7 +566,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
               fontSize: 12,
             }}
           >
-            Pick a studio, name your talent, and hit generate. The AI does the rest.
+            Select a studio and enter talent to generate the shoot script.
           </div>
         )}
 
@@ -623,6 +623,77 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
               </pre>
             </div>
 
+            {/* Primary actions — immediately after output so user doesn't need to scroll */}
+            {!stream.streaming && stream.output && (
+              <div className="flex flex-col gap-3 mb-4">
+                {/* Action buttons row */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {isAdmin ? (
+                    <button
+                      onClick={save}
+                      disabled={saving || !selectedRow}
+                      className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+                      style={{
+                        background: "var(--color-lime)",
+                        color: "#0d0d0d",
+                        opacity: saving || !selectedRow ? 0.5 : 1,
+                      }}
+                    >
+                      {saving ? "Saving..." : "Accept & Save"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={submitForApproval}
+                      disabled={saving}
+                      className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+                      style={{
+                        background: "var(--color-lime)",
+                        color: "#0d0d0d",
+                        opacity: saving ? 0.5 : 1,
+                      }}
+                    >
+                      {saving ? "Submitting..." : "Submit for Approval"}
+                    </button>
+                  )}
+
+                  <button
+                    onClick={downloadTxt}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-colors"
+                    style={{ background: "var(--color-surface)", color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
+                  >
+                    <Download size={11} />
+                    Download .txt
+                  </button>
+
+                  {saveMsg && (
+                    <span style={{ fontSize: 11, color: saveMsg.includes("Saved") || saveMsg.includes("Submitted") ? "var(--color-ok)" : "var(--color-err)" }}>
+                      {saveMsg}
+                    </span>
+                  )}
+                </div>
+
+                {/* Ticket linking */}
+                {tickets.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Link2 size={12} style={{ color: "var(--color-text-faint)" }} />
+                    <select
+                      value={linkedTicket}
+                      onChange={(e) => setLinkedTicket(e.target.value)}
+                      className="px-2 py-1 rounded text-xs outline-none"
+                      style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
+                    >
+                      <option value="">Link to ticket...</option>
+                      {tickets.map((t) => (
+                        <option key={t.ticket_id} value={t.ticket_id}>
+                          {t.ticket_id} — {t.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Parsed sections */}
             {!stream.streaming && Object.keys(sections).length > 0 && (
               <div
@@ -652,7 +723,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
               </div>
             )}
 
-            {/* Post-generation controls */}
+            {/* Secondary controls */}
             {!stream.streaming && stream.output && (
               <div className="flex flex-col gap-4">
                 {/* Validation */}
@@ -698,7 +769,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
                       opacity: titleGenerating ? 0.5 : 1,
                     }}
                   >
-                    <Sparkles size={11} />
+                    <Wand2 size={11} />
                     {titleGenerating ? "Generating..." : "Generate Title"}
                   </button>
                   {genTitleText && (
@@ -710,74 +781,6 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
                     </span>
                   )}
                 </div>
-
-                {/* Action buttons row */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  {/* Download */}
-                  <button
-                    onClick={downloadTxt}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-colors"
-                    style={{ background: "var(--color-surface)", color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
-                  >
-                    <Download size={11} />
-                    Download .txt
-                  </button>
-
-                  {/* Accept (admin) or Submit (editor) */}
-                  {isAdmin ? (
-                    <button
-                      onClick={save}
-                      disabled={saving || !selectedRow}
-                      className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-                      style={{
-                        background: "var(--color-lime)",
-                        color: "#0d0d0d",
-                        opacity: saving || !selectedRow ? 0.5 : 1,
-                      }}
-                    >
-                      {saving ? "Saving..." : "Accept & Save"}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={submitForApproval}
-                      disabled={saving}
-                      className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-                      style={{
-                        background: "var(--color-lime)",
-                        color: "#0d0d0d",
-                        opacity: saving ? 0.5 : 1,
-                      }}
-                    >
-                      {saving ? "Submitting..." : "Submit for Approval"}
-                    </button>
-                  )}
-
-                  {saveMsg && (
-                    <span style={{ fontSize: 11, color: saveMsg.includes("Saved") || saveMsg.includes("Submitted") ? "var(--color-ok)" : "var(--color-err)" }}>
-                      {saveMsg}
-                    </span>
-                  )}
-                </div>
-
-                {/* Ticket linking */}
-                {tickets.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <Link2 size={12} style={{ color: "var(--color-text-faint)" }} />
-                    <select
-                      value={linkedTicket}
-                      onChange={(e) => setLinkedTicket(e.target.value)}
-                      className="px-2 py-1 rounded text-xs outline-none"
-                      style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
-                    >
-                      <option value="">Link to ticket...</option>
-                      {tickets.map((t) => (
-                        <option key={t.ticket_id} value={t.ticket_id}>
-                          {t.ticket_id} — {t.title}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
 
                 {/* Regenerate with feedback */}
                 <div className="flex items-center gap-2">

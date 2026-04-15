@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ArrowLeft, Sparkles, FolderPlus } from "lucide-react"
+import { ArrowLeft, Wand2, FolderPlus } from "lucide-react"
 import { api, type Scene, type NamingIssue } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioBadge } from "@/components/ui/studio-badge"
@@ -235,7 +235,7 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
                   opacity: generating ? 0.5 : 1,
                 }}
               >
-                <Sparkles size={11} />
+                <Wand2 size={11} />
                 {generating ? "Generating..." : "Generate Title"}
               </button>
               {genTitle && (
