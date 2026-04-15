@@ -208,6 +208,7 @@ export interface ProfileScene {
   duration: string
   views: string
   likes: string
+  comments: string
 }
 
 export interface ModelProfile {
