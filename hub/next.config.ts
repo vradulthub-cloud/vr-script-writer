@@ -1,11 +1,9 @@
 import type { NextConfig } from "next"
 
 const nextConfig: NextConfig = {
-  // The FastAPI backend is called directly via NEXT_PUBLIC_API_URL.
-  // No proxy needed — the API client builds the full URL.
-  //
-  // Production: both services run behind Tailscale; update NEXT_PUBLIC_API_URL
-  // to the Windows machine's Tailscale URL on port 8502.
+  // Standalone output: creates a self-contained bundle in .next/standalone
+  // that can be run with `node server.js` — no node_modules needed on the server.
+  output: "standalone",
 }
 
 export default nextConfig
