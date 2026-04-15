@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Bell, Ticket, RefreshCw, UserCheck, ClipboardList, CheckCircle, Pin } from "lucide-react"
-import { api, type Notification } from "@/lib/api"
+import { signOut } from "next-auth/react"
+import { api, ApiError, type Notification } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 
 const TYPE_ICONS: Record<string, typeof Bell> = {
@@ -33,8 +34,12 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
     try {
       const { count } = await client.notifications.unreadCount()
       setUnread(count)
-    } catch {
-      // Silently fail — bell just won't show a badge
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        // Token is dead — sign out so the user gets redirected to login cleanly
+        signOut({ redirectTo: "/login" })
+      }
+      // Other failures: silently ignore — bell just won't show a badge
     }
   }, [idToken])
 
