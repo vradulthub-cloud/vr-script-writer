@@ -222,6 +222,13 @@ CREATE TABLE IF NOT EXISTS sync_meta (
     status TEXT DEFAULT 'ok',
     error TEXT DEFAULT ''
 );
+
+-- Model profile cache (scraped from Babepedia, VRPorn, SLR — 7-day TTL)
+CREATE TABLE IF NOT EXISTS model_profiles (
+    name TEXT PRIMARY KEY,
+    profile_json TEXT NOT NULL DEFAULT '{}',
+    cached_at TEXT NOT NULL
+);
 """
 
 

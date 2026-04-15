@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useMemo, useDeferredValue } from "react"
+import { useState, useMemo, useDeferredValue, useCallback } from "react"
 import { ErrorAlert } from "@/components/ui/error-alert"
-import type { Model } from "@/lib/api"
+import { api, type Model, type ModelProfile } from "@/lib/api"
+import { useIdToken } from "@/hooks/use-id-token"
 
 // ─── Rank config ─────────────────────────────────────────────────────────────
 
@@ -12,6 +13,24 @@ const RANK_CONFIG: Record<string, { label: string; color: string }> = {
   moderate: { label: "Mod",      color: "#eab308" },
   poor:     { label: "Poor",     color: "#ef4444" },
 }
+
+// ─── Bio fields to display (in order) ────────────────────────────────────────
+
+const BIO_FIELDS: { key: string; label: string }[] = [
+  { key: "age",          label: "Age"          },
+  { key: "birthday",     label: "Born"         },
+  { key: "ethnicity",    label: "Ethnicity"    },
+  { key: "height",       label: "Height"       },
+  { key: "weight",       label: "Weight"       },
+  { key: "measurements", label: "Measurements" },
+  { key: "hair",         label: "Hair"         },
+  { key: "eyes",         label: "Eyes"         },
+  { key: "nationality",  label: "Nationality"  },
+  { key: "birthplace",   label: "From"         },
+  { key: "years active", label: "Active"       },
+  { key: "sexuality",    label: "Sexuality"    },
+  { key: "body type",    label: "Body type"    },
+]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -56,9 +75,10 @@ function buildPhotoUrl(name: string): string {
 
 // ─── Circular photo with initials fallback ────────────────────────────────────
 
-function ModelPhoto({ name, size = 28 }: { name: string; size?: number }) {
+function ModelPhoto({ name, photoUrl, size = 28 }: { name: string; photoUrl?: string; size?: number }) {
   const [failed, setFailed] = useState(false)
   const initials = name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase()).join("")
+  const src = photoUrl || buildPhotoUrl(name)
 
   if (failed) {
     return (
@@ -81,7 +101,7 @@ function ModelPhoto({ name, size = 28 }: { name: string; size?: number }) {
 
   return (
     <img
-      src={buildPhotoUrl(name)}
+      src={src}
       alt=""
       aria-hidden="true"
       onError={() => setFailed(true)}
@@ -132,7 +152,6 @@ function OutreachCard({
         if (!isActive) (e.currentTarget as HTMLElement).style.borderColor = "var(--color-border)"
       }}
     >
-      {/* Photo / initials */}
       {imgFailed ? (
         <div style={{
           height: 150,
@@ -156,7 +175,6 @@ function OutreachCard({
         />
       )}
 
-      {/* Opportunity score badge */}
       <div style={{
         position: "absolute", top: 6, right: 6,
         background: scoreColor(model.opportunity_score),
@@ -167,7 +185,6 @@ function OutreachCard({
         {model.opportunity_score}
       </div>
 
-      {/* Rank badge (top-left, shown for Great/Good only) */}
       {rankCfg && model.rank.toLowerCase() !== "moderate" && model.rank.toLowerCase() !== "poor" && (
         <div style={{
           position: "absolute", top: 6, left: 6,
@@ -181,7 +198,6 @@ function OutreachCard({
         </div>
       )}
 
-      {/* Gradient overlay — name + urgency */}
       <div style={{
         position: "absolute", bottom: 0, left: 0, right: 0,
         background: "linear-gradient(transparent, rgba(0,0,0,0.88))",
@@ -205,6 +221,325 @@ function OutreachCard({
   )
 }
 
+// ─── Scene strip (horizontal scroll row) ─────────────────────────────────────
+
+function SceneStrip({ scenes, platform }: {
+  scenes: ModelProfile["slr_scenes"]
+  platform: "SLR" | "VRP"
+}) {
+  if (!scenes.length) {
+    return (
+      <p style={{ fontSize: 11, color: "var(--color-text-faint)", padding: "4px 0" }}>
+        No scenes found
+      </p>
+    )
+  }
+
+  return (
+    <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+      {scenes.map((scene, i) => (
+        <a
+          key={i}
+          href={scene.url || undefined}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={e => { if (!scene.url) e.preventDefault() }}
+          style={{
+            flexShrink: 0,
+            width: 140,
+            borderRadius: 4,
+            overflow: "hidden",
+            background: "var(--color-elevated)",
+            border: "1px solid var(--color-border-subtle)",
+            textDecoration: "none",
+            display: "block",
+          }}
+        >
+          {scene.thumb ? (
+            <img
+              src={scene.thumb}
+              alt=""
+              aria-hidden="true"
+              style={{ width: "100%", height: 78, objectFit: "cover", display: "block" }}
+              onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
+            />
+          ) : (
+            <div style={{
+              width: "100%", height: 78,
+              background: "var(--color-border)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <span style={{ fontSize: 9, color: "var(--color-text-faint)" }}>{platform}</span>
+            </div>
+          )}
+          <div style={{ padding: "5px 6px 6px" }}>
+            <div className="line-clamp-2" style={{
+              fontSize: 10, fontWeight: 500,
+              color: "var(--color-text-muted)",
+              lineHeight: 1.35,
+            }}>
+              {scene.title}
+            </div>
+            {(scene.date || scene.duration) && (
+              <div style={{ fontSize: 9, color: "var(--color-text-faint)", marginTop: 3 }}>
+                {[scene.date, scene.duration].filter(Boolean).join(" · ")}
+              </div>
+            )}
+          </div>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+// ─── Expanded profile panel ───────────────────────────────────────────────────
+
+function ProfilePanel({
+  model,
+  profile,
+  loading,
+  onRefresh,
+}: {
+  model: Model
+  profile: ModelProfile | null
+  loading: boolean
+  onRefresh: () => void
+}) {
+  const urgency = urgencyLabel(model.last_booked)
+  const rankCfg = RANK_CONFIG[model.rank.toLowerCase()]
+  const acts = parseActs(model.notes)
+  const isActualActList = model.notes.includes(",")
+
+  // Bio fields with values
+  const bioRows = BIO_FIELDS
+    .map(f => ({ label: f.label, value: profile?.bio[f.key] ?? "" }))
+    .filter(r => r.value)
+
+  const hasScrapedData = profile && (
+    profile.photo_url || bioRows.length > 0 ||
+    profile.slr_scenes.length > 0 || profile.vrp_scenes.length > 0
+  )
+
+  return (
+    <div style={{
+      padding: "14px 12px 16px",
+      background: "var(--color-surface)",
+      display: "flex", flexDirection: "column", gap: 14,
+    }}>
+
+      {/* ── Top row: photo + bio + booking ─────────────────────────────────── */}
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+
+        {/* Photo */}
+        <div style={{ flexShrink: 0 }}>
+          <ModelPhoto
+            name={model.name}
+            photoUrl={profile?.photo_url || undefined}
+            size={88}
+          />
+        </div>
+
+        {/* Bio facts */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {loading && !profile && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
+              <div style={{
+                width: 12, height: 12, borderRadius: "50%",
+                border: "2px solid var(--color-lime)",
+                borderTopColor: "transparent",
+                animation: "spin 0.7s linear infinite",
+              }} />
+              <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                Fetching profile…
+              </span>
+            </div>
+          )}
+
+          {bioRows.length > 0 && (
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
+              gap: "3px 16px",
+              marginBottom: 8,
+            }}>
+              {bioRows.map(r => (
+                <div key={r.label} style={{ display: "flex", gap: 4, alignItems: "baseline" }}>
+                  <span style={{
+                    fontSize: 9, fontWeight: 600, letterSpacing: "0.06em",
+                    textTransform: "uppercase", color: "var(--color-text-faint)",
+                    flexShrink: 0, whiteSpace: "nowrap",
+                  }}>
+                    {r.label}
+                  </span>
+                  <span style={{
+                    fontSize: 11, color: "var(--color-text-muted)",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {r.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* About */}
+          {profile?.bio.about && (
+            <p style={{
+              fontSize: 11, color: "var(--color-text-faint)",
+              lineHeight: 1.5, fontStyle: "italic",
+              marginBottom: 8,
+              display: "-webkit-box",
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            } as React.CSSProperties}>
+              {profile.bio.about}
+            </p>
+          )}
+
+          {/* Acts (when no scraped data yet) */}
+          {!hasScrapedData && isActualActList && acts.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {acts.map(act => (
+                <span key={act} style={{
+                  fontSize: 10, color: "var(--color-text-muted)",
+                  background: "var(--color-elevated)",
+                  border: "1px solid var(--color-border-subtle)",
+                  borderRadius: 3, padding: "2px 6px", whiteSpace: "nowrap",
+                }}>
+                  {act}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Booking history (right column) */}
+        <div style={{
+          flexShrink: 0, width: 140,
+          background: "var(--color-elevated)",
+          border: "1px solid var(--color-border-subtle)",
+          borderRadius: 5, padding: "8px 10px",
+        }}>
+          <div style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
+            textTransform: "uppercase", color: "var(--color-text-faint)",
+            marginBottom: 6,
+          }}>
+            Our bookings
+          </div>
+
+          {model.bookings_count && (
+            <div style={{ marginBottom: 6 }}>
+              <span style={{ fontSize: 18, fontWeight: 700, color: "var(--color-text)", lineHeight: 1 }}>
+                {model.bookings_count}
+              </span>
+              <span style={{ fontSize: 10, color: "var(--color-text-faint)", marginLeft: 3 }}>
+                total
+              </span>
+            </div>
+          )}
+
+          {model.last_booked && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 9, color: "var(--color-text-faint)" }}>Last</div>
+              <div style={{ fontSize: 11, color: urgency.color, fontWeight: 500 }}>
+                {model.last_booked}
+              </div>
+            </div>
+          )}
+
+          {profile && Object.keys(profile.booking_studios).length > 0 && (
+            <div>
+              <div style={{ fontSize: 9, color: "var(--color-text-faint)", marginBottom: 3 }}>
+                By studio
+              </div>
+              {Object.entries(profile.booking_studios).map(([studio, count]) => (
+                <div key={studio} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+                  <span style={{ fontSize: 10, color: "var(--color-text-muted)" }}>{studio}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-text-faint)" }}>{count}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Scene strips ────────────────────────────────────────────────────── */}
+      {(profile?.slr_scenes.length || 0) > 0 && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <span style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
+              textTransform: "uppercase", color: "var(--color-text-faint)",
+            }}>
+              SexLikeReal
+            </span>
+            {profile!.slr_profile_url && (
+              <a
+                href={profile!.slr_profile_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontSize: 9, color: "var(--color-lime)", textDecoration: "none" }}
+              >
+                Profile ↗
+              </a>
+            )}
+          </div>
+          <SceneStrip scenes={profile!.slr_scenes} platform="SLR" />
+        </div>
+      )}
+
+      {(profile?.vrp_scenes.length || 0) > 0 && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <span style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
+              textTransform: "uppercase", color: "var(--color-text-faint)",
+            }}>
+              VRPorn
+            </span>
+            {profile!.vrp_profile_url && (
+              <a
+                href={profile!.vrp_profile_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontSize: 9, color: "var(--color-lime)", textDecoration: "none" }}
+              >
+                Profile ↗
+              </a>
+            )}
+          </div>
+          <SceneStrip scenes={profile!.vrp_scenes} platform="VRP" />
+        </div>
+      )}
+
+      {/* ── Footer: cache info + refresh ────────────────────────────────────── */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        borderTop: "1px solid var(--color-border-subtle)", paddingTop: 8,
+      }}>
+        <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
+          {profile?.cached_at
+            ? `Cached ${new Date(profile.cached_at).toLocaleDateString()}`
+            : loading ? "Fetching…" : "Not yet fetched"}
+        </span>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          style={{
+            fontSize: 10, color: loading ? "var(--color-text-faint)" : "var(--color-lime)",
+            background: "none", border: "none", cursor: loading ? "default" : "pointer",
+            padding: "2px 0",
+          }}
+        >
+          {loading ? "Refreshing…" : "Refresh ↺"}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 type SortKey = "score" | "name" | "last_booked" | "rank"
@@ -212,19 +547,51 @@ type SortKey = "score" | "name" | "last_booked" | "rank"
 interface Props {
   models: Model[]
   error: string | null
+  idToken: string | undefined
 }
 
-export function ModelSearch({ models, error }: Props) {
-  const [search, setSearch]             = useState("")
-  const [rankFilter, setRankFilter]     = useState("All")
-  const [locationFilter, setLocationFilter] = useState("All")
-  const [sortKey, setSortKey]           = useState<SortKey>("score")
-  const [expanded, setExpanded]         = useState<string | null>(null)
-  const deferredSearch                  = useDeferredValue(search)
+export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
+  const idToken                               = useIdToken(serverIdToken)
+  const [search, setSearch]                  = useState("")
+  const [rankFilter, setRankFilter]          = useState("All")
+  const [locationFilter, setLocationFilter]  = useState("All")
+  const [sortKey, setSortKey]                = useState<SortKey>("score")
+  const [expanded, setExpanded]              = useState<string | null>(null)
+  const [profiles, setProfiles]              = useState<Record<string, ModelProfile>>({})
+  const [loadingProfiles, setLoadingProfiles] = useState<Set<string>>(new Set())
+  const deferredSearch                        = useDeferredValue(search)
+
+  const client = useMemo(() => api(idToken ?? null), [idToken])
+
+  const fetchProfile = useCallback(async (name: string, refresh = false) => {
+    setLoadingProfiles(prev => new Set(prev).add(name))
+    try {
+      const data = await client.models.profile(name, refresh)
+      setProfiles(prev => ({ ...prev, [name]: data }))
+    } catch {
+      // silently ignore — profile panel degrades to booking-sheet data only
+    } finally {
+      setLoadingProfiles(prev => {
+        const next = new Set(prev)
+        next.delete(name)
+        return next
+      })
+    }
+  }, [client])
+
+  const handleExpand = useCallback((name: string) => {
+    setExpanded(prev => {
+      if (prev === name) return null
+      // Fetch profile if not already cached
+      if (!profiles[name]) {
+        fetchProfile(name)
+      }
+      return name
+    })
+  }, [profiles, fetchProfile])
 
   const isFiltered = search !== "" || rankFilter !== "All" || locationFilter !== "All"
 
-  // Top 8 by opportunity score — shown above the list when no filters are active
   const topOutreach = useMemo(
     () => [...models].sort((a, b) => b.opportunity_score - a.opportunity_score).slice(0, 8),
     [models]
@@ -270,12 +637,12 @@ export function ModelSearch({ models, error }: Props) {
     return list
   }, [filtered, sortKey])
 
-  const isActList = (notes: string) => notes.includes(",")
-
   return (
     <div>
+      {/* ── Spin keyframe (injected once) ─────────────────────────────────────── */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
 
-      {/* ── Top Outreach grid (hidden when filters active) ───────────────────── */}
+      {/* ── Top Outreach grid ─────────────────────────────────────────────────── */}
       {!isFiltered && topOutreach.length > 0 && (
         <div className="mb-7">
           <div className="flex items-center gap-2 mb-3">
@@ -295,7 +662,7 @@ export function ModelSearch({ models, error }: Props) {
                 key={model.name}
                 model={model}
                 isActive={expanded === model.name}
-                onClick={() => setExpanded(expanded === model.name ? null : model.name)}
+                onClick={() => handleExpand(model.name)}
               />
             ))}
           </div>
@@ -414,8 +781,8 @@ export function ModelSearch({ models, error }: Props) {
             const isLast = i === sorted.length - 1
             const rankCfg = RANK_CONFIG[model.rank.toLowerCase()]
             const urgency = urgencyLabel(model.last_booked)
-            const acts = parseActs(model.notes)
-            const isActualActList = isActList(model.notes)
+            const profile = profiles[model.name] ?? null
+            const isLoading = loadingProfiles.has(model.name)
 
             return (
               <div key={model.name}>
@@ -429,7 +796,7 @@ export function ModelSearch({ models, error }: Props) {
                     background: isExpanded ? "var(--color-surface)" : undefined,
                     alignItems: "center",
                   }}
-                  onClick={() => setExpanded(isExpanded ? null : model.name)}
+                  onClick={() => handleExpand(model.name)}
                   onMouseEnter={e => { if (!isExpanded) (e.currentTarget as HTMLElement).style.background = "var(--color-elevated)" }}
                   onMouseLeave={e => { if (!isExpanded) (e.currentTarget as HTMLElement).style.background = "" }}
                 >
@@ -444,7 +811,11 @@ export function ModelSearch({ models, error }: Props) {
 
                   {/* Photo + Name + rank */}
                   <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                    <ModelPhoto name={model.name} size={26} />
+                    <ModelPhoto
+                      name={model.name}
+                      photoUrl={profile?.photo_url || undefined}
+                      size={26}
+                    />
                     <div style={{ minWidth: 0 }}>
                       <div className="flex items-center gap-2">
                         <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text)" }}>
@@ -466,8 +837,17 @@ export function ModelSearch({ models, error }: Props) {
                             {model.age}
                           </span>
                         )}
+                        {isLoading && (
+                          <div style={{
+                            width: 8, height: 8, borderRadius: "50%",
+                            border: "1.5px solid var(--color-lime)",
+                            borderTopColor: "transparent",
+                            animation: "spin 0.7s linear infinite",
+                            flexShrink: 0,
+                          }} />
+                        )}
                       </div>
-                      {!isActualActList && model.notes && (
+                      {model.notes && !model.notes.includes(",") && (
                         <p className="line-clamp-1" style={{
                           fontSize: 10, color: "var(--color-text-faint)", marginTop: 1,
                         }}>
@@ -517,58 +897,17 @@ export function ModelSearch({ models, error }: Props) {
                   </span>
                 </div>
 
-                {/* Expanded detail */}
+                {/* Expanded profile panel */}
                 {isExpanded && (
-                  <div
-                    style={{
-                      padding: "12px 12px 14px 12px",
-                      background: "var(--color-surface)",
-                      borderBottom: !isLast ? "1px solid var(--color-border-subtle)" : undefined,
-                      display: "flex", gap: 16, alignItems: "flex-start",
-                    }}
-                  >
-                    {/* Larger photo */}
-                    <ModelPhoto name={model.name} size={72} />
-
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      {model.bookings_count && (
-                        <p style={{ fontSize: 11, color: "var(--color-text-faint)", marginBottom: 8 }}>
-                          <span style={{ color: "var(--color-text-muted)" }}>{model.bookings_count}</span>
-                          {" "}booking{model.bookings_count !== "1" ? "s" : ""} with us
-                          {" · "}
-                          <span style={{ color: urgency.color }}>
-                            Last: {model.last_booked || "never"}
-                          </span>
-                        </p>
-                      )}
-
-                      {isActualActList && acts.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {acts.map(act => (
-                            <span
-                              key={act}
-                              style={{
-                                fontSize: 10, color: "var(--color-text-muted)",
-                                background: "var(--color-elevated)",
-                                border: "1px solid var(--color-border-subtle)",
-                                borderRadius: 3, padding: "2px 6px", whiteSpace: "nowrap",
-                              }}
-                            >
-                              {act}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {!isActualActList && model.notes && (
-                        <p style={{
-                          fontSize: 12, color: "var(--color-text-muted)",
-                          lineHeight: 1.5, fontStyle: "italic",
-                        }}>
-                          "{model.notes}"
-                        </p>
-                      )}
-                    </div>
+                  <div style={{
+                    borderBottom: !isLast ? "1px solid var(--color-border-subtle)" : undefined,
+                  }}>
+                    <ProfilePanel
+                      model={model}
+                      profile={profile}
+                      loading={isLoading}
+                      onRefresh={() => fetchProfile(model.name, true)}
+                    />
                   </div>
                 )}
               </div>

@@ -181,6 +181,29 @@ export interface CallSheetResult {
   title: string
 }
 
+export interface ProfileScene {
+  title: string
+  date: string
+  studio: string
+  url: string
+  thumb: string
+  duration: string
+  views: string
+  likes: string
+}
+
+export interface ModelProfile {
+  name: string
+  photo_url: string
+  bio: Record<string, string>       // age, birthday, ethnicity, height, measurements, hair, eyes, about, …
+  slr_profile_url: string
+  slr_scenes: ProfileScene[]
+  vrp_profile_url: string
+  vrp_scenes: ProfileScene[]
+  booking_studios: Record<string, number>  // studio → shoot count from our scripts table
+  cached_at: string
+}
+
 export interface Approval {
   approval_id: string
   scene_id: string
@@ -281,6 +304,10 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         return get<Model[]>(`/models/${params}`)
       },
       get: (name: string) => get<Model>(`/models/${encodeURIComponent(name)}`),
+      profile: (name: string, refresh = false) => {
+        const params = refresh ? "?refresh=true" : ""
+        return get<ModelProfile>(`/models/${encodeURIComponent(name)}/profile${params}`)
+      },
     },
 
     approvals: {

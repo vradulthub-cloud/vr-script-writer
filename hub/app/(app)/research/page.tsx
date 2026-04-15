@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic"
 export default async function ResearchPage() {
   const session = await auth()
   const client = api(session)
+  const idToken = (session as { idToken?: string } | null)?.idToken
 
   let models: Model[] = []
   let error: string | null = null
@@ -27,7 +28,7 @@ export default async function ResearchPage() {
           Agency info, rates, and notes for talent
         </p>
       </div>
-      <ModelSearch models={models} error={error} />
+      <ModelSearch models={models} error={error} idToken={idToken} />
     </div>
   )
 }
