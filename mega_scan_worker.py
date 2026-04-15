@@ -140,7 +140,7 @@ def _mega_ls_recursive(mega_path: str) -> str:
     """Run mega-ls -R and return stdout. Raises on failure."""
     cmd = [MEGA_LS, "-R", mega_path]
     result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=120,
+        cmd, capture_output=True, text=True, timeout=600,
     )
     stderr = result.stderr.strip() if result.stderr else ""
     if "Not logged in" in stderr:
@@ -235,6 +235,22 @@ def run_scan(progress_callback=None) -> dict:
         raise RuntimeError(
             "MEGA scan failed for all studios:\n" + "\n".join(errors)
         )
+
+    # Guard: never overwrite a populated scan with empty results.
+    # If mega-ls returned no parseable scenes but didn't error, something
+    # is wrong (session issue, empty output, parse failure). Keep existing data.
+    if not all_scenes:
+        msg = "MEGA scan returned 0 scenes without errors — keeping existing data."
+        print(f"[WARN] {msg}", file=sys.stderr)
+        if progress_callback:
+            progress_callback(msg)
+        # Return existing data so the UI doesn't show stale-but-valid as broken
+        try:
+            if OUTPUT_FILE.exists():
+                return json.loads(OUTPUT_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return {"scanned_at": scanned_at, "scenes": []}
 
     # Sort: missing descriptions first, then by scene_id
     all_scenes.sort(key=lambda s: (s["has_description"], s["scene_id"]))

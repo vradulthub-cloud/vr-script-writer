@@ -59,15 +59,15 @@ def _get_client():
     return _cached_client
 
 
-def _retry_api(func, max_retries=3, base_sleep=5):
+def _retry_api(func, max_retries=5, base_sleep=5):
     """Retry a gspread call on 429 quota errors with exponential backoff."""
     for attempt in range(max_retries):
         try:
             return func()
         except gspread.exceptions.APIError as exc:
             if "429" in str(exc) and attempt < max_retries - 1:
-                wait = base_sleep * (2 ** attempt)  # 5, 10, 20 seconds
-                _log.warning("Sheets 429 – waiting %ds (attempt %d)", wait, attempt + 1)
+                wait = base_sleep * (2 ** attempt)  # 5, 10, 20, 40, 80 seconds
+                _log.warning("Sheets 429 – waiting %ds (attempt %d/%d)", wait, attempt + 1, max_retries)
                 time.sleep(wait)
             else:
                 raise

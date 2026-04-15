@@ -1220,7 +1220,7 @@ with tab_scripts:
                 _sc_color = _studio_colors_sc.get(_saved_studio, _C["accent"])
                 st.markdown(
                     f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:8px'>"
-                    f"<div style='width:4px;height:24px;border-radius:2px;background:{_sc_color}'></div>"
+                    f"<div aria-hidden='true' style='width:8px;height:8px;border-radius:50%;background:{_sc_color};flex-shrink:0'></div>"
                     f"<span style='font-size:0.85rem;font-weight:700;color:{_C['text']}'>{_saved_female}</span>"
                     f"<span style='font-size:0.72rem;color:{_C['muted']};margin-left:auto'>"
                     f"{_saved_studio} · {_saved_scene}</span>"
@@ -2638,7 +2638,7 @@ with tab_research:
                     _score_overlay = (
                         f"<div style='position:absolute;top:6px;right:6px;background:{_sc_bg};"
                         f"border-radius:12px;padding:2px 7px;font-size:0.65rem;font-weight:700;"
-                        f"color:#fff'>{score}</div>"
+                        f"color:{_C['text_on_accent']}'>{score}</div>"
                     )
                 else:
                     _score_overlay = ""
@@ -4455,7 +4455,7 @@ with tab_tickets:
                         for _is in _issue_scenes:
                             _is_color = _studio_colors.get(_is["studio"], _C["muted"])
                             _is_missing_pills = " ".join(
-                                f"<span style='display:inline-block;font-size:0.65rem;padding:1px 6px;"
+                                f"<span style='display:inline-block;font-size:0.65rem;padding:3px 8px;"
                                 f"border-radius:3px;background:{_C['red_dim']};color:{_C['red']}'>{m}</span>"
                                 for m in _is["missing"]
                             )
@@ -4463,8 +4463,8 @@ with tab_tickets:
                             with _ic1:
                                 st.markdown(
                                     f"<div style='display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap'>"
-                                    f"<span style='width:4px;height:16px;border-radius:2px;"
-                                    f"background:{_is_color};display:inline-block'></span>"
+                                    f"<span aria-hidden='true' style='width:8px;height:8px;border-radius:50%;"
+                                    f"background:{_is_color};display:inline-block;flex-shrink:0'></span>"
                                     f"<span style='font-family:DM Mono,monospace;font-size:0.78rem;"
                                     f"font-weight:600;color:{_C['text']}'>{_is['scene_id']}</span>"
                                     f"{_is_missing_pills}"
@@ -4489,12 +4489,12 @@ with tab_tickets:
 
                 # Scene header
                 _comp_badge = (
-                    f"<span style='font-size:0.68rem;background:{_C['accent']};color:#fff;"
+                    f"<span style='font-size:0.68rem;background:{_C['accent']};color:{_C['text_on_accent']};"
                     f"padding:2px 8px;border-radius:4px;font-weight:600'>Compilation</span>"
                 ) if _sc.get("is_compilation") else ""
                 st.markdown(
                     f"<div style='display:flex;align-items:center;gap:12px;margin:8px 0 4px'>"
-                    f"<div style='width:5px;height:32px;border-radius:2px;background:{_s_color}'></div>"
+                    f"<div aria-hidden='true' style='width:10px;height:10px;border-radius:50%;background:{_s_color};flex-shrink:0'></div>"
                     f"<span style='font-family:DM Mono,monospace;font-size:1.1rem;font-weight:700;"
                     f"color:{_C['text']}'>{_sc['scene_id']}</span>"
                     f"<span style='background:{_s_color}22;color:{_s_color};font-size:0.72rem;"
@@ -4516,9 +4516,12 @@ with tab_tickets:
                 )
 
                 # Progress bar (larger)
+                _pct_label = "complete" if _pct == 100 else ("in progress" if _pct >= 50 else "incomplete")
                 st.markdown(
                     f"<div style='display:flex;align-items:center;gap:10px;margin:0 0 16px 0'>"
-                    f"<div style='flex:1;height:10px;background:{_C['elevated']};border-radius:5px;overflow:hidden'>"
+                    f"<div role='progressbar' aria-valuenow='{_sc['completed']}' aria-valuemax='{_sc['total']}'"
+                    f" aria-label='Asset completion: {_sc['completed']} of {_sc['total']}'"
+                    f" style='flex:1;height:10px;background:{_C['elevated']};border-radius:5px;overflow:hidden'>"
                     f"<div style='width:{_pct}%;height:100%;background:{_pct_color};border-radius:5px'></div>"
                     f"</div>"
                     f"<span style='font-size:0.85rem;font-weight:700;color:{_pct_color}'>"
@@ -4537,9 +4540,11 @@ with tab_tickets:
                 _ro1, _ro2, _ro3 = st.columns(3)
                 for _col_ro, (_ak, _al, _desc) in zip([_ro1, _ro2, _ro3], _readonly_assets):
                     _ok = _sc.get(_ak, False)
-                    _icon = f"<span style='color:{_C['green']};font-size:1.1rem'>&#10003;</span>" if _ok else f"<span style='color:{_C['red']};font-size:1.1rem'>&#10007;</span>"
+                    _status_text = "Found" if _ok else "Missing"
+                    _icon = f"<span aria-hidden='true' style='color:{_C['green']};font-size:1.1rem'>&#10003;</span>" if _ok else f"<span aria-hidden='true' style='color:{_C['red']};font-size:1.1rem'>&#10007;</span>"
                     _col_ro.markdown(
-                        f"<div style='background:{_C['elevated']};border-radius:6px;padding:8px 12px;"
+                        f"<div role='status' aria-label='{_al}: {_status_text}'"
+                        f" style='background:{_C['elevated']};border-radius:6px;padding:8px 12px;"
                         f"margin-bottom:6px;display:flex;align-items:center;gap:8px'>"
                         f"{_icon}"
                         f"<div><span style='font-size:0.82rem;font-weight:600;color:{_C['text']}'>{_al}</span>"
@@ -4962,7 +4967,7 @@ with tab_tickets:
                         _s_color = _studio_colors.get(_grp_studio, _C["muted"])
                         st.markdown(
                             f"<div style='display:flex;align-items:center;gap:10px;margin:16px 0 8px'>"
-                            f"<div style='width:4px;height:20px;border-radius:2px;background:{_s_color}'></div>"
+                            f"<div aria-hidden='true' style='width:10px;height:10px;border-radius:50%;background:{_s_color};flex-shrink:0'></div>"
                             f"<span style='font-family:\"Bricolage Grotesque\",sans-serif;font-size:1rem;font-weight:700;"
                             f"color:{_C['text']}'>{_studio_names.get(_grp_studio, _grp_studio)}</span>"
                             f"<span style='font-size:0.72rem;color:{_C['muted']}'>{len(_grp_scenes)} scenes</span>"
@@ -4980,7 +4985,7 @@ with tab_tickets:
                                     _missing_names = _scene.get("missing", [])
                                     if _missing_names:
                                         _checks_html = " ".join(
-                                            f"<span style='display:inline-block;font-size:0.62rem;padding:1px 5px;"
+                                            f"<span style='display:inline-block;font-size:0.62rem;padding:3px 6px;"
                                             f"border-radius:3px;background:{_C['red_dim']};color:{_C['red']}'>{m}</span>"
                                             for m in _missing_names
                                         )
@@ -4994,7 +4999,7 @@ with tab_tickets:
                                     _title_display = _scene["title"][:40] + "..." if len(_scene.get("title", "")) > 40 else (_scene.get("title") or "\u2014")
                                     _date_display = _scene.get("release_date", "")[:10] or ""
                                     _card_comp = (
-                                        f"<span style='font-size:0.6rem;background:{_C['accent']};color:#fff;"
+                                        f"<span style='font-size:0.6rem;background:{_C['accent']};color:{_C['text_on_accent']};"
                                         f"padding:1px 6px;border-radius:3px;margin-left:6px;font-family:inherit'>COMP</span>"
                                     ) if _scene.get("is_compilation") else ""
 
@@ -5014,7 +5019,9 @@ with tab_tickets:
                                         f"<div style='font-size:0.72rem;color:{_C['muted']};margin-bottom:auto;"
                                         f"font-style:italic'>{_title_display}</div>"
                                         f"<div style='display:flex;align-items:center;gap:8px;margin:8px 0 6px'>"
-                                        f"<div style='flex:1;height:6px;background:{_C['elevated']};border-radius:3px;overflow:hidden'>"
+                                        f"<div role='progressbar' aria-valuenow='{_scene['completed']}' aria-valuemax='{_scene['total']}'"
+                                        f" aria-label='{_scene['completed']} of {_scene['total']} assets'"
+                                        f" style='flex:1;height:6px;background:{_C['elevated']};border-radius:3px;overflow:hidden'>"
                                         f"<div style='width:{_pct}%;height:100%;background:{_pct_color};border-radius:3px'></div>"
                                         f"</div>"
                                         f"<span style='font-size:0.72rem;font-weight:600;color:{_pct_color}'>"
@@ -5351,7 +5358,7 @@ with tab_tickets:
 
                 st.markdown(
                     f"<div style='display:flex;align-items:center;gap:12px;margin:8px 0 4px'>"
-                    f"<div style='width:5px;height:28px;border-radius:2px;background:{_pc}'></div>"
+                    f"<div aria-hidden='true' style='width:10px;height:10px;border-radius:50%;background:{_pc};flex-shrink:0'></div>"
                     f"<span style='font-family:DM Mono,monospace;font-size:0.82rem;color:{_C['subtle']}'>{_t['id']}</span>"
                     f"<span style='font-family:\"Bricolage Grotesque\",sans-serif;font-size:1.2rem;font-weight:700;color:{_C['text']}'>{_t['title']}</span>"
                     f"<span style='background:{_sb};color:{_sc};font-size:0.72rem;font-weight:600;"
