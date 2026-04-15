@@ -204,7 +204,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                 color: mode === m ? "var(--color-text)" : "var(--color-text-muted)",
               }}
             >
-              {m === "ideas" ? "Suggest Ideas" : "Build Comp"}
+              {m === "ideas" ? "Suggest Ideas" : m === "builder" ? "Build Comp" : "Existing"}
             </button>
           ))}
         </div>
