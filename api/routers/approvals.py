@@ -166,6 +166,21 @@ async def create_approval(body: ApprovalCreate, user: CurrentUser):
             )],
         )
 
+    # Notify admins about new approval submission
+    try:
+        from api.routers.notifications import notify_multiple, get_admin_names, TYPE_APPROVAL_SUBMITTED
+        admins = [n for n in get_admin_names() if n != user["name"]]
+        if admins:
+            notify_multiple(
+                admins,
+                TYPE_APPROVAL_SUBMITTED,
+                f"New {body.content_type}: {body.scene_id}",
+                f'{user["name"]} submitted {body.content_type} for review',
+                "Approvals",
+            )
+    except Exception as exc:
+        _log.warning("Failed to send approval notification: %s", exc)
+
     return _row_to_approval(approval)
 
 
@@ -237,6 +252,22 @@ async def decide_approval(
             args=(approval,),
             daemon=True,
         ).start()
+
+    # Notify the original submitter about the decision
+    try:
+        from api.routers.notifications import create_notification, TYPE_APPROVAL_DECIDED
+        submitter = approval.get("submitted_by", "")
+        if submitter and submitter != user["name"]:
+            status_word = "approved" if body.decision == "Approved" else "rejected"
+            create_notification(
+                submitter,
+                TYPE_APPROVAL_DECIDED,
+                f"{approval.get('content_type', 'Content')} {status_word}",
+                f'{user["name"]} {status_word} your {approval.get("content_type", "")} for {approval.get("scene_id", "")}',
+                "Approvals",
+            )
+    except Exception as exc:
+        _log.warning("Failed to send approval decision notification: %s", exc)
 
     return _row_to_approval(approval)
 

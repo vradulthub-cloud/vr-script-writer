@@ -1,5 +1,5 @@
 import { auth } from "@/auth"
-import { api, type Scene } from "@/lib/api"
+import { api, type Scene, type UserProfile } from "@/lib/api"
 import { DescGenerator } from "./desc-generator"
 
 export const dynamic = "force-dynamic"
@@ -10,12 +10,17 @@ export default async function DescriptionsPage() {
 
   let scenes: Scene[] = []
   let error: string | null = null
+  let userProfile: UserProfile | null = null
 
   try {
     scenes = await client.scenes.list({ limit: 500 })
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load scenes"
   }
+
+  try {
+    userProfile = await client.users.me()
+  } catch {}
 
   return (
     <div>
@@ -31,6 +36,7 @@ export default async function DescriptionsPage() {
         scenes={scenes}
         scenesError={error}
         idToken={(session as { idToken?: string } | null)?.idToken}
+        userRole={userProfile?.role}
       />
     </div>
   )

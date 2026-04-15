@@ -47,6 +47,7 @@ interface Props {
   scenes: Scene[]
   scenesError: string | null
   idToken: string | undefined
+  userRole?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -142,8 +143,9 @@ function EditableParagraph({
 // Main component
 // ---------------------------------------------------------------------------
 
-export function DescGenerator({ scenes, scenesError, idToken: serverIdToken }: Props) {
+export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, userRole = "editor" }: Props) {
   const idToken = useIdToken(serverIdToken)
+  const isAdmin = userRole === "admin"
 
   const [studio, setStudio] = useState("FuckPassVR")
   const [isCompilation, setIsCompilation] = useState(false)
@@ -191,6 +193,48 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken }: P
     () => scenes.filter(s => s.studio === studio),
     [scenes, studio]
   )
+
+  // Scenes missing descriptions — sorted by readiness
+  const missingDescScenes = useMemo(() => {
+    return studioScenes
+      .filter(s => !s.has_description)
+      .sort((a, b) => {
+        const readyA = (a.title ? 1 : 0) + (a.performers ? 1 : 0) + (a.plot ? 1 : 0) + (a.categories ? 1 : 0)
+        const readyB = (b.title ? 1 : 0) + (b.performers ? 1 : 0) + (b.plot ? 1 : 0) + (b.categories ? 1 : 0)
+        return readyB - readyA // Most ready first
+      })
+  }, [studioScenes])
+
+  const [showQueue, setShowQueue] = useState(true)
+  const [grailSaving, setGrailSaving] = useState(false)
+
+  function autoPopulateFromScene(scene: Scene) {
+    setSelectedSceneId(scene.id)
+    if (scene.performers) setPerformers(scene.performers)
+    if (scene.categories) {
+      const cats = scene.categories.split(",").map(c => c.trim()).filter(Boolean)
+      setSelectedCats(cats.filter(c => availableCategories.includes(c)))
+    }
+  }
+
+  async function saveToGrail() {
+    if (!getFullDescription() || !selectedSceneId) return
+    setGrailSaving(true)
+    setSaveMsg(null)
+    try {
+      await client.descriptions.saveGrail({
+        scene_id: selectedSceneId,
+        description: getFullDescription(),
+        meta_title: metaTitle || undefined,
+        meta_description: metaDesc || undefined,
+      })
+      setSaveMsg("Saved to Grail.")
+    } catch (e) {
+      setSaveMsg(e instanceof Error ? e.message : "Save to Grail failed")
+    } finally {
+      setGrailSaving(false)
+    }
+  }
 
   const availableCategories = STUDIO_CATEGORIES[studio] ?? []
 
@@ -314,6 +358,52 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken }: P
     <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
       {/* ── Left — inputs ── */}
       <div style={{ width: 300, flexShrink: 0 }}>
+
+        {/* Missing descriptions queue */}
+        {missingDescScenes.length > 0 && (
+          <div className="mb-4">
+            <button
+              onClick={() => setShowQueue(v => !v)}
+              className="flex items-center justify-between w-full mb-2"
+              style={{ fontSize: 11, color: "var(--color-text-muted)", fontWeight: 600 }}
+            >
+              <span>Missing Descriptions ({missingDescScenes.length})</span>
+              <span style={{ fontSize: 10 }}>{showQueue ? "▾" : "▸"}</span>
+            </button>
+            {showQueue && (
+              <div
+                className="rounded overflow-y-auto"
+                style={{
+                  border: "1px solid var(--color-border)",
+                  maxHeight: 200,
+                }}
+              >
+                {missingDescScenes.slice(0, 30).map((s, i) => {
+                  const readiness = (s.title ? 1 : 0) + (s.performers ? 1 : 0) + (s.plot ? 1 : 0) + (s.categories ? 1 : 0)
+                  const dot = readiness >= 3 ? "var(--color-ok)" : readiness >= 1 ? "var(--color-warn)" : "var(--color-err)"
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => autoPopulateFromScene(s)}
+                      className="w-full text-left px-2.5 py-1.5 transition-colors hover:bg-[--color-elevated]"
+                      style={{
+                        borderBottom: i < missingDescScenes.length - 1 ? "1px solid var(--color-border-subtle, var(--color-border))" : undefined,
+                        background: selectedSceneId === s.id ? "var(--color-elevated)" : undefined,
+                      }}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="rounded-full shrink-0" style={{ width: 5, height: 5, background: dot }} />
+                        <span className="font-mono" style={{ fontSize: 10, color: studioColor }}>{s.id}</span>
+                        <span className="truncate" style={{ fontSize: 10, color: "var(--color-text-muted)" }}>{s.performers || "—"}</span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-col gap-3">
 
           {/* Studio */}
@@ -678,6 +768,22 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken }: P
                 >
                   {saving ? "Saving…" : "Save"}
                 </button>
+
+                {isAdmin && (
+                  <button
+                    onClick={saveToGrail}
+                    disabled={grailSaving || !selectedSceneId}
+                    className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+                    style={{
+                      background: "color-mix(in srgb, var(--color-lime) 15%, transparent)",
+                      color: "var(--color-lime)",
+                      border: "1px solid color-mix(in srgb, var(--color-lime) 30%, transparent)",
+                      opacity: (grailSaving || !selectedSceneId) ? 0.5 : 1,
+                    }}
+                  >
+                    {grailSaving ? "Saving…" : "Save to Grail"}
+                  </button>
+                )}
 
                 <button
                   onClick={downloadDocx}

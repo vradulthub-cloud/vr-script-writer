@@ -262,6 +262,93 @@ async def save_script(body: ScriptSaveBody, user: CurrentUser):
 
 
 # ---------------------------------------------------------------------------
+# Script validation
+# ---------------------------------------------------------------------------
+
+BANNED_WORDS = {"alcohol", "drunk", "choking", "choke", "drug", "incest", "underage", "minor", "sleep", "unconscious"}
+
+
+class ValidateBody(BaseModel):
+    theme: str = ""
+    plot: str = ""
+    wardrobe_f: str = ""
+    wardrobe_m: str = ""
+    shoot_location: str = ""
+    female: str = ""
+    male: str = ""
+
+
+@router.post("/validate")
+async def validate_script(body: ValidateBody, user: CurrentUser):
+    """Check a script for rule violations."""
+    violations: list[str] = []
+
+    if not body.theme.strip():
+        violations.append("Missing required section: THEME")
+    if not body.plot.strip():
+        violations.append("Missing required section: PLOT")
+    if not body.shoot_location.strip():
+        violations.append("Missing required section: SHOOT LOCATION")
+    if not body.wardrobe_f.strip():
+        violations.append("Missing required section: WARDROBE (F)")
+
+    # Check for banned content
+    all_text = f"{body.plot} {body.theme} {body.shoot_location}".lower()
+    for word in BANNED_WORDS:
+        if word in all_text:
+            violations.append(f"Banned content: '{word}' found in script")
+
+    # Male talent name should not appear as a character in the plot
+    if body.male and body.male != "POV":
+        first_name = body.male.split()[0].lower()
+        if first_name in body.plot.lower():
+            violations.append(f"Male talent first name '{first_name}' appears in plot — should use 'you' instead")
+
+    return {"violations": violations, "passed": len(violations) == 0}
+
+
+# ---------------------------------------------------------------------------
+# Script title generation
+# ---------------------------------------------------------------------------
+
+_SCRIPT_TITLE_SYSTEMS = {
+    "VRHush": "You are a creative title writer for VRHush. Generate exactly ONE scene title: 2-3 words only, clever wordplay/innuendo, no performer names. Respond with ONLY the title.",
+    "FuckPassVR": "You are a creative title writer for FuckPassVR. Generate exactly ONE scene title: 2-5 words, travel themes when applicable, clever wordplay. Respond with ONLY the title.",
+    "VRAllure": "You are a creative title writer for VRAllure. Generate exactly ONE scene title: 2-3 words only, sensual/intimate tone, no performer names. Respond with ONLY the title.",
+    "NaughtyJOI": "You are a creative title writer for NaughtyJOI. Generate a PAIRED title using the performer's first name: '[Name] [soft action]' / '[Name] then [intense action]'. Respond with ONLY the two titles separated by a newline.",
+}
+
+
+class TitleGenBody(BaseModel):
+    studio: str
+    female: str = ""
+    theme: str = ""
+    plot: str = ""
+
+
+@router.post("/title-generate")
+async def generate_script_title(body: TitleGenBody, user: CurrentUser):
+    """Generate an AI title for a script using Claude."""
+    settings = get_settings()
+    sys_prompt = _SCRIPT_TITLE_SYSTEMS.get(body.studio, _SCRIPT_TITLE_SYSTEMS["VRHush"])
+    user_prompt = f"Generate a title:\n\nPerformer: {body.female}\nTheme: {body.theme}\nPlot: {body.plot[:500] if body.plot else 'N/A'}"
+
+    try:
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=50,
+            system=sys_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        title = resp.content[0].text.strip().strip('"').strip("'")
+        return {"title": title}
+    except Exception as exc:
+        _log.error("Script title generation failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Title generation failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Sheets write helper
 # ---------------------------------------------------------------------------
 

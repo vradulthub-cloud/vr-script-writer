@@ -106,11 +106,17 @@ export interface SyncStatus {
 export interface Scene {
   id: string
   studio: string
+  grail_tab: string
   site_code: string
   title: string
   performers: string
   categories: string
   tags: string
+  release_date: string
+  female: string
+  male: string
+  plot: string
+  theme: string
   is_compilation: boolean
   has_description: boolean
   has_videos: boolean
@@ -121,6 +127,12 @@ export interface Scene {
   storyboard_count: number
   mega_path: string
   grail_row: number
+}
+
+export interface NamingIssue {
+  type: string
+  file: string
+  issue: string
 }
 
 export interface SceneStats {
@@ -239,6 +251,40 @@ export interface Approval {
   target_range: string
 }
 
+export interface UserProfile {
+  email: string
+  name: string
+  role: string           // "admin" | "editor"
+  allowed_tabs: string   // comma-separated or "ALL"
+}
+
+export interface UserUpdate {
+  role?: string
+  allowed_tabs?: string
+}
+
+export interface Notification {
+  notif_id: string
+  timestamp: string
+  recipient: string
+  type: string           // ticket_created, ticket_status, approval_submitted, etc.
+  title: string
+  message: string
+  read: number           // 0 or 1
+  link: string
+}
+
+export interface Treatment {
+  name: string
+  featured: boolean
+}
+
+export interface LocalTitleResult {
+  data_url: string
+  treatment_name: string
+  error: string | null
+}
+
 // ─── API client factory ──────────────────────────────────────────────────────
 
 export function api(idTokenOrSession: string | { idToken?: string } | null) {
@@ -295,6 +341,18 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       },
       stats: () => get<SceneStats>("/scenes/stats"),
       get: (id: string) => get<Scene>(`/scenes/${id}`),
+      updateTitle: (id: string, value: string) =>
+        patch<{ ok: boolean }>(`/scenes/${id}/title`, { value }),
+      updateCategories: (id: string, value: string) =>
+        patch<{ ok: boolean }>(`/scenes/${id}/categories`, { value }),
+      updateTags: (id: string, value: string) =>
+        patch<{ ok: boolean }>(`/scenes/${id}/tags`, { value }),
+      generateTitle: (id: string, body: { female?: string; theme?: string; plot?: string }) =>
+        post<{ title: string }>(`/scenes/${id}/generate-title`, body),
+      namingIssues: (id: string) =>
+        get<{ scene_id: string; issues: NamingIssue[]; ok: boolean }>(`/scenes/${id}/naming-issues`),
+      createFolder: (sceneId: string) =>
+        post<{ status: string; scene_id: string }>("/scenes/create-folder", { scene_id: sceneId }),
     },
 
     scripts: {
@@ -308,13 +366,29 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         return get<Script[]>(`/scripts/${qs ? `?${qs}` : ""}`)
       },
       tabs: () => get<string[]>("/scripts/tabs"),
-      save: (body: { tab_name: string; sheet_row: number; theme: string; plot: string; wardrobe_f?: string; wardrobe_m?: string }) =>
-        post<{ ok: boolean }>("/scripts/save", body),
+      save: (body: { script_id?: number; tab_name: string; sheet_row: number; theme: string; plot: string; wardrobe_f?: string; wardrobe_m?: string; shoot_location?: string; props?: string }) =>
+        post<{ id: number; status: string }>("/scripts/save", body),
+      validate: (body: { theme: string; plot: string; wardrobe_f: string; wardrobe_m?: string; shoot_location: string; female?: string; male?: string }) =>
+        post<{ violations: string[]; passed: boolean }>("/scripts/validate", body),
+      generateTitle: (body: { studio: string; female?: string; theme?: string; plot?: string }) =>
+        post<{ title: string }>("/scripts/title-generate", body),
     },
 
     descriptions: {
       save: (body: { scene_id: string; description: string; meta_title?: string; meta_description?: string }) =>
         post<{ ok: boolean }>("/descriptions/save", body),
+      saveGrail: (body: { scene_id: string; description: string; meta_title?: string; meta_description?: string }) =>
+        post<{ scene_id: string; status: string }>("/descriptions/save-grail", body),
+      seo: (body: { description: string; studio: string }) =>
+        post<{ meta_title: string; meta_description: string }>("/descriptions/seo", body),
+    },
+
+    titles: {
+      treatments: () => get<Treatment[]>("/titles/treatments"),
+      local: (body: { text: string; treatments?: string[]; n?: number; seed?: number }) =>
+        post<LocalTitleResult[]>("/titles/local", body),
+      refine: (body: { text: string; treatment_name: string; refine_prompt: string; seed?: number }) =>
+        post<LocalTitleResult>("/titles/refine", body),
     },
 
     models: {
@@ -365,6 +439,25 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       },
       save: (body: { studio: string; title: string; scene_ids: string[]; description?: string; notes?: string; target_sheet?: string; target_range?: string }) =>
         post<{ task_id: string; status: string }>("/compilations/save", body),
+      existing: (studio?: string) => {
+        const params = studio ? `?studio=${encodeURIComponent(studio)}` : ""
+        return get<{ title: string; scenes: string[]; date: string }[]>(`/compilations/existing${params}`)
+      },
+      grailWrite: (body: { studio: string; title: string; scene_ids: string[] }) =>
+        post<{ status: string; scene_count: number }>("/compilations/grail-write", body),
+    },
+
+    users: {
+      me: () => get<UserProfile>("/users/me"),
+      list: () => get<UserProfile[]>("/users/"),
+      update: (email: string, body: UserUpdate) =>
+        patch<UserProfile>(`/users/${encodeURIComponent(email)}`, body),
+    },
+
+    notifications: {
+      list: (limit = 50) => get<Notification[]>(`/notifications/?limit=${limit}`),
+      unreadCount: () => get<{ count: number }>("/notifications/unread-count"),
+      markRead: () => post<{ updated: number }>("/notifications/mark-read", {}),
     },
   }
 }

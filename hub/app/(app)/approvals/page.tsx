@@ -1,12 +1,15 @@
 import { auth } from "@/auth"
 import { api, type Approval } from "@/lib/api"
 import { ApprovalList } from "./approval-list"
+import { ApprovalSubmit } from "./approval-submit"
+import { ApprovalsPageShell } from "./approvals-page-shell"
 
 export const dynamic = "force-dynamic"
 
 export default async function ApprovalsPage() {
   const session = await auth()
   const client = api(session)
+  const idToken = (session as { idToken?: string } | null)?.idToken
 
   let approvals: Approval[] = []
   let error: string | null = null
@@ -20,24 +23,19 @@ export default async function ApprovalsPage() {
   const pendingCount = approvals.filter(a => a.status === "Pending").length
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="font-semibold tracking-tight" style={{ fontSize: 16, color: "var(--color-text)" }}>
-            Approvals
-          </h1>
-          <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
-            {pendingCount > 0
-              ? `${pendingCount} pending decision${pendingCount !== 1 ? "s" : ""}`
-              : "No pending approvals"}
-          </p>
-        </div>
-      </div>
-      <ApprovalList
-        initialApprovals={approvals}
-        error={error}
-        idToken={(session as { idToken?: string } | null)?.idToken}
-      />
-    </div>
+    <ApprovalsPageShell pendingCount={pendingCount}>
+      {{
+        review: (
+          <ApprovalList
+            initialApprovals={approvals}
+            error={error}
+            idToken={idToken}
+          />
+        ),
+        submit: (
+          <ApprovalSubmit idToken={idToken} />
+        ),
+      }}
+    </ApprovalsPageShell>
   )
 }

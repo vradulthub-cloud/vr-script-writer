@@ -275,3 +275,57 @@ def _build_desc_user_prompt(body: DescGenRequest) -> str:
         lines.append(f"Plot Summary: {body.plot}")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Save description to Grail sheet (admin/grail-writer only)
+# ---------------------------------------------------------------------------
+
+class DescSaveGrailBody(BaseModel):
+    scene_id: str
+    description: str
+    meta_title: str = ""
+    meta_description: str = ""
+
+
+@router.post("/save-grail")
+async def save_description_to_grail(body: DescSaveGrailBody, user: CurrentUser):
+    """
+    Save a description directly to the Grail sheet. Requires grail-writer permission.
+    Also marks the scene as having a description in SQLite.
+    """
+    if user["name"] not in {"Drew", "David", "Duc"}:
+        raise HTTPException(status_code=403, detail="Grail write access required")
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, grail_tab, grail_row FROM scenes WHERE id = ?",
+            (body.scene_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Scene not found")
+        scene = dict(row)
+        conn.execute("UPDATE scenes SET has_description=1 WHERE id=?", (body.scene_id,))
+
+    # Fire-and-forget Grail write (description goes in column 8 per Grail layout)
+    import threading
+    threading.Thread(
+        target=_write_desc_to_grail,
+        args=(scene["grail_tab"], scene["grail_row"], body.description),
+        daemon=True,
+    ).start()
+
+    return {"scene_id": body.scene_id, "status": "saved_to_grail"}
+
+
+def _write_desc_to_grail(grail_tab: str, grail_row: int, description: str) -> None:
+    """Write description to the Grail sheet (background safe)."""
+    try:
+        from api.sheets_client import open_grail, with_retry
+        sh = open_grail()
+        ws = sh.worksheet(grail_tab)
+        # Description is typically in column 8 (H) in the Grail sheet
+        with_retry(lambda: ws.update_cell(grail_row, 8, description))
+        _log.info("Grail description write: %s row %d", grail_tab, grail_row)
+    except Exception:
+        _log.exception("Failed to write description to Grail: %s R%d", grail_tab, grail_row)

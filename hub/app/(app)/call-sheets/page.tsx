@@ -206,6 +206,51 @@ export default function CallSheetsPage() {
   const [tabsError, setTabsError] = useState<string | null>(null)
   const [datesError, setDatesError] = useState<string | null>(null)
 
+  // Batch generate state
+  const [batchRunning, setBatchRunning] = useState(false)
+  const [batchProgress, setBatchProgress] = useState(0)
+  const [batchTotal, setBatchTotal] = useState(0)
+  const [batchResults, setBatchResults] = useState<{ date: string; url?: string; error?: string }[]>([])
+
+  async function generateAll() {
+    if (dates.length === 0 || batchRunning) return
+    setBatchRunning(true)
+    setBatchTotal(dates.length)
+    setBatchProgress(0)
+    setBatchResults([])
+    const results: { date: string; url?: string; error?: string }[] = []
+
+    for (let i = 0; i < dates.length; i++) {
+      setBatchProgress(i + 1)
+      const d = dates[i]
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/call-sheets/generate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+          },
+          body: JSON.stringify({
+            date_key: d.date_key,
+            door_code: doorCode,
+            tab_name: activeTab || undefined,
+          }),
+        })
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "")
+          results.push({ date: d.date_display, error: txt || `HTTP ${res.status}` })
+        } else {
+          const data = await res.json()
+          results.push({ date: d.date_display, url: data.doc_url })
+        }
+      } catch (e) {
+        results.push({ date: d.date_display, error: e instanceof Error ? e.message : "Failed" })
+      }
+    }
+    setBatchResults(results)
+    setBatchRunning(false)
+  }
+
   // Load tabs once we have an idToken
   useEffect(() => {
     if (!idToken) return
@@ -305,6 +350,64 @@ export default function CallSheetsPage() {
               {tab}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Generate All button + batch progress */}
+      {dates.length > 0 && (
+        <div className="mb-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={generateAll}
+              disabled={batchRunning}
+              className="px-4 py-1.5 rounded text-xs font-semibold transition-colors"
+              style={{
+                background: batchRunning ? "var(--color-elevated)" : "var(--color-lime)",
+                color: batchRunning ? "var(--color-text-muted)" : "#0d0d0d",
+                cursor: batchRunning ? "wait" : "pointer",
+              }}
+            >
+              {batchRunning
+                ? `Generating ${batchProgress}/${batchTotal}…`
+                : `Generate All for ${activeTab}`}
+            </button>
+            {batchRunning && (
+              <div className="flex-1 rounded-full overflow-hidden" style={{ height: 4, background: "var(--color-border)", maxWidth: 200 }}>
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${(batchProgress / batchTotal) * 100}%`,
+                    background: "var(--color-lime)",
+                  }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Batch results */}
+          {batchResults.length > 0 && !batchRunning && (
+            <div className="mt-3 flex flex-col gap-1">
+              {batchResults.map((r, i) => (
+                <div key={i} className="flex items-center gap-2" style={{ fontSize: 11 }}>
+                  {r.url ? (
+                    <>
+                      <span style={{ color: "var(--color-ok)" }}>&#10003;</span>
+                      <span style={{ color: "var(--color-text-muted)" }}>{r.date}</span>
+                      <a href={r.url} target="_blank" rel="noopener noreferrer"
+                        style={{ color: "var(--color-lime)" }}
+                      >Open Doc ↗</a>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ color: "var(--color-err)" }}>&#10007;</span>
+                      <span style={{ color: "var(--color-text-muted)" }}>{r.date}</span>
+                      <span style={{ color: "var(--color-err)" }}>{r.error}</span>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

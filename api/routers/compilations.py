@@ -47,6 +47,7 @@ class CompGenRequest(BaseModel):
 class IdeasRequest(BaseModel):
     studio: str
     notes: str = ""
+    count: int = 5
 
 
 class CompSaveBody(BaseModel):
@@ -122,7 +123,8 @@ async def generate_compilation_ideas(body: IdeasRequest, user: CurrentUser):
         user_parts.append(f"Available performers: {', '.join(all_performers[:40])}")
     if body.notes:
         user_parts.append(f"Creative direction: {body.notes}")
-    user_parts.append("\nSuggest 5 compilation ideas for this studio.")
+    n_ideas = max(3, min(10, body.count))
+    user_parts.append(f"\nSuggest {n_ideas} compilation ideas for this studio.")
     user_prompt = "\n".join(user_parts)
 
     settings = get_settings()
@@ -285,3 +287,74 @@ def _write_comp_to_sheet(body: CompSaveBody) -> None:
 
     except Exception as exc:
         _log.error("Failed to write compilation to Sheets: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Existing compilations (from planning sheet)
+# ---------------------------------------------------------------------------
+
+class ExistingComp(BaseModel):
+    title: str
+    scenes: list[str]       # scene IDs
+    date: str = ""          # when created
+
+
+@router.get("/existing", response_model=list[ExistingComp])
+async def list_existing_comps(
+    user: CurrentUser,
+    studio: Optional[str] = None,
+):
+    """
+    List existing compilations from the comp planning sheet.
+
+    Reads the sheet on every call (not cached in SQLite).
+    """
+    try:
+        from api.sheets_client import open_comp_planning, with_retry, fetch_all_rows
+
+        sh = open_comp_planning()
+        ws = sh.sheet1
+        rows = fetch_all_rows(ws)
+
+        comps = []
+        for row in rows:
+            if len(row) < 4:
+                continue
+            row_date = row[0] if row[0] else ""
+            row_studio = row[1] if len(row) > 1 else ""
+            row_title = row[2] if len(row) > 2 else ""
+            row_scenes = row[3] if len(row) > 3 else ""
+
+            if studio and row_studio != studio:
+                continue
+            if not row_title:
+                continue
+
+            scene_ids = [s.strip() for s in row_scenes.split(",") if s.strip()]
+            comps.append(ExistingComp(
+                title=row_title,
+                scenes=scene_ids,
+                date=row_date,
+            ))
+
+        return comps
+    except Exception as exc:
+        _log.error("Failed to load existing comps: %s", exc)
+        return []
+
+
+@router.post("/grail-write")
+async def write_comp_to_grail(body: CompSaveBody, user: CurrentUser):
+    """Write compilation scenes to the Grail sheet. Requires grail-writer permission."""
+    if user["name"] not in {"Drew", "David", "Duc"}:
+        raise HTTPException(status_code=403, detail="Grail write access required")
+
+    # Mark scenes as compilation in SQLite
+    with get_db() as conn:
+        for scene_id in body.scene_ids:
+            conn.execute(
+                "UPDATE scenes SET is_compilation=1 WHERE id=?",
+                (scene_id,),
+            )
+
+    return {"status": "written", "scene_count": len(body.scene_ids)}

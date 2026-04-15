@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useCallback } from "react"
 import { FilterTabs } from "@/components/ui/filter-tabs"
 import { StudioBadge } from "@/components/ui/studio-badge"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { useIdToken } from "@/hooks/use-id-token"
 import type { Scene, SceneStats } from "@/lib/api"
 import { API_BASE_URL } from "@/lib/api"
+import { SceneDetail } from "./scene-detail"
 
 const STUDIOS = ["All", "FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
 
@@ -30,13 +31,20 @@ interface Props {
   idToken?: string | undefined
 }
 
-export function SceneGrid({ scenes, stats, error, idToken: serverIdToken }: Props) {
+export function SceneGrid({ scenes: initialScenes, stats, error, idToken: serverIdToken }: Props) {
   const idToken = useIdToken(serverIdToken)
+  const [scenes, setScenes] = useState(initialScenes)
   const [studio, setStudio] = useState("All")
   const [missingOnly, setMissingOnly] = useState(false)
   const [search, setSearch] = useState("")
   const [megaRefreshing, setMegaRefreshing] = useState(false)
   const [megaMsg, setMegaMsg] = useState<string | null>(null)
+  const [selectedScene, setSelectedScene] = useState<Scene | null>(null)
+
+  const handleSceneUpdate = useCallback((updated: Scene) => {
+    setScenes((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
+    setSelectedScene(updated)
+  }, [])
 
   const studioCounts = useMemo(() => {
     const counts: Record<string, number> = { All: scenes.length }
@@ -84,6 +92,18 @@ export function SceneGrid({ scenes, stats, error, idToken: serverIdToken }: Prop
     } finally {
       setMegaRefreshing(false)
     }
+  }
+
+  // Detail view
+  if (selectedScene) {
+    return (
+      <SceneDetail
+        scene={selectedScene}
+        idToken={idToken}
+        onBack={() => setSelectedScene(null)}
+        onSceneUpdate={handleSceneUpdate}
+      />
+    )
   }
 
   return (
@@ -187,7 +207,8 @@ export function SceneGrid({ scenes, stats, error, idToken: serverIdToken }: Prop
                 return (
                   <tr
                     key={scene.id}
-                    className="transition-colors"
+                    onClick={() => setSelectedScene(scene)}
+                    className="transition-colors cursor-pointer hover:bg-[--color-elevated]"
                     style={{
                       borderBottom: i < filtered.length - 1 ? "1px solid var(--color-border-subtle)" : undefined,
                     }}

@@ -256,6 +256,21 @@ async def create_ticket(body: TicketCreate, user: CurrentUser):
     import threading
     threading.Thread(target=_write_ticket_to_sheet, args=(ticket,), daemon=True).start()
 
+    # Notify admins about new ticket
+    try:
+        from api.routers.notifications import notify_multiple, get_admin_names, TYPE_TICKET_CREATED
+        admins = [n for n in get_admin_names() if n != user["name"]]
+        if admins:
+            notify_multiple(
+                admins,
+                TYPE_TICKET_CREATED,
+                f"New ticket: {ticket_id}",
+                f'{user["name"]} submitted "{body.title}"',
+                "Tickets",
+            )
+    except Exception as exc:
+        _log.warning("Failed to send ticket notification: %s", exc)
+
     return ticket
 
 
@@ -322,5 +337,30 @@ async def update_ticket(ticket_id: str, body: TicketUpdate, user: CurrentUser):
             args=(ticket_id, sheet_updates),
             daemon=True,
         ).start()
+
+    # Notify on status change or assignment
+    try:
+        from api.routers.notifications import create_notification, TYPE_TICKET_STATUS, TYPE_TICKET_ASSIGNED
+        if "status" in sheet_updates:
+            # Notify the ticket submitter if it's not the person making the change
+            submitter = ticket.get("submitted_by", "")
+            if submitter and submitter != user["name"]:
+                create_notification(
+                    submitter,
+                    TYPE_TICKET_STATUS,
+                    f"{ticket_id} → {body.status}",
+                    f'{user["name"]} changed status to {body.status}',
+                    "Tickets",
+                )
+        if "assignee" in sheet_updates and body.assignee and body.assignee != user["name"]:
+            create_notification(
+                body.assignee,
+                TYPE_TICKET_ASSIGNED,
+                f"Assigned: {ticket_id}",
+                f'{user["name"]} assigned "{ticket["title"]}" to you',
+                "Tickets",
+            )
+    except Exception as exc:
+        _log.warning("Failed to send ticket notification: %s", exc)
 
     return ticket

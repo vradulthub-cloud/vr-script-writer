@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -15,20 +16,40 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
+/**
+ * Map from nav label → the key used in the users.allowed_tabs column.
+ * The Streamlit app's auth_config ALL_TABS uses these exact keys.
+ */
 const NAV_ITEMS = [
-  { href: "/missing",      label: "Missing",       icon: LayoutGrid },
-  { href: "/research",     label: "Model Research", icon: Users },
-  { href: "/scripts",      label: "Scripts",        icon: FileText },
-  { href: "/call-sheets",  label: "Call Sheets",    icon: Phone },
-  { href: "/titles",       label: "Titles",         icon: Image },
-  { href: "/descriptions", label: "Descriptions",   icon: AlignLeft },
-  { href: "/compilations", label: "Compilations",   icon: Layers },
-  { href: "/approvals",   label: "Approvals",       icon: CheckSquare },
-  { href: "/tickets",     label: "Tickets",         icon: Ticket },
+  { href: "/missing",      label: "Missing",        tabKey: "Tickets",        icon: LayoutGrid },
+  { href: "/research",     label: "Model Research",  tabKey: "Model Research", icon: Users },
+  { href: "/scripts",      label: "Scripts",          tabKey: "Scripts",        icon: FileText },
+  { href: "/call-sheets",  label: "Call Sheets",      tabKey: "Call Sheets",    icon: Phone },
+  { href: "/titles",       label: "Titles",            tabKey: "Titles",         icon: Image },
+  { href: "/descriptions", label: "Descriptions",    tabKey: "Descriptions",   icon: AlignLeft },
+  { href: "/compilations", label: "Compilations",    tabKey: "Compilations",   icon: Layers },
+  { href: "/approvals",    label: "Approvals",        tabKey: "Tickets",        icon: CheckSquare },
+  { href: "/tickets",      label: "Tickets",          tabKey: "Tickets",        icon: Ticket },
 ] as const
 
-export function Sidebar() {
+interface SidebarProps {
+  allowedTabs: string   // comma-separated tab keys or "ALL"
+  userRole: string      // "admin" | "editor"
+}
+
+export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
   const pathname = usePathname()
+
+  const visibleItems = useMemo(() => {
+    // Admins see everything
+    if (userRole === "admin" || allowedTabs === "ALL" || !allowedTabs) {
+      return NAV_ITEMS
+    }
+    const allowed = new Set(
+      allowedTabs.split(",").map((t) => t.trim())
+    )
+    return NAV_ITEMS.filter((item) => allowed.has(item.tabKey))
+  }, [allowedTabs, userRole])
 
   return (
     <aside
@@ -52,7 +73,6 @@ export function Sidebar() {
           className="font-bold tracking-tight"
           style={{ fontSize: 14, color: "var(--color-lime)" }}
         >
-          {/* Icon-only: show single "E" glyph; expanded: full wordmark */}
           <span className="xl:hidden">E</span>
           <span className="hidden xl:inline">ECLATECH</span>
         </span>
@@ -63,7 +83,7 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-2">
-        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+        {visibleItems.map(({ href, label, icon: Icon }) => {
           const active = pathname.startsWith(href)
           return (
             <Link
@@ -93,7 +113,7 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Bottom: version — hidden at icon-only width */}
+      {/* Bottom: version */}
       <div
         className="hidden xl:block px-4 py-3 shrink-0"
         style={{

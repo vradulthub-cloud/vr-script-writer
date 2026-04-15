@@ -3,12 +3,15 @@
 import { signOut } from "next-auth/react"
 import { LogOut } from "lucide-react"
 import type { Session } from "next-auth"
+import { NotificationBell } from "./notification-bell"
 
 interface TopbarProps {
   session: Session
+  idToken: string | undefined
+  userRole: string
 }
 
-export function Topbar({ session }: TopbarProps) {
+export function Topbar({ session, idToken, userRole }: TopbarProps) {
   return (
     <header
       className="fixed top-0 right-0 flex items-center justify-end gap-3 px-4"
@@ -20,6 +23,9 @@ export function Topbar({ session }: TopbarProps) {
         zIndex: 30,
       }}
     >
+      {/* Notifications */}
+      <NotificationBell idToken={idToken} />
+
       {/* User */}
       <div className="flex items-center gap-2">
         {session.user?.image ? (

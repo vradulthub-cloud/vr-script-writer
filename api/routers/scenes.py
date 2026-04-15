@@ -14,13 +14,16 @@ Routes:
 from __future__ import annotations
 
 import logging
+import re
+import threading
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from api.auth import CurrentUser
+from api.auth import CurrentUser, require_grail_writer
 from api.database import get_db
+from api.sheets_client import open_grail, with_retry
 
 _log = logging.getLogger(__name__)
 
@@ -34,21 +37,31 @@ router = APIRouter(prefix="/api/scenes", tags=["scenes"])
 class SceneResponse(BaseModel):
     id: str
     studio: str
-    site_code: str
-    title: str
-    performers: str
-    categories: str
-    tags: str
-    is_compilation: bool
-    has_description: bool
-    has_videos: bool
-    video_count: int
-    has_thumbnail: bool
-    has_photos: bool
-    has_storyboard: bool
-    storyboard_count: int
-    mega_path: str
-    grail_row: int
+    grail_tab: str = ""
+    site_code: str = ""
+    title: str = ""
+    performers: str = ""
+    categories: str = ""
+    tags: str = ""
+    release_date: str = ""
+    female: str = ""
+    male: str = ""
+    plot: str = ""
+    theme: str = ""
+    is_compilation: bool = False
+    has_description: bool = False
+    has_videos: bool = False
+    video_count: int = 0
+    has_thumbnail: bool = False
+    has_photos: bool = False
+    has_storyboard: bool = False
+    storyboard_count: int = 0
+    mega_path: str = ""
+    grail_row: int = 0
+
+
+class SceneFieldUpdate(BaseModel):
+    value: str = Field(..., min_length=0)
 
 
 class SceneStats(BaseModel):
@@ -152,6 +165,177 @@ async def get_scene(scene_id: str, user: CurrentUser):
 
 
 # ---------------------------------------------------------------------------
+# Scene field edit endpoints (Grail write-through)
+# ---------------------------------------------------------------------------
+
+# Grail column mapping (1-based): Scene#=2, Title=4, Performers=5, Categories=6, Tags=7
+GRAIL_COL = {"title": 4, "categories": 6, "tags": 7}
+
+
+def _write_grail_cell(grail_tab: str, grail_row: int, col: int, value: str) -> None:
+    """Write a single cell to the Grail sheet (background thread safe)."""
+    try:
+        sh = open_grail()
+        ws = sh.worksheet(grail_tab)
+        with_retry(lambda: ws.update_cell(grail_row, col, value))
+        _log.info("Grail write: %s row %d col %d", grail_tab, grail_row, col)
+    except Exception:
+        _log.exception("Failed to write Grail cell: %s R%dC%d", grail_tab, grail_row, col)
+
+
+@router.patch("/{scene_id}/title")
+async def update_scene_title(scene_id: str, body: SceneFieldUpdate, user: CurrentUser):
+    """Update a scene's title in SQLite + Grail sheet. Requires grail-writer permission."""
+    if user["name"] not in {"Drew", "David", "Duc"}:
+        raise HTTPException(status_code=403, detail="Grail write access required")
+
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM scenes WHERE id = ?", (scene_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Scene not found")
+        scene = dict(row)
+        conn.execute("UPDATE scenes SET title = ? WHERE id = ?", (body.value, scene_id))
+
+    threading.Thread(
+        target=_write_grail_cell,
+        args=(scene["grail_tab"], scene["grail_row"], GRAIL_COL["title"], body.value),
+        daemon=True,
+    ).start()
+
+    return {"ok": True, "field": "title", "value": body.value}
+
+
+@router.patch("/{scene_id}/categories")
+async def update_scene_categories(scene_id: str, body: SceneFieldUpdate, user: CurrentUser):
+    """Update a scene's categories in SQLite + Grail sheet."""
+    if user["name"] not in {"Drew", "David", "Duc"}:
+        raise HTTPException(status_code=403, detail="Grail write access required")
+
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM scenes WHERE id = ?", (scene_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Scene not found")
+        scene = dict(row)
+        conn.execute("UPDATE scenes SET categories = ? WHERE id = ?", (body.value, scene_id))
+
+    threading.Thread(
+        target=_write_grail_cell,
+        args=(scene["grail_tab"], scene["grail_row"], GRAIL_COL["categories"], body.value),
+        daemon=True,
+    ).start()
+
+    return {"ok": True, "field": "categories", "value": body.value}
+
+
+@router.patch("/{scene_id}/tags")
+async def update_scene_tags(scene_id: str, body: SceneFieldUpdate, user: CurrentUser):
+    """Update a scene's tags in SQLite + Grail sheet."""
+    if user["name"] not in {"Drew", "David", "Duc"}:
+        raise HTTPException(status_code=403, detail="Grail write access required")
+
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM scenes WHERE id = ?", (scene_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Scene not found")
+        scene = dict(row)
+        conn.execute("UPDATE scenes SET tags = ? WHERE id = ?", (body.value, scene_id))
+
+    threading.Thread(
+        target=_write_grail_cell,
+        args=(scene["grail_tab"], scene["grail_row"], GRAIL_COL["tags"], body.value),
+        daemon=True,
+    ).start()
+
+    return {"ok": True, "field": "tags", "value": body.value}
+
+
+# ---------------------------------------------------------------------------
+# AI title generation
+# ---------------------------------------------------------------------------
+
+_TITLE_GEN_SYSTEMS = {
+    "VRHush": "You are a creative title writer for VRHush, a premium VR adult content studio. Generate exactly ONE scene title. Rules: 2-3 words ONLY, clever double-entendres/wordplay preferred, hint at theme without being literal, no performer names, no generic titles. Recent VRH titles: Heat By Design, Born To Breed, Under Her Spell, Intimate Renderings, She Blooms on Command, Nailing the Interview. Respond with ONLY the title.",
+    "FuckPassVR": "You are a creative title writer for FuckPassVR, a premium VR travel/adventure studio. Generate exactly ONE scene title. Rules: 2-5 words, travel/destination themes when applicable, clever wordplay preferred, no performer names. Recent FPVR titles: The Grind Finale, Eager Beaver, Deep Devotion, Fully Seated Affair, Behind the Curtain, The Bouncing Layover. Respond with ONLY the title.",
+    "VRAllure": "You are a creative title writer for VRAllure, a premium VR solo/intimate studio. Generate exactly ONE scene title. Rules: 2-3 words ONLY, sensual/intimate/soft tone, suggestive but elegant, no performer names. Recent VRA titles: Sweet Surrender, Rise and Grind, Always on Top, A Swift Release, She Came to Play, Hovering With Intent. Respond with ONLY the title.",
+    "NaughtyJOI": "You are a creative title writer for NaughtyJOI, a premium VR JOI studio. Generate a PAIRED title: '[Name] [soft action]' then '[Name] then [intense action]'. Use the performer's first name only. Respond with ONLY the two titles separated by a newline.",
+}
+
+
+class TitleGenerateBody(BaseModel):
+    female: str = ""
+    theme: str = ""
+    plot: str = ""
+
+
+@router.post("/{scene_id}/generate-title")
+async def generate_scene_title(scene_id: str, body: TitleGenerateBody, user: CurrentUser):
+    """Generate an AI title suggestion for a scene using Claude."""
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM scenes WHERE id = ?", (scene_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Scene not found")
+        scene = dict(row)
+
+    studio = scene.get("studio", "VRHush")
+    female = body.female or scene.get("female", "")
+    theme = body.theme or scene.get("theme", "")
+    plot = body.plot or scene.get("plot", "")
+
+    sys_prompt = _TITLE_GEN_SYSTEMS.get(studio, _TITLE_GEN_SYSTEMS["VRHush"])
+    user_prompt = f"Generate a title for this scene:\n\nPerformer: {female}\nTheme: {theme}\nPlot summary: {plot[:500] if plot else 'N/A'}\n\nGenerate the title now."
+
+    try:
+        import anthropic
+        from api.config import get_settings
+        client = anthropic.Anthropic(api_key=get_settings().anthropic_api_key)
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=50,
+            system=sys_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        title = resp.content[0].text.strip().strip('"').strip("'")
+        return {"title": title}
+    except Exception as exc:
+        _log.error("Title generation failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Title generation failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Naming validation
+# ---------------------------------------------------------------------------
+
+# Expected prefixes by studio
+_STUDIO_PREFIXES = {
+    "FuckPassVR": "FPVR", "VRHush": "VRH", "VRAllure": "VRA", "NaughtyJOI": "NNJOI",
+}
+
+
+@router.get("/{scene_id}/naming-issues")
+async def naming_issues(scene_id: str, user: CurrentUser):
+    """Check file naming conventions for a scene's MEGA assets."""
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM scenes WHERE id = ?", (scene_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Scene not found")
+        scene = dict(row)
+
+    issues: list[dict] = []
+    prefix = _STUDIO_PREFIXES.get(scene["studio"], scene["id"][:3].upper())
+    expected_folder = scene["id"]  # e.g., "FPVR0042"
+
+    # Check folder name pattern
+    if not re.match(rf"^{prefix}\d{{4}}$", scene["id"]):
+        issues.append({"type": "folder", "file": scene["id"], "issue": f"ID should match {prefix}XXXX pattern"})
+
+    # Check mega_path exists
+    if not scene.get("mega_path"):
+        issues.append({"type": "folder", "file": scene["id"], "issue": "No MEGA folder found"})
+
+    return {"scene_id": scene_id, "issues": issues, "ok": len(issues) == 0}
+
+
+# ---------------------------------------------------------------------------
 # MEGA action endpoints
 # ---------------------------------------------------------------------------
 
@@ -235,11 +419,17 @@ def _row_to_scene(row: dict) -> SceneResponse:
     return SceneResponse(
         id=row["id"],
         studio=row["studio"],
+        grail_tab=row.get("grail_tab", ""),
         site_code=row.get("site_code", ""),
         title=row.get("title", ""),
         performers=row.get("performers", ""),
         categories=row.get("categories", ""),
         tags=row.get("tags", ""),
+        release_date=row.get("release_date", ""),
+        female=row.get("female", ""),
+        male=row.get("male", ""),
+        plot=row.get("plot", ""),
+        theme=row.get("theme", ""),
         is_compilation=bool(row.get("is_compilation", 0)),
         has_description=bool(row.get("has_description", 0)),
         has_videos=bool(row.get("has_videos", 0)),

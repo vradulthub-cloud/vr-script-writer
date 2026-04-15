@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { useStream } from "@/lib/sse"
-import { API_BASE_URL, type Scene } from "@/lib/api"
+import { api, API_BASE_URL, type Scene } from "@/lib/api"
 import { StudioBadge } from "@/components/ui/studio-badge"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
@@ -10,7 +10,7 @@ import { useIdToken } from "@/hooks/use-id-token"
 
 const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
 
-type Mode = "ideas" | "builder"
+type Mode = "ideas" | "builder" | "existing"
 
 interface Props {
   allScenes: Scene[]
@@ -53,6 +53,7 @@ function parseIdeas(raw: string): ParsedIdea[] {
 
 export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: Props) {
   const idToken = useIdToken(serverIdToken)
+  const client = api(idToken ?? null)
 
   const [studio, setStudio] = useState("FuckPassVR")
   const [mode, setMode] = useState<Mode>("ideas")
@@ -60,9 +61,22 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
   const [selected, setSelected] = useState<string[]>([])
   const [sceneSearch, setSceneSearch] = useState("")
   const [ideasNotes, setIdeasNotes] = useState("")
+  const [ideasCount, setIdeasCount] = useState(6)
+
+  // Existing comps state
+  const [existingComps, setExistingComps] = useState<{ title: string; scenes: string[]; date: string }[]>([])
+  const [existingLoading, setExistingLoading] = useState(false)
 
   const ideasStream = useStream()
   const descStream = useStream()
+
+  // Load existing comps when switching to that tab
+  useEffect(() => {
+    if (mode !== "existing") return
+    setExistingLoading(true)
+    client.compilations.existing(studio).then(setExistingComps).catch(() => setExistingComps([])).finally(() => setExistingLoading(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, studio])
 
   const eligibleScenes = useMemo(
     () => allScenes.filter(s => s.studio === studio),
@@ -102,7 +116,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
     ideasStream.start(
       `${API_BASE_URL}/api/compilations/ideas`,
       idToken,
-      { studio, notes: ideasNotes }
+      { studio, notes: ideasNotes, count: ideasCount }
     )
   }
 
@@ -180,7 +194,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
           className="flex rounded overflow-hidden ml-4"
           style={{ border: "1px solid var(--color-border)" }}
         >
-          {(["ideas", "builder"] as Mode[]).map(m => (
+          {(["ideas", "builder", "existing"] as Mode[]).map(m => (
             <button
               key={m}
               onClick={() => setMode(m)}
@@ -218,6 +232,17 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                   }}
                 />
               </div>
+              {/* Ideas count slider */}
+              <div>
+                <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  # Ideas: <span style={{ color: "var(--color-text)" }}>{ideasCount}</span>
+                </label>
+                <input
+                  type="range" min={3} max={10} value={ideasCount}
+                  onChange={e => setIdeasCount(Number(e.target.value))}
+                  className="w-full" style={{ accentColor: "var(--color-lime)" }}
+                />
+              </div>
               <button
                 onClick={generateIdeas}
                 disabled={ideasStream.streaming}
@@ -228,7 +253,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                   cursor: ideasStream.streaming ? "wait" : "pointer",
                 }}
               >
-                {ideasStream.streaming ? "Generating…" : "Suggest 5 Ideas"}
+                {ideasStream.streaming ? "Generating…" : `Suggest ${ideasCount} Ideas`}
               </button>
               {ideasStream.streaming && (
                 <button
@@ -492,6 +517,60 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ── Existing comps tab ── */}
+      {mode === "existing" && (
+        <div>
+          {existingLoading && (
+            <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Loading existing compilations…</p>
+          )}
+          {!existingLoading && existingComps.length === 0 && (
+            <div className="rounded flex items-center justify-center"
+              style={{ height: 200, border: "1px dashed var(--color-border)", color: "var(--color-text-faint)", fontSize: 12 }}
+            >
+              No compilations found for {studio}
+            </div>
+          )}
+          {!existingLoading && existingComps.length > 0 && (
+            <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
+              <table className="w-full" style={{ borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
+                    <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Title</th>
+                    <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Scenes</th>
+                    <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {existingComps.map((comp, i) => (
+                    <tr key={i} style={{ borderBottom: i < existingComps.length - 1 ? "1px solid var(--color-border-subtle, var(--color-border))" : undefined }}>
+                      <td className="px-3 py-2" style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500 }}>
+                        {comp.title}
+                      </td>
+                      <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                        {comp.scenes.length} scene{comp.scenes.length !== 1 ? "s" : ""}
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {comp.scenes.slice(0, 8).map(id => (
+                            <span key={id} className="font-mono rounded px-1" style={{ fontSize: 9, background: "var(--color-elevated)", color: "var(--color-text-faint)" }}>
+                              {id}
+                            </span>
+                          ))}
+                          {comp.scenes.length > 8 && (
+                            <span style={{ fontSize: 9, color: "var(--color-text-faint)" }}>+{comp.scenes.length - 8}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                        {comp.date || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>

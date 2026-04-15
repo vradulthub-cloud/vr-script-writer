@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
+import { Download, Sparkles, Link2, RotateCcw } from "lucide-react"
 import { useStream } from "@/lib/sse"
-import { api, API_BASE_URL, type Script } from "@/lib/api"
+import { api, API_BASE_URL, type Script, type Ticket } from "@/lib/api"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
@@ -26,10 +27,12 @@ interface Props {
   tabs: string[]
   tabsError: string | null
   idToken: string | undefined
+  userRole?: string
 }
 
-export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken }: Props) {
+export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userRole = "editor" }: Props) {
   const idToken = useIdToken(serverIdToken)
+  const isAdmin = userRole === "admin"
 
   const [mode, setMode] = useState<"manual" | "sheet">("manual")
 
@@ -56,6 +59,15 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken }: Pro
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
 
+  // Post-generation features
+  const [violations, setViolations] = useState<string[]>([])
+  const [validationRan, setValidationRan] = useState(false)
+  const [genTitleText, setGenTitleText] = useState("")
+  const [titleGenerating, setTitleGenerating] = useState(false)
+  const [feedback, setFeedback] = useState("")
+  const [tickets, setTickets] = useState<Ticket[]>([])
+  const [linkedTicket, setLinkedTicket] = useState("")
+
   // Parsed sections from output — memoized so regex doesn't re-run on every render
   const sections = useMemo(
     () => (stream.output ? parseSections(stream.output) : {}),
@@ -63,6 +75,33 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken }: Pro
   )
 
   const client = api(idToken ?? null)
+
+  // Auto-validate when stream finishes
+  useEffect(() => {
+    if (stream.streaming || !stream.output) return
+    const s = parseSections(stream.output)
+    if (!s["THEME"] && !s["PLOT"]) return
+    setValidationRan(false)
+    client.scripts.validate({
+      theme: s["THEME"] ?? "",
+      plot: s["PLOT"] ?? "",
+      wardrobe_f: s["WARDROBE (F)"] ?? "",
+      wardrobe_m: s["WARDROBE (M)"] ?? "",
+      shoot_location: s["SHOOT LOCATION"] ?? "",
+      female,
+      male,
+    }).then((r) => {
+      setViolations(r.violations)
+      setValidationRan(true)
+    }).catch(() => setValidationRan(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stream.streaming, stream.output])
+
+  // Load tickets for linking dropdown
+  useEffect(() => {
+    client.tickets.list({ status: "In Progress" }).then(setTickets).catch(() => {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Load rows when tab changes
   useEffect(() => {
@@ -136,6 +175,8 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken }: Pro
         plot: sections["PLOT"] ?? "",
         wardrobe_f: sections["WARDROBE (F)"],
         wardrobe_m: sections["WARDROBE (M)"],
+        shoot_location: sections["SHOOT LOCATION"],
+        props: "",
       })
       setSaveMsg("Saved to sheet.")
     } catch (e) {
@@ -143,6 +184,77 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken }: Pro
     } finally {
       setSaving(false)
     }
+  }
+
+  async function submitForApproval() {
+    if (!stream.output) return
+    setSaving(true)
+    setSaveMsg(null)
+    try {
+      await client.approvals.create({
+        scene_id: selectedRow?.id?.toString() ?? female.replace(/\s+/g, "-"),
+        studio,
+        content_type: "script",
+        content_json: JSON.stringify(sections),
+        notes: linkedTicket ? `Linked: ${linkedTicket}` : "",
+        target_sheet: selectedRow?.tab_name,
+        target_range: selectedRow ? `G${selectedRow.sheet_row}` : "",
+      })
+      setSaveMsg("Submitted for approval.")
+    } catch (e) {
+      setSaveMsg(e instanceof Error ? e.message : "Submit failed")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function generateScriptTitle() {
+    setTitleGenerating(true)
+    try {
+      const { title } = await client.scripts.generateTitle({
+        studio,
+        female,
+        theme: sections["THEME"] ?? "",
+        plot: sections["PLOT"] ?? "",
+      })
+      setGenTitleText(title)
+    } catch {
+      setGenTitleText("")
+    } finally {
+      setTitleGenerating(false)
+    }
+  }
+
+  function downloadTxt() {
+    if (!stream.output) return
+    const blob = new Blob([stream.output], { type: "text/plain" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${studio}_${female.replace(/\s+/g, "_")}_${sceneType}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function regenerateWithFeedback() {
+    stream.start(
+      `${API_BASE_URL}/api/scripts/generate`,
+      idToken,
+      {
+        studio,
+        scene_type: sceneType,
+        female,
+        male,
+        destination: studio === "FuckPassVR" ? destination : undefined,
+        director_note: feedback || undefined,
+        tab_name: selectedRow?.tab_name,
+        sheet_row: selectedRow?.sheet_row,
+      }
+    )
+    setFeedback("")
+    setViolations([])
+    setValidationRan(false)
+    setGenTitleText("")
   }
 
   const studioColor = STUDIO_COLOR[studio] ?? "var(--color-text-muted)"
@@ -529,32 +641,166 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken }: Pro
               </div>
             )}
 
-            {/* Save button */}
-            {!stream.streaming && selectedRow && (
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={save}
-                  disabled={saving}
-                  className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-                  style={{
-                    background: "var(--color-lime)",
-                    color: "#0d0d0d",
-                    opacity: saving ? 0.6 : 1,
-                  }}
-                >
-                  {saving ? "Saving…" : "Save to Sheet"}
-                </button>
-                {saveMsg && (
-                  <span style={{ fontSize: 11, color: saveMsg.includes("Saved") ? "var(--color-ok)" : "var(--color-err)" }}>
-                    {saveMsg}
-                  </span>
+            {/* Post-generation controls */}
+            {!stream.streaming && stream.output && (
+              <div className="flex flex-col gap-4">
+                {/* Validation */}
+                {validationRan && (
+                  <div
+                    className="rounded px-3 py-2"
+                    style={{
+                      background: violations.length === 0
+                        ? "color-mix(in srgb, var(--color-ok) 8%, transparent)"
+                        : "color-mix(in srgb, var(--color-err) 8%, transparent)",
+                      border: `1px solid ${violations.length === 0
+                        ? "color-mix(in srgb, var(--color-ok) 20%, transparent)"
+                        : "color-mix(in srgb, var(--color-err) 20%, transparent)"}`,
+                    }}
+                  >
+                    {violations.length === 0 ? (
+                      <span style={{ fontSize: 12, color: "var(--color-ok)" }}>&#10003; Validation passed</span>
+                    ) : (
+                      <div>
+                        <span style={{ fontSize: 12, color: "var(--color-err)", fontWeight: 600 }}>
+                          {violations.length} issue{violations.length > 1 ? "s" : ""}
+                        </span>
+                        <ul className="mt-1 space-y-0.5">
+                          {violations.map((v, i) => (
+                            <li key={i} style={{ fontSize: 11, color: "var(--color-err)" }}>{v}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Title generation */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={generateScriptTitle}
+                    disabled={titleGenerating}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors"
+                    style={{
+                      background: "color-mix(in srgb, var(--color-lime) 12%, transparent)",
+                      color: "var(--color-lime)",
+                      border: "1px solid color-mix(in srgb, var(--color-lime) 25%, transparent)",
+                      opacity: titleGenerating ? 0.5 : 1,
+                    }}
+                  >
+                    <Sparkles size={11} />
+                    {titleGenerating ? "Generating..." : "Generate Title"}
+                  </button>
+                  {genTitleText && (
+                    <span
+                      className="rounded px-2.5 py-1"
+                      style={{ fontSize: 12, color: "var(--color-text)", background: "var(--color-elevated)", border: "1px solid var(--color-border)" }}
+                    >
+                      {genTitleText}
+                    </span>
+                  )}
+                </div>
+
+                {/* Action buttons row */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Download */}
+                  <button
+                    onClick={downloadTxt}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-colors"
+                    style={{ background: "var(--color-surface)", color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
+                  >
+                    <Download size={11} />
+                    Download .txt
+                  </button>
+
+                  {/* Accept (admin) or Submit (editor) */}
+                  {isAdmin ? (
+                    <button
+                      onClick={save}
+                      disabled={saving || !selectedRow}
+                      className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+                      style={{
+                        background: "var(--color-lime)",
+                        color: "#0d0d0d",
+                        opacity: saving || !selectedRow ? 0.5 : 1,
+                      }}
+                    >
+                      {saving ? "Saving..." : "Accept & Save"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={submitForApproval}
+                      disabled={saving}
+                      className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+                      style={{
+                        background: "var(--color-lime)",
+                        color: "#0d0d0d",
+                        opacity: saving ? 0.5 : 1,
+                      }}
+                    >
+                      {saving ? "Submitting..." : "Submit for Approval"}
+                    </button>
+                  )}
+
+                  {saveMsg && (
+                    <span style={{ fontSize: 11, color: saveMsg.includes("Saved") || saveMsg.includes("Submitted") ? "var(--color-ok)" : "var(--color-err)" }}>
+                      {saveMsg}
+                    </span>
+                  )}
+                </div>
+
+                {/* Ticket linking */}
+                {tickets.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Link2 size={12} style={{ color: "var(--color-text-faint)" }} />
+                    <select
+                      value={linkedTicket}
+                      onChange={(e) => setLinkedTicket(e.target.value)}
+                      className="px-2 py-1 rounded text-xs outline-none"
+                      style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
+                    >
+                      <option value="">Link to ticket...</option>
+                      {tickets.map((t) => (
+                        <option key={t.ticket_id} value={t.ticket_id}>
+                          {t.ticket_id} — {t.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Regenerate with feedback */}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={feedback}
+                    onChange={(e) => setFeedback(e.target.value)}
+                    placeholder="Director's feedback for regeneration..."
+                    className="flex-1 px-2.5 py-1.5 rounded text-xs outline-none"
+                    style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && feedback) regenerateWithFeedback() }}
+                  />
+                  <button
+                    onClick={regenerateWithFeedback}
+                    disabled={!feedback}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-colors"
+                    style={{
+                      background: "transparent",
+                      color: feedback ? "var(--color-text-muted)" : "var(--color-text-faint)",
+                      border: "1px solid var(--color-border)",
+                      opacity: feedback ? 1 : 0.5,
+                    }}
+                  >
+                    <RotateCcw size={11} />
+                    Regenerate
+                  </button>
+                </div>
+
+                {!selectedRow && (
+                  <p style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                    Select a row from "From Sheet" mode to enable saving to sheet.
+                  </p>
                 )}
               </div>
-            )}
-            {!stream.streaming && !selectedRow && stream.output && (
-              <p style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-                Select a row from "From Sheet" mode to enable saving.
-              </p>
             )}
           </>
         )}
