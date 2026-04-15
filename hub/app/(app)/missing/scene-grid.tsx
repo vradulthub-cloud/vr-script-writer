@@ -226,29 +226,44 @@ export function SceneGrid({ scenes: initialScenes, stats, error, idToken: server
                       <span className="line-clamp-1">{scene.performers || "—"}</span>
                     </td>
                     {ASSET_COLS.map(col => (
-                      <td key={col.key} className="px-2 py-1.5 text-center" style={{ fontSize: 13 }}>
-                        {scene[col.key] ? (
-                          <span style={{ color: "var(--color-ok)" }}>✓</span>
-                        ) : (
-                          <span style={{ color: "var(--color-err)" }}>·</span>
-                        )}
+                      <td key={col.key} className="px-2 py-1.5 text-center">
+                        <span
+                          className="inline-flex items-center justify-center rounded-full"
+                          style={{
+                            width: 18,
+                            height: 18,
+                            fontSize: 10,
+                            fontWeight: 600,
+                            background: scene[col.key]
+                              ? "color-mix(in srgb, var(--color-ok) 18%, transparent)"
+                              : "color-mix(in srgb, var(--color-err) 12%, transparent)",
+                            color: scene[col.key] ? "var(--color-ok)" : "var(--color-err)",
+                          }}
+                        >
+                          {scene[col.key] ? "✓" : "✗"}
+                        </span>
                       </td>
                     ))}
                     <td className="px-3 py-1.5">
                       <div className="flex items-center gap-1.5">
                         <div
                           className="rounded-full overflow-hidden"
-                          style={{ width: 40, height: 3, background: "var(--color-border)" }}
+                          style={{ width: 56, height: 5, background: "var(--color-border)" }}
                         >
                           <div
-                            className="h-full rounded-full"
+                            className="h-full rounded-full transition-all"
                             style={{
                               width: `${pct}%`,
                               background: pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)",
                             }}
                           />
                         </div>
-                        <span style={{ fontSize: 10, color: "var(--color-text-faint)", minWidth: 24 }}>
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          minWidth: 28,
+                          color: pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : pct > 0 ? "var(--color-err)" : "var(--color-text-faint)",
+                        }}>
                           {pct}%
                         </span>
                       </div>

@@ -2,17 +2,17 @@
 
 /* ─── Design tokens ───────────────────────────────────────────────────────── */
 @theme {
-  /* Surfaces */
-  --color-base:     #0d0d0d;
-  --color-surface:  #141414;
-  --color-elevated: #1c1c1c;
-  --color-border:   #242424;
-  --color-border-subtle: #1a1a1a;
+  /* Surfaces — tinted toward lime hue (82°) for subtle warmth */
+  --color-base:     oklch(7% 0.005 82);
+  --color-surface:  oklch(11% 0.005 82);
+  --color-elevated: oklch(15% 0.008 82);
+  --color-border:   oklch(20% 0.006 82);
+  --color-border-subtle: oklch(14% 0.004 82);
 
-  /* Text */
-  --color-text:       #e8e8e8;
-  --color-text-muted: #888888;
-  --color-text-faint: #6b6b6b;
+  /* Text — slightly warm instead of pure gray */
+  --color-text:       oklch(92% 0.005 82);
+  --color-text-muted: oklch(60% 0.008 82);
+  --color-text-faint: oklch(45% 0.006 82);
 
   /* Primary action — lime green, use sparingly */
   --color-lime:      #bed62f;

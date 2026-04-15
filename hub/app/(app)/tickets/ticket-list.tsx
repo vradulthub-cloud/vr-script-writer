@@ -7,15 +7,15 @@ import { useIdToken } from "@/hooks/use-id-token"
 
 const PRIORITY_COLOR: Record<string, string> = {
   Critical: "var(--color-err)",
-  High:     "#f97316",
+  High:     "var(--color-njoi)",
   Medium:   "var(--color-warn)",
   Low:      "var(--color-text-muted)",
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  "New":         "var(--color-text-muted)",
+  "New":         "var(--color-text)",
   "Approved":    "var(--color-ok)",
-  "In Progress": "#60a5fa",
+  "In Progress": "var(--color-fpvr)",
   "In Review":   "var(--color-lime)",
   "Closed":      "var(--color-text-faint)",
   "Rejected":    "var(--color-err)",
