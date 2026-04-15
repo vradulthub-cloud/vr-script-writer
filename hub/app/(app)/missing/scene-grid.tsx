@@ -178,9 +178,22 @@ export function SceneGrid({ scenes: initialScenes, stats, error, idToken: server
 
       {/* Empty */}
       {!error && filtered.length === 0 && (
-        <p style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
-          No scenes match the current filters.
-        </p>
+        <div
+          className="rounded flex flex-col items-center justify-center gap-2"
+          style={{
+            height: 200,
+            border: "1px dashed var(--color-border)",
+            color: "var(--color-text-faint)",
+          }}
+        >
+          <span style={{ fontSize: 24 }}>&#9673;</span>
+          <span style={{ fontSize: 13 }}>
+            {search ? `No scenes matching "${search}"` : missingOnly ? "All assets accounted for" : "No scenes loaded"}
+          </span>
+          {missingOnly && !search && (
+            <span style={{ fontSize: 11, color: "var(--color-ok)" }}>Every scene has its assets. Nice.</span>
+          )}
+        </div>
       )}
 
       {/* Table */}
@@ -208,6 +221,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error, idToken: server
                   <tr
                     key={scene.id}
                     onClick={() => setSelectedScene(scene)}
+                    data-complete={pct === 100 || undefined}
                     className="transition-colors cursor-pointer hover:bg-[--color-elevated]"
                     style={{
                       borderBottom: i < filtered.length - 1 ? "1px solid var(--color-border-subtle)" : undefined,

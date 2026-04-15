@@ -573,6 +573,14 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
 
         {(stream.output || stream.streaming) && (
           <>
+            {/* Word count indicator while streaming */}
+            {stream.streaming && stream.output && (
+              <div className="flex items-center gap-3 mb-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                <span className="tabular-nums">{stream.output.split(/\s+/).filter(Boolean).length} words</span>
+                <span style={{ color: "var(--color-text-faint)", opacity: 0.5 }}>generating...</span>
+              </div>
+            )}
+
             {/* Raw streaming output */}
             <div
               className="rounded mb-4 overflow-auto"

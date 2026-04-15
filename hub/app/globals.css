@@ -162,6 +162,25 @@ main > div {
   animation: dropdownIn var(--duration-base) var(--ease-out-expo) both;
 }
 
+/* Success flash — applies briefly after save actions */
+@keyframes successFlash {
+  0% { background: color-mix(in srgb, var(--color-ok) 20%, transparent); }
+  100% { background: transparent; }
+}
+[data-saved] {
+  animation: successFlash 1.2s var(--ease-out-expo) both;
+}
+
+/* Complete row accent — subtle left glow for 100% scenes */
+tr[data-complete="true"] {
+  box-shadow: inset 3px 0 0 0 color-mix(in srgb, var(--color-ok) 40%, transparent);
+}
+
+/* Sidebar active indicator */
+nav a[data-active="true"] {
+  box-shadow: inset 3px 0 0 0 var(--color-lime);
+}
+
 /* ─── Responsive sidebar ──────────────────────────────────────────────────── */
 /* Below 1280px: collapse to icon-only rail (sidebar.tsx hides labels) */
 @media (max-width: 1279px) {

@@ -90,6 +90,7 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
               key={href}
               href={href}
               title={label}
+              data-active={active || undefined}
               className={cn(
                 "flex items-center gap-2.5 py-2 transition-colors",
                 "justify-center px-0 xl:justify-start xl:px-4",
