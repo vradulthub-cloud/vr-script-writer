@@ -87,3 +87,29 @@ Detailed rules for each subsystem are in `.claude/rules/`:
 - `windows-ssh.md` — SSH lessons learned (process lifecycle gotchas)
 
 These load automatically when you work on matching files.
+
+---
+
+## Design Context
+
+### Users
+Small internal team of 7 (3 admins, 3 editors) managing video production workflows for 4 adult content studios. Used daily, in-depth — not casual browsing. Users are comfortable with dense UIs and need speed over hand-holding. Context is typically a desktop browser in a work setting. Power users who will notice inconsistencies.
+
+### Brand Personality
+**Three words:** precise · cinematic · backstage
+
+The tool lives behind the scenes of a production operation. It should feel like the equipment rack in a film studio — purposeful, authoritative, no wasted space. Not glamorous, not grim — just completely in control.
+
+### Aesthetic Direction
+- **Theme:** Dark, always. Not "dark mode as a preference" — dark as the primary reality of this interface.
+- **Reference feel:** Linear, Raycast, Vercel Dashboard — confident use of dark surfaces, restrained accent use, excellent information density
+- **Color system:** Keep lime green (`#bed62f`) as the sole primary action color. Keep studio identity colors (FPVR blue `#3b82f6`, VRH purple `#8b5cf6`, VRA pink `#ec4899`, NJOI orange `#f97316`) as contextual anchors — they should dominate when in a studio context.
+- **Typography evolution:** Syne and DM Sans are approved to replace on new work. Prefer a high-contrast grotesque display face (e.g., Basement Grotesque, Cabinet Grotesk, Clash Display, Neue Montreal) for headings. Body: General Sans, Geist, or Switzer. DM Mono is fine to keep for code/monospace contexts.
+- **Anti-references:** NO purple/cyan gradient combos, NO gradient text, NO glowing card borders, NO AI startup aesthetic. NO gray enterprise table grids, NO blue primary buttons, NO sidebar-with-accordion nav.
+
+### Design Principles
+1. **Information density first.** This is a pro tool used all day. Prioritize fitting more on screen over breathing room. Tight line-height, compact spacing, minimal chrome.
+2. **Studio color owns its context.** When working in FPVR, blue is the dominant accent. When in VRH, purple leads. Lime green recedes to action-only use (submit, save, CTA).
+3. **Lime green is sacred.** Use it only for primary actions and active/selected states. One occurrence per screen is ideal. Never decorative.
+4. **Weight and size carry hierarchy — not color.** Use font weight (400→700) and size steps aggressively. Reserve color for status and identity, not emphasis.
+5. **Nothing decorates.** Every visual element must communicate something: status, identity, hierarchy, or interactivity. Purely decorative elements (dividers, background patterns, ambient glow) are banned unless they orient the user.
