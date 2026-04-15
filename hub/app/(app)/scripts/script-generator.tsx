@@ -604,8 +604,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
                       background: studioColor,
                       marginLeft: 2,
                       verticalAlign: "middle",
-                      animation: "none",
-                      opacity: 0.8,
+                      animation: "streamCursorPulse 1s ease-in-out infinite",
                     }}
                   />
                 )}

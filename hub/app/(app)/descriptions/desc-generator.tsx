@@ -640,7 +640,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                       background: studioColor,
                       marginLeft: 2,
                       verticalAlign: "middle",
-                      opacity: 0.8,
+                      animation: "streamCursorPulse 1s ease-in-out infinite",
                     }}
                   />
                 </p>

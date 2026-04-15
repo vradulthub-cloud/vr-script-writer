@@ -336,7 +336,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                 <pre style={{ fontSize: 12, lineHeight: 1.7, color: "var(--color-text)", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontFamily: "var(--font-sans)" }}>
                   {ideasStream.output}
                   {ideasStream.streaming && (
-                    <span style={{ display: "inline-block", width: 6, height: 12, background: studioColor, marginLeft: 2, verticalAlign: "middle", opacity: 0.8 }} />
+                    <span style={{ display: "inline-block", width: 6, height: 12, background: studioColor, marginLeft: 2, verticalAlign: "middle", animation: "streamCursorPulse 1s ease-in-out infinite" }} />
                   )}
                 </pre>
               </div>
@@ -492,7 +492,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                   <pre style={{ fontFamily: "var(--font-sans)", fontSize: 12, lineHeight: 1.7, color: "var(--color-text)", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0 }}>
                     {descStream.output}
                     {descStream.streaming && (
-                      <span style={{ display: "inline-block", width: 6, height: 12, background: studioColor, marginLeft: 2, verticalAlign: "middle", opacity: 0.8 }} />
+                      <span style={{ display: "inline-block", width: 6, height: 12, background: studioColor, marginLeft: 2, verticalAlign: "middle", animation: "streamCursorPulse 1s ease-in-out infinite" }} />
                     )}
                   </pre>
                 </div>

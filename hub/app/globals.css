@@ -96,6 +96,36 @@ h3 { font-size: var(--text-base); font-weight: 600; }
   background: color-mix(in srgb, var(--color-lime) 25%, transparent);
 }
 
+/* ─── Motion tokens ──────────────────────────────────────────────────────── */
+:root {
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo:  cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast:  120ms;
+  --duration-base:  200ms;
+  --duration-slow:  350ms;
+}
+
+/* ─── Global interactive transitions ─────────────────────────────────────── */
+button, a, [role="button"], input, select, textarea {
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart),
+    opacity var(--duration-fast) var(--ease-out-quart),
+    box-shadow var(--duration-fast) var(--ease-out-quart);
+}
+
+/* Button press feedback */
+button:active:not(:disabled), [role="button"]:active:not(:disabled) {
+  transform: scale(0.97);
+  transition-duration: 60ms;
+}
+
+/* Table row hover */
+tr {
+  transition: background var(--duration-fast) var(--ease-out-quart);
+}
+
 /* ─── Animations ──────────────────────────────────────────────────────────── */
 @keyframes panelSlideIn {
   from { opacity: 0; transform: translateX(14px); }
@@ -107,6 +137,31 @@ h3 { font-size: var(--text-base); font-weight: 600; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes streamCursorPulse {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes dropdownIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Page content entrance */
+main > div {
+  animation: fadeIn var(--duration-slow) var(--ease-out-expo) both;
+}
+
+/* Dropdown menus */
+[data-dropdown] {
+  animation: dropdownIn var(--duration-base) var(--ease-out-expo) both;
+}
+
 /* ─── Responsive sidebar ──────────────────────────────────────────────────── */
 /* Below 1280px: collapse to icon-only rail (sidebar.tsx hides labels) */
 @media (max-width: 1279px) {
@@ -116,12 +171,9 @@ h3 { font-size: var(--text-base); font-weight: 600; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  @keyframes panelSlideIn {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-  }
-  @keyframes toastSlideUp {
-    from { opacity: 0; }
-    to   { opacity: 1; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

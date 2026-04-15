@@ -115,6 +115,7 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
       {open && (
         <div
           className="absolute right-0 overflow-hidden"
+          data-dropdown
           style={{
             top: "calc(100% + 6px)",
             width: 340,
