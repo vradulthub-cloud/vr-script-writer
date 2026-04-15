@@ -11,6 +11,7 @@ import {
   AlignLeft,
   Layers,
   Ticket,
+  CheckSquare,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -22,7 +23,8 @@ const NAV_ITEMS = [
   { href: "/titles",       label: "Titles",         icon: Image },
   { href: "/descriptions", label: "Descriptions",   icon: AlignLeft },
   { href: "/compilations", label: "Compilations",   icon: Layers },
-  { href: "/tickets",      label: "Tickets",        icon: Ticket },
+  { href: "/approvals",   label: "Approvals",       icon: CheckSquare },
+  { href: "/tickets",     label: "Tickets",         icon: Ticket },
 ] as const
 
 export function Sidebar() {
@@ -40,7 +42,7 @@ export function Sidebar() {
     >
       {/* Logo */}
       <div
-        className="flex items-center gap-2 px-4 shrink-0"
+        className="flex items-center justify-center xl:justify-start gap-2 px-0 xl:px-4 shrink-0"
         style={{
           height: "var(--spacing-topbar)",
           borderBottom: "1px solid var(--color-border)",
@@ -50,9 +52,11 @@ export function Sidebar() {
           className="font-bold tracking-tight"
           style={{ fontSize: 14, color: "var(--color-lime)" }}
         >
-          ECLATECH
+          {/* Icon-only: show single "E" glyph; expanded: full wordmark */}
+          <span className="xl:hidden">E</span>
+          <span className="hidden xl:inline">ECLATECH</span>
         </span>
-        <span style={{ fontSize: 14, color: "var(--color-text-muted)" }}>
+        <span className="hidden xl:inline" style={{ fontSize: 14, color: "var(--color-text-muted)" }}>
           HUB
         </span>
       </div>
@@ -65,8 +69,10 @@ export function Sidebar() {
             <Link
               key={href}
               href={href}
+              title={label}
               className={cn(
-                "flex items-center gap-2.5 px-4 py-2 transition-colors",
+                "flex items-center gap-2.5 py-2 transition-colors",
+                "justify-center px-0 xl:justify-start xl:px-4",
                 "text-sm leading-none",
                 active
                   ? "font-medium"
@@ -75,24 +81,21 @@ export function Sidebar() {
               style={{
                 color: active ? "var(--color-text)" : "var(--color-text-muted)",
                 background: active ? "var(--color-elevated)" : undefined,
-                borderLeft: active
-                  ? "2px solid var(--color-lime)"
-                  : "2px solid transparent",
               }}
             >
               <Icon
                 size={14}
                 style={{ color: active ? "var(--color-lime)" : undefined }}
               />
-              {label}
+              <span className="hidden xl:inline">{label}</span>
             </Link>
           )
         })}
       </nav>
 
-      {/* Bottom: version */}
+      {/* Bottom: version — hidden at icon-only width */}
       <div
-        className="px-4 py-3 shrink-0"
+        className="hidden xl:block px-4 py-3 shrink-0"
         style={{
           borderTop: "1px solid var(--color-border)",
           color: "var(--color-text-faint)",

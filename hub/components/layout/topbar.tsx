@@ -1,7 +1,7 @@
 "use client"
 
 import { signOut } from "next-auth/react"
-import { LogOut, Bell } from "lucide-react"
+import { LogOut } from "lucide-react"
 import type { Session } from "next-auth"
 
 interface TopbarProps {
@@ -20,15 +20,6 @@ export function Topbar({ session }: TopbarProps) {
         zIndex: 30,
       }}
     >
-      {/* Notifications */}
-      <button
-        className="p-1.5 rounded transition-colors hover:bg-[--color-elevated]"
-        style={{ color: "var(--color-text-muted)" }}
-        aria-label="Notifications"
-      >
-        <Bell size={14} />
-      </button>
-
       {/* User */}
       <div className="flex items-center gap-2">
         {session.user?.image ? (

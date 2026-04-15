@@ -67,33 +67,54 @@ def sync_users() -> int:
 
 
 def sync_tickets() -> int:
-    """Sync Tickets tab → tickets table."""
+    """Sync Tickets tab → tickets table.
+
+    Sheet columns (0-indexed, from ticket_tools.py):
+      0  Ticket ID
+      1  Date Submitted  → submitted_at
+      2  Submitted By
+      3  Project
+      4  Type
+      5  Priority
+      6  Title
+      7  Description
+      8  Status
+      9  Approved By     → approved_by (not used in DB, ignored)
+      10 Admin Notes     → notes
+      11 Assigned To     → assignee
+      12 Date Resolved   → resolved_at
+    """
     sh = open_tickets()
-    ws = get_or_create_worksheet(
-        sh,
-        "Tickets",
-        headers=[
-            "Ticket ID", "Title", "Description", "Project", "Type",
-            "Priority", "Status", "Submitted By", "Submitted At",
-            "Assignee", "Notes", "Resolved At", "Linked Items",
-        ],
-    )
+    # Tab is named "Sheet1" in the actual spreadsheet
+    ws = sh.sheet1
     rows = fetch_all_rows(ws)
 
     with get_db() as conn:
         conn.execute("DELETE FROM tickets")
         for row in rows:
-            if len(row) < 7 or not row[0]:
+            if len(row) < 9 or not row[0]:
                 continue
-            # Pad row to 13 columns
             padded = row + [""] * (13 - len(row))
             conn.execute(
                 """INSERT INTO tickets
-                   (ticket_id, title, description, project, type,
-                    priority, status, submitted_by, submitted_at,
-                    assignee, notes, resolved_at, linked_items)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                padded[:13],
+                   (ticket_id, submitted_at, submitted_by, project, type,
+                    priority, title, description, status,
+                    notes, assignee, resolved_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    padded[0],   # Ticket ID
+                    padded[1],   # Date Submitted
+                    padded[2],   # Submitted By
+                    padded[3],   # Project
+                    padded[4],   # Type
+                    padded[5],   # Priority
+                    padded[6],   # Title
+                    padded[7],   # Description
+                    padded[8],   # Status
+                    padded[10],  # Admin Notes
+                    padded[11],  # Assigned To
+                    padded[12],  # Date Resolved
+                ),
             )
 
     count = len([r for r in rows if r and r[0]])
@@ -273,34 +294,204 @@ def sync_scenes() -> int:
     return count
 
 
+def sync_scripts() -> int:
+    """
+    Sync Scripts sheet (monthly tabs) → scripts table.
+
+    Processes current month + last 2 months. Each tab is fully replaced
+    on sync to keep data fresh without accumulating stale rows.
+
+    Sheet columns (0-indexed):
+      A=0 Date, B=1 Studio, C=2 Location, D=3 Scene, E=4 Female,
+      F=5 Male, G=6 Theme, H=7 WardrobeF, I=8 WardrobeM,
+      J=9 Plot, K=10 Title, L=11 Props, M=12 Status
+    """
+    import re
+    from calendar import month_name
+
+    sh = open_scripts()
+    all_titles = [ws.title for ws in sh.worksheets()]
+
+    # Filter to tabs matching "Month YYYY" pattern
+    month_pattern = re.compile(
+        r"^(" + "|".join(month_name[1:]) + r")\s+\d{4}$",
+        re.IGNORECASE,
+    )
+    valid_tabs = [t for t in all_titles if month_pattern.match(t)]
+
+    if not valid_tabs:
+        _log.warning("sync_scripts: no monthly tabs found in Scripts sheet")
+        update_sync_meta("scripts", row_count=0)
+        return 0
+
+    # Sort tabs by date (most recent first), take current + last 2
+    def _tab_sort_key(tab_name: str):
+        parts = tab_name.rsplit(" ", 1)
+        try:
+            month_idx = list(month_name).index(parts[0].capitalize())
+            year = int(parts[1])
+            return (year, month_idx)
+        except (ValueError, IndexError):
+            return (0, 0)
+
+    # Sort all tabs by date, filter to those <= current month (exclude future placeholders)
+    now_dt = datetime.now(timezone.utc)
+    def _is_past_or_current(tab_name: str) -> bool:
+        parts = tab_name.rsplit(" ", 1)
+        try:
+            month_idx = list(month_name).index(parts[0].capitalize())
+            year = int(parts[1])
+            return (year, month_idx) <= (now_dt.year, now_dt.month)
+        except (ValueError, IndexError):
+            return False
+
+    past_tabs = [t for t in valid_tabs if _is_past_or_current(t)]
+    sorted_tabs = sorted(past_tabs, key=_tab_sort_key, reverse=True)
+    tabs_to_sync = sorted_tabs[:3]  # current + last 2
+
+    now = datetime.now(timezone.utc).isoformat()
+    total_count = 0
+
+    for tab_name in tabs_to_sync:
+        try:
+            ws = sh.worksheet(tab_name)
+            rows = fetch_all_rows(ws)
+        except Exception as exc:
+            _log.warning("sync_scripts: failed to read tab %s: %s", tab_name, exc)
+            continue
+
+        with get_db() as conn:
+            # Delete existing rows for this tab before re-inserting
+            conn.execute("DELETE FROM scripts WHERE tab_name = ?", (tab_name,))
+
+            for row_idx, row in enumerate(rows, start=2):  # Row 2 = first data row
+                # Skip rows where studio column (index 1) is empty
+                if len(row) < 2 or not row[1].strip():
+                    continue
+
+                padded = row + [""] * (13 - len(row))
+                conn.execute(
+                    """INSERT INTO scripts
+                       (tab_name, sheet_row, studio, shoot_date, location,
+                        scene_type, female, male, theme, wardrobe_f,
+                        wardrobe_m, plot, title, props, script_status, synced_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        tab_name,
+                        row_idx,
+                        padded[1].strip(),   # Studio
+                        padded[0].strip(),   # Date
+                        padded[2].strip(),   # Location
+                        padded[3].strip(),   # Scene type
+                        padded[4].strip(),   # Female
+                        padded[5].strip(),   # Male
+                        padded[6].strip(),   # Theme
+                        padded[7].strip(),   # WardrobeF
+                        padded[8].strip(),   # WardrobeM
+                        padded[9].strip(),   # Plot
+                        padded[10].strip(),  # Title
+                        padded[11].strip(),  # Props
+                        padded[12].strip(),  # Status
+                        now,
+                    ),
+                )
+                total_count += 1
+
+        _log.info("sync_scripts: synced tab %s (%d rows)", tab_name, total_count)
+
+    update_sync_meta("scripts", row_count=total_count)
+    _log.info("Synced %d script rows across %d tabs", total_count, len(tabs_to_sync))
+    return total_count
+
+
 def sync_bookings() -> int:
-    """Sync Booking sheet → bookings table."""
+    """Sync Booking sheet → bookings table.
+
+    The Booking spreadsheet has one tab per agency after three utility tabs
+    (📋 Legend, 🔍 Search, 📊 Dashboard).  Each agency tab has:
+      Row 1  — agency name in col A
+      Row 2  — website / link row (first http URL becomes agency_link)
+      Row 3  — column headers: Name, Age, Last Booked Date, Bookings, Location, AVG Rate, Rank, …, Notes, …
+      Row 4+ — model data rows
+    """
     sh = open_booking()
-    ws = sh.sheet1
-    rows = fetch_all_rows(ws)
+
+    # The three non-agency utility tabs always carry these exact names.
+    SKIP_TABS = {"📋 Legend", "🔍 Search", "📊 Dashboard"}
+    agency_tabs = [ws for ws in sh.worksheets() if ws.title not in SKIP_TABS]
+
+    total_count = 0
 
     with get_db() as conn:
         conn.execute("DELETE FROM bookings")
-        for row in rows:
-            if len(row) < 2 or not row[0]:
-                continue
-            conn.execute(
-                """INSERT INTO bookings (name, agency, agency_link, rate, notes, raw_json)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (
-                    row[0].strip(),
-                    row[1].strip() if len(row) > 1 else "",
-                    row[2].strip() if len(row) > 2 else "",
-                    row[3].strip() if len(row) > 3 else "",
-                    row[4].strip() if len(row) > 4 else "",
-                    json.dumps(row),
-                ),
-            )
 
-    count = len([r for r in rows if r and r[0]])
-    update_sync_meta("bookings", row_count=count)
-    _log.info("Synced %d bookings", count)
-    return count
+        for ws in agency_tabs:
+            agency_name = ws.title
+            try:
+                # include_header=True so we see all rows (agency header + website + col headers + data)
+                all_rows = fetch_all_rows(ws, include_header=True)
+            except Exception as exc:
+                _log.warning("sync_bookings: failed to read tab %s: %s", agency_name, exc)
+                continue
+
+            if len(all_rows) < 4:
+                continue
+
+            # Row index 1 = website/link row — scan for first http URL
+            agency_link = ""
+            for cell in (all_rows[1] if len(all_rows) > 1 else []):
+                if cell.strip().startswith("http"):
+                    agency_link = cell.strip()
+                    break
+
+            # Row index 2 = column headers — build header → index map
+            header_row = all_rows[2] if len(all_rows) > 2 else []
+            col_map = {h.strip().lower(): i for i, h in enumerate(header_row) if h.strip()}
+
+            def _get(row: list, *keys: str) -> str:
+                """Return first non-empty value from the given header keys (case-insensitive)."""
+                for key in keys:
+                    idx = col_map.get(key)
+                    if idx is not None and idx < len(row):
+                        v = row[idx].strip()
+                        if v:
+                            return v
+                return ""
+
+            # Row index 3+ = model data
+            for row in all_rows[3:]:
+                if not row or not row[0].strip():
+                    continue
+                name = row[0].strip()
+                if name.lower() in ("name", "model", "performer"):
+                    continue
+
+                rate = _get(row, "avg rate", "rate")
+                rank = _get(row, "rank")
+                notes = _get(row, "notes", "available for")
+
+                # Operational metadata → compact info string
+                age           = _get(row, "age")
+                last_booked   = _get(row, "last booked date", "last booked")
+                bookings_cnt  = _get(row, "bookings")
+                location      = _get(row, "location")
+                parts = []
+                if age:          parts.append(f"Age: {age}")
+                if last_booked:  parts.append(f"Last booked: {last_booked}")
+                if bookings_cnt: parts.append(f"Bookings: {bookings_cnt}")
+                if location:     parts.append(f"Location: {location}")
+                info = " · ".join(parts)
+
+                conn.execute(
+                    """INSERT INTO bookings (name, agency, agency_link, rate, rank, notes, info, raw_json)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (name, agency_name, agency_link, rate, rank, notes, info, json.dumps(row)),
+                )
+                total_count += 1
+
+    update_sync_meta("bookings", row_count=total_count)
+    _log.info("Synced %d bookings from %d agency tabs", total_count, len(agency_tabs))
+    return total_count
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +513,7 @@ def run_full_sync() -> dict[str, int | str]:
         ("notifications", sync_notifications),
         ("approvals", sync_approvals),
         ("scenes", sync_scenes),
+        ("scripts", sync_scripts),
         ("bookings", sync_bookings),
     ]
 

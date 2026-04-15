@@ -18,7 +18,8 @@ echo "=== Eclatech Hub — FastAPI Deploy ==="
 
 # ── 1. SCP api/ ──────────────────────────────────────────────────────────────
 echo "[1/3] Uploading api/ to Windows..."
-scp -i "$SSH_KEY" -r "$SCRIPTS_DIR/api/" "$WINDOWS_HOST:$WIN_HUB/api/"
+# No trailing slash on source — copies the api/ directory itself, overwriting contents
+scp -i "$SSH_KEY" -r "$SCRIPTS_DIR/api" "$WINDOWS_HOST:$WIN_HUB/"
 echo "      Done."
 
 # ── 2. Install / update Python deps ──────────────────────────────────────────

@@ -1,0 +1,304 @@
+"use client"
+
+import { useState } from "react"
+import { API_BASE_URL } from "@/lib/api"
+import { ErrorAlert } from "@/components/ui/error-alert"
+import { STUDIO_COLOR } from "@/lib/studio-colors"
+import { useIdToken } from "@/hooks/use-id-token"
+
+const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
+const STYLES = ["cinematic", "bold", "minimal"] as const
+type Style = typeof STYLES[number]
+
+const STYLE_DESCRIPTIONS: Record<Style, string> = {
+  cinematic: "Dark, moody atmosphere — film poster depth",
+  bold:      "High contrast, heavy typography — editorial punch",
+  minimal:   "Clean layout, refined type — restrained palette",
+}
+
+interface TitleResult {
+  url: string | null
+  error: string | null
+}
+
+interface Props {
+  idToken: string | undefined
+}
+
+export function TitleGenerator({ idToken: serverIdToken }: Props) {
+  const idToken = useIdToken(serverIdToken)
+
+  const [titleText, setTitleText] = useState("")
+  const [style, setStyle] = useState<Style>("cinematic")
+  const [studio, setStudio] = useState("")
+  const [variations, setVariations] = useState(1)
+
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [results, setResults] = useState<TitleResult[]>([])
+
+  const activeStudioColor = studio ? STUDIO_COLOR[studio] : undefined
+
+  async function generate() {
+    if (!titleText) return
+    setLoading(true)
+    setError(null)
+    setResults([])
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/titles/cloud`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
+        body: JSON.stringify({
+          text: titleText,
+          style,
+          studio: studio || undefined,
+          n: variations,
+        }),
+      })
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "")
+        throw new Error(`${res.status}: ${text}`)
+      }
+
+      const data = await res.json() as TitleResult[]
+      setResults(data)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Generation failed")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function downloadImage(url: string, index: number) {
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `title-${titleText.toLowerCase().replace(/\s+/g, "-").slice(0, 40)}${variations > 1 ? `-v${index + 1}` : ""}.png`
+    a.click()
+  }
+
+  const successResults = results.filter(r => r.url)
+  const errorResults   = results.filter(r => r.error)
+
+  return (
+    <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
+      {/* ── Left — inputs ── */}
+      <div style={{ width: 280, flexShrink: 0 }}>
+        <div className="flex flex-col gap-3">
+
+          {/* Title text */}
+          <div>
+            <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Title text</label>
+            <input
+              type="text"
+              value={titleText}
+              onChange={e => setTitleText(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && generate()}
+              placeholder="Enter scene title…"
+              className="w-full px-2.5 py-1.5 rounded text-xs outline-none"
+              style={{
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text)",
+              }}
+            />
+          </div>
+
+          {/* Style */}
+          <div>
+            <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Style</label>
+            <div className="flex gap-1">
+              {STYLES.map(s => (
+                <button
+                  key={s}
+                  onClick={() => setStyle(s)}
+                  title={STYLE_DESCRIPTIONS[s]}
+                  className="px-2.5 py-1.5 rounded text-xs transition-colors capitalize"
+                  style={{
+                    background: style === s ? "var(--color-elevated)" : "transparent",
+                    color: style === s ? "var(--color-text)" : "var(--color-text-muted)",
+                    border: `1px solid ${style === s ? "var(--color-border)" : "transparent"}`,
+                  }}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+            <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 4 }}>
+              {STYLE_DESCRIPTIONS[style]}
+            </p>
+          </div>
+
+          {/* Studio (optional) */}
+          <div>
+            <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+              Studio <span style={{ color: "var(--color-text-faint)" }}>(optional)</span>
+            </label>
+            <div className="flex gap-1 flex-wrap">
+              {["", ...STUDIOS].map(s => {
+                const active = studio === s
+                const color = s ? STUDIO_COLOR[s] : "var(--color-text-muted)"
+                return (
+                  <button
+                    key={s || "none"}
+                    onClick={() => setStudio(s)}
+                    className="px-2 py-1 rounded text-xs transition-colors"
+                    style={{
+                      background: active
+                        ? s ? `color-mix(in srgb, ${color} 20%, transparent)` : "var(--color-elevated)"
+                        : "transparent",
+                      color: active ? (s ? color : "var(--color-text)") : "var(--color-text-faint)",
+                      border: `1px solid ${active
+                        ? s ? `color-mix(in srgb, ${color} 35%, transparent)` : "var(--color-border)"
+                        : "transparent"}`,
+                    }}
+                  >
+                    {s === "" ? "None" :
+                     s === "FuckPassVR" ? "FPVR" :
+                     s === "NaughtyJOI" ? "NJOI" :
+                     s === "VRHush" ? "VRH" : "VRA"}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Variations */}
+          <div>
+            <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+              Variations
+            </label>
+            <div className="flex gap-1">
+              {[1, 2, 3, 4].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setVariations(n)}
+                  className="px-3 py-1.5 rounded text-xs transition-colors"
+                  style={{
+                    background: variations === n ? "var(--color-elevated)" : "transparent",
+                    color: variations === n ? "var(--color-text)" : "var(--color-text-muted)",
+                    border: `1px solid ${variations === n ? "var(--color-border)" : "transparent"}`,
+                  }}
+                >
+                  {n}×
+                </button>
+              ))}
+            </div>
+            {variations > 1 && (
+              <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 4 }}>
+                Runs {variations} parallel requests — takes longer
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Generate button */}
+        <button
+          onClick={generate}
+          disabled={loading || !titleText}
+          className="w-full mt-4 px-3 py-2 rounded text-xs font-semibold transition-colors"
+          style={{
+            background: loading ? "var(--color-elevated)" : "var(--color-lime)",
+            color: loading ? "var(--color-text-muted)" : "#0d0d0d",
+            cursor: loading ? "wait" : "pointer",
+            opacity: (!titleText && !loading) ? 0.5 : 1,
+          }}
+        >
+          {loading
+            ? `Generating ${variations > 1 ? `${variations} variations` : ""}…`
+            : !titleText
+              ? "Enter title to continue"
+              : variations > 1
+                ? `Generate ${variations} Variations`
+                : "Generate Title Card"}
+        </button>
+      </div>
+
+      {/* ── Right — output ── */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {error && <ErrorAlert className="mb-3">{error}</ErrorAlert>}
+
+        {loading && (
+          <div
+            className="rounded flex items-center justify-center"
+            style={{
+              height: 240,
+              border: "1px solid var(--color-border)",
+              background: "var(--color-surface)",
+              color: "var(--color-text-muted)",
+              fontSize: 12,
+            }}
+          >
+            <span>Generating{variations > 1 ? ` ${variations} variations` : ""}…</span>
+          </div>
+        )}
+
+        {!successResults.length && !loading && (
+          <div
+            className="rounded flex items-center justify-center"
+            style={{
+              height: 240,
+              border: "1px dashed var(--color-border)",
+              color: "var(--color-text-faint)",
+              fontSize: 12,
+            }}
+          >
+            Title card{variations > 1 ? "s" : ""} will appear here
+          </div>
+        )}
+
+        {/* Error results from individual requests */}
+        {errorResults.length > 0 && (
+          <div className="mb-3">
+            {errorResults.map((r, i) => (
+              <ErrorAlert key={i} className="mb-1 text-xs">{r.error}</ErrorAlert>
+            ))}
+          </div>
+        )}
+
+        {/* Image gallery */}
+        {successResults.length > 0 && !loading && (
+          <div
+            className={successResults.length > 1 ? "grid gap-3" : ""}
+            style={successResults.length > 1 ? { gridTemplateColumns: "repeat(2, 1fr)" } : undefined}
+          >
+            {successResults.map((result, i) => (
+              <div key={i}>
+                <div
+                  className="rounded overflow-hidden mb-2"
+                  style={{
+                    border: `1px solid ${activeStudioColor
+                      ? `color-mix(in srgb, ${activeStudioColor} 30%, var(--color-border))`
+                      : "var(--color-border)"}`,
+                  }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={result.url!}
+                    alt={`Title card${successResults.length > 1 ? ` v${i + 1}` : ""}: ${titleText}`}
+                    loading="lazy"
+                    style={{ width: "100%", display: "block" }}
+                  />
+                </div>
+                <button
+                  onClick={() => downloadImage(result.url!, i)}
+                  className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+                  style={{
+                    background: "var(--color-lime)",
+                    color: "#0d0d0d",
+                  }}
+                >
+                  Download{successResults.length > 1 ? ` v${i + 1}` : ""}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

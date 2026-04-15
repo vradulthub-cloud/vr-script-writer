@@ -1,9 +1,9 @@
 import type { NextConfig } from "next"
 
 const nextConfig: NextConfig = {
-  // Standalone output: creates a self-contained bundle in .next/standalone
-  // that can be run with `node server.js` — no node_modules needed on the server.
-  output: "standalone",
+  // Use standalone output only for Windows self-hosted deploy (node server.js).
+  // Vercel manages its own build pipeline and doesn't need this.
+  output: process.env.VERCEL ? undefined : "standalone",
 }
 
 export default nextConfig

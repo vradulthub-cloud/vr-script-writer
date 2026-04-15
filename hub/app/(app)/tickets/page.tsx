@@ -63,7 +63,7 @@ export default async function TicketsPage() {
       )}
 
       {/* Ticket list (client component for interactivity) */}
-      <TicketList tickets={tickets} error={error} />
+      <TicketList tickets={tickets} error={error} idToken={(session as { idToken?: string } | null)?.idToken} />
     </div>
   )
 }

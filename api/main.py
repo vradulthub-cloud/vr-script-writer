@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.database import init_db
 from api.sync_engine import start_sync_loop, stop_sync_loop
-from api.routers import tickets
+from api.routers import tickets, scenes, scripts, descriptions, models, approvals, compilations, titles, call_sheets
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -65,7 +65,9 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",       # Next.js dev
         "http://localhost:8502",       # API self
-        "https://desktop-9d407v9.tail3f755a.ts.net",  # Production Tailscale
+        "https://desktop-9d407v9.tail3f755a.ts.net",  # Tailscale (internal)
+        "https://desktop-9d407v9.tail3f755a.ts.net:8443",  # Tailscale Funnel (public FastAPI)
+        "https://eclatech-hub.vercel.app",  # Vercel production
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -76,6 +78,14 @@ app.add_middleware(
 # Routers
 # ---------------------------------------------------------------------------
 app.include_router(tickets.router)
+app.include_router(scenes.router)
+app.include_router(scripts.router)
+app.include_router(descriptions.router)
+app.include_router(models.router)
+app.include_router(approvals.router)
+app.include_router(compilations.router)
+app.include_router(titles.router)
+app.include_router(call_sheets.router)
 
 
 # ---------------------------------------------------------------------------

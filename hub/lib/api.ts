@@ -18,6 +18,8 @@
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8502"
 
+export const API_BASE_URL = API_BASE
+
 // ─── Low-level fetch ────────────────────────────────────────────────────────
 
 async function apiFetch<T>(
@@ -101,6 +103,100 @@ export interface SyncStatus {
   error: string
 }
 
+export interface Scene {
+  id: string
+  studio: string
+  site_code: string
+  title: string
+  performers: string
+  categories: string
+  tags: string
+  is_compilation: boolean
+  has_description: boolean
+  has_videos: boolean
+  video_count: number
+  has_thumbnail: boolean
+  has_photos: boolean
+  has_storyboard: boolean
+  storyboard_count: number
+  mega_path: string
+  grail_row: number
+}
+
+export interface SceneStats {
+  total: number
+  by_studio: Record<string, number>
+  complete: number
+  missing_any: number
+}
+
+export interface Script {
+  id: number
+  tab_name: string
+  sheet_row: number
+  studio: string
+  shoot_date: string
+  female: string
+  male: string
+  theme: string
+  plot: string
+  title: string
+  script_status: string
+}
+
+export interface Model {
+  name: string
+  agency: string
+  agency_link: string
+  rate: string
+  rank: string            // Great / Good / Moderate / Poor
+  notes: string           // Available For / acts
+  info: string            // Raw "Age: 22 · Last booked: Mar 2026 · ..."
+  age: string
+  last_booked: string
+  bookings_count: string
+  location: string
+  opportunity_score: number  // 0–100
+}
+
+export interface ShootScene {
+  date_raw: string
+  studio: string
+  type: string
+  female: string
+  male: string
+  agency: string
+  male_agency: string
+}
+
+export interface ShootDate {
+  date_key: string
+  date_display: string
+  scenes: ShootScene[]
+}
+
+export interface CallSheetResult {
+  doc_id: string
+  doc_url: string
+  title: string
+}
+
+export interface Approval {
+  approval_id: string
+  scene_id: string
+  studio: string
+  content_type: string
+  submitted_by: string
+  submitted_at: string
+  status: string
+  decided_by: string
+  decided_at: string
+  content_json: string
+  notes: string
+  target_sheet: string
+  target_range: string
+}
+
 // ─── API client factory ──────────────────────────────────────────────────────
 
 export function api(idTokenOrSession: string | { idToken?: string } | null) {
@@ -142,6 +238,80 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       get: (id: string) => get<Ticket>(`/tickets/${id}`),
       create: (body: TicketCreate) => post<Ticket>("/tickets/", body),
       update: (id: string, body: TicketUpdate) => patch<Ticket>(`/tickets/${id}`, body),
+    },
+
+    scenes: {
+      list: (filters?: { studio?: string; missing_only?: boolean; search?: string; page?: number; limit?: number }) => {
+        const params = new URLSearchParams()
+        if (filters?.studio) params.set("studio", filters.studio)
+        if (filters?.missing_only) params.set("missing_only", "true")
+        if (filters?.search) params.set("search", filters.search)
+        if (filters?.page) params.set("page", String(filters.page))
+        if (filters?.limit) params.set("limit", String(filters.limit))
+        const qs = params.toString()
+        return get<Scene[]>(`/scenes/${qs ? `?${qs}` : ""}`)
+      },
+      stats: () => get<SceneStats>("/scenes/stats"),
+      get: (id: string) => get<Scene>(`/scenes/${id}`),
+    },
+
+    scripts: {
+      list: (filters?: { studio?: string; tab_name?: string; needs_script?: boolean; search?: string }) => {
+        const params = new URLSearchParams()
+        if (filters?.studio) params.set("studio", filters.studio)
+        if (filters?.tab_name) params.set("tab_name", filters.tab_name)
+        if (filters?.needs_script) params.set("needs_script", "true")
+        if (filters?.search) params.set("search", filters.search)
+        const qs = params.toString()
+        return get<Script[]>(`/scripts/${qs ? `?${qs}` : ""}`)
+      },
+      tabs: () => get<string[]>("/scripts/tabs"),
+      save: (body: { tab_name: string; sheet_row: number; theme: string; plot: string; wardrobe_f?: string; wardrobe_m?: string }) =>
+        post<{ ok: boolean }>("/scripts/save", body),
+    },
+
+    descriptions: {
+      save: (body: { scene_id: string; description: string; meta_title?: string; meta_description?: string }) =>
+        post<{ ok: boolean }>("/descriptions/save", body),
+    },
+
+    models: {
+      list: (search?: string) => {
+        const params = search ? `?search=${encodeURIComponent(search)}` : ""
+        return get<Model[]>(`/models/${params}`)
+      },
+      get: (name: string) => get<Model>(`/models/${encodeURIComponent(name)}`),
+    },
+
+    approvals: {
+      list: (status?: string) => {
+        const params = status ? `?status=${status}` : ""
+        return get<Approval[]>(`/approvals/${params}`)
+      },
+      get: (id: string) => get<Approval>(`/approvals/${id}`),
+      create: (body: { scene_id: string; studio: string; content_type: string; content_json: string; notes?: string; target_sheet?: string; target_range?: string }) =>
+        post<Approval>("/approvals/", body),
+      decide: (id: string, body: { decision: string; notes?: string }) =>
+        patch<Approval>(`/approvals/${id}`, body),
+    },
+
+    callSheets: {
+      tabs: () => get<string[]>("/call-sheets/tabs"),
+      dates: (tab?: string) => {
+        const params = tab ? `?tab=${encodeURIComponent(tab)}` : ""
+        return get<ShootDate[]>(`/call-sheets/dates${params}`)
+      },
+      generate: (body: { date_key: string; door_code?: string; tab_name?: string }) =>
+        post<CallSheetResult>("/call-sheets/generate", body),
+    },
+
+    compilations: {
+      scenes: (studio?: string) => {
+        const params = studio ? `?studio=${encodeURIComponent(studio)}` : ""
+        return get<Scene[]>(`/compilations/scenes${params}`)
+      },
+      save: (body: { studio: string; title: string; scene_ids: string[]; description?: string; notes?: string; target_sheet?: string; target_range?: string }) =>
+        post<{ task_id: string; status: string }>("/compilations/save", body),
     },
   }
 }

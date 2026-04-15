@@ -168,7 +168,9 @@ CREATE TABLE IF NOT EXISTS bookings (
     agency TEXT DEFAULT '',
     agency_link TEXT DEFAULT '',
     rate TEXT DEFAULT '',
-    notes TEXT DEFAULT '',
+    rank TEXT DEFAULT '',        -- Great / Good / Moderate / Poor
+    notes TEXT DEFAULT '',       -- Available For / acts from Notes column
+    info TEXT DEFAULT '',        -- Derived: "Age: 22 · Last booked: Mar 2026 · ..."
     raw_json TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_bookings_name ON bookings(name);
@@ -188,6 +190,30 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_by TEXT DEFAULT ''
 );
 
+-- Scripts (from Scripts sheet monthly tabs)
+CREATE TABLE IF NOT EXISTS scripts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tab_name TEXT NOT NULL DEFAULT '',
+    sheet_row INTEGER NOT NULL DEFAULT 0,
+    studio TEXT NOT NULL DEFAULT '',
+    shoot_date TEXT DEFAULT '',
+    location TEXT DEFAULT '',
+    scene_type TEXT DEFAULT '',
+    female TEXT DEFAULT '',
+    male TEXT DEFAULT '',
+    theme TEXT DEFAULT '',
+    wardrobe_f TEXT DEFAULT '',
+    wardrobe_m TEXT DEFAULT '',
+    plot TEXT DEFAULT '',
+    title TEXT DEFAULT '',
+    props TEXT DEFAULT '',
+    script_status TEXT DEFAULT '',
+    synced_at TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_scripts_studio ON scripts(studio);
+CREATE INDEX IF NOT EXISTS idx_scripts_tab ON scripts(tab_name);
+CREATE INDEX IF NOT EXISTS idx_scripts_female ON scripts(female COLLATE NOCASE);
+
 -- Sync metadata (tracks last sync time per data source)
 CREATE TABLE IF NOT EXISTS sync_meta (
     source TEXT PRIMARY KEY,       -- "grail", "scripts", "tickets", etc.
@@ -200,9 +226,15 @@ CREATE TABLE IF NOT EXISTS sync_meta (
 
 
 def init_db() -> None:
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist, then apply incremental migrations."""
     with get_db() as conn:
         conn.executescript(SCHEMA_SQL)
+        # v2 migration: add rank/info columns to bookings if upgrading from older schema
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(bookings)").fetchall()}
+        for col, ddl in [("rank", "TEXT DEFAULT ''"), ("info", "TEXT DEFAULT ''")]:
+            if col not in existing_cols:
+                conn.execute(f"ALTER TABLE bookings ADD COLUMN {col} {ddl}")
+                _log.info("Migration: added bookings.%s", col)
         _log.info("Database initialized at %s", get_settings().sqlite_db_path)
 
 

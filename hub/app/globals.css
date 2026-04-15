@@ -12,7 +12,7 @@
   /* Text */
   --color-text:       #e8e8e8;
   --color-text-muted: #888888;
-  --color-text-faint: #4a4a4a;
+  --color-text-faint: #6b6b6b;
 
   /* Primary action — lime green, use sparingly */
   --color-lime:      #bed62f;
@@ -73,4 +73,34 @@ body {
 /* ─── Selection ───────────────────────────────────────────────────────────── */
 ::selection {
   background: color-mix(in srgb, var(--color-lime) 25%, transparent);
+}
+
+/* ─── Animations ──────────────────────────────────────────────────────────── */
+@keyframes panelSlideIn {
+  from { opacity: 0; transform: translateX(14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes toastSlideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Responsive sidebar ──────────────────────────────────────────────────── */
+/* Below 1280px: collapse to icon-only rail (sidebar.tsx hides labels) */
+@media (max-width: 1279px) {
+  :root {
+    --spacing-sidebar: 52px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes panelSlideIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes toastSlideUp {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
 }
