@@ -214,10 +214,10 @@ async def get_model_photo(name: str):
         except Exception:
             pass
 
-    # 2. If no cached photo, try known URL patterns
+    # 2. If no cached photo, try URL patterns then page scrapes
     if not photo_url:
+        # Fast: direct URL guesses
         candidates = [
-            f"https://cdn.vrporn.com/models/{_slug(name)}/photo.jpg",
             f"https://www.babepedia.com/pics/{_slug_caps(name)}.jpg",
             f"https://www.babepedia.com/pics/{name.strip().replace(' ', '_')}.jpg",
         ]
@@ -230,6 +230,30 @@ async def get_model_photo(name: str):
                     break
             except Exception:
                 pass
+
+    # 3. Slow fallback: scrape og:image from Babepedia / VRPorn profile page
+    if not photo_url:
+        try:
+            from bs4 import BeautifulSoup
+        except ImportError:
+            BeautifulSoup = None
+        if BeautifulSoup:
+            for page_url in [
+                f"https://www.babepedia.com/babe/{_slug_caps(name)}",
+                f"https://vrporn.com/pornstars/{_slug(name)}/",
+            ]:
+                try:
+                    r = _req.get(page_url, timeout=8, headers=_HEADERS, allow_redirects=True)
+                    if r.status_code == 200:
+                        soup = BeautifulSoup(r.text, "html.parser")
+                        og = soup.select_one('meta[property="og:image"]')
+                        if og and og.get("content"):
+                            p = og["content"]
+                            if p and "placeholder" not in p.lower() and not p.endswith(".svg"):
+                                photo_url = p
+                                break
+                except Exception:
+                    pass
 
     if not photo_url:
         raise HTTPException(status_code=404, detail="No photo found")
