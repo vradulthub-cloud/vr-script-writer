@@ -45,10 +45,25 @@ _HEADERS = {
 }
 
 _COMPILATION_RE = re.compile(
-    r'\b(compilation|compil|pmv|best of|best scenes|top scenes|top \d+|'
-    r'collection|all scenes|mega|mashup|mix|highlights|fap|tribute|vol\.?\s*\d+)\b',
+    r'\b(compilations?|compil|pmv|p\.m\.v|music\s*video|best[- ]of|best\s+scenes?|'
+    r'top\s+scenes?|top\s+\d+|collection|all\s+scenes?|mega[- ]?(mix|comp)|'
+    r'mashups?|mixtape|highlights?|fap|tribute|vol(?:ume)?\.?\s*\d+|'
+    r'cum\s*compilation|cumpilation|best\s+of\s+\d{4}|year\s*end|'
+    r'moments|greatest\s+hits|supercut|super\s+cut)\b',
     re.I,
 )
+
+
+def _filter_compilations(scenes: list) -> list:
+    """Drop any scene whose title OR studio looks like a compilation/PMV."""
+    out = []
+    for s in scenes:
+        title = (s.get("title") if isinstance(s, dict) else getattr(s, "title", "")) or ""
+        studio = (s.get("studio") if isinstance(s, dict) else getattr(s, "studio", "")) or ""
+        if _COMPILATION_RE.search(title) or _COMPILATION_RE.search(studio):
+            continue
+        out.append(s)
+    return out
 
 _BABE_SECTION_NOISE = re.compile(
     r'\s+(Body|Performances|Extra|Personal|Show more)\s*$', re.I
@@ -319,6 +334,10 @@ async def get_model_profile(
                     ts = ts.replace(tzinfo=timezone.utc)
                 if datetime.now(timezone.utc) - ts < timedelta(days=7):
                     data = json.loads(cached["profile_json"])
+                    # Re-filter cached scenes so old compilations get removed
+                    # without waiting for the 7-day cache to expire
+                    data["slr_scenes"] = _filter_compilations(data.get("slr_scenes", []))
+                    data["vrp_scenes"] = _filter_compilations(data.get("vrp_scenes", []))
                     data["booking_history"] = booking_history.model_dump()
                     data["cached_at"] = cached["cached_at"]
                     return ProfileResponse(**data)
@@ -344,6 +363,11 @@ async def get_model_profile(
     slr_profile_url = slr_hint or f"https://sexlikereal.com/stars/{_slug(canonical)}"
     vrp_profile_url = f"https://vrporn.com/pornstars/{_slug(canonical)}/"
 
+    # Apply the wider compilation/PMV filter at this layer too — catches anything
+    # the scrapers missed (e.g. edge-case titles, non-English words)
+    slr_scenes = _filter_compilations(slr_scenes)
+    vrp_scenes = _filter_compilations(vrp_data.get("scenes", []))
+
     now_iso = datetime.now(timezone.utc).isoformat()
     cache_payload = {
         "name": canonical,
@@ -352,7 +376,7 @@ async def get_model_profile(
         "slr_profile_url": slr_profile_url,
         "slr_scenes": slr_scenes,
         "vrp_profile_url": vrp_profile_url,
-        "vrp_scenes": vrp_data.get("scenes", []),
+        "vrp_scenes": vrp_scenes,
         "cached_at": now_iso,
     }
 
