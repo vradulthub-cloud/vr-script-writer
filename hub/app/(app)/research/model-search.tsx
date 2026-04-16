@@ -807,35 +807,33 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
     return m?.opportunity_score
   }, [models])
 
-  // ── Profile view ───────────────────────────────────────────────────────────
-  if (currentModel) {
-    return (
-      <>
-
-        <ProfileView
-          model={currentModel}
-          profile={profile}
-          loading={profileLoading}
-          profileError={profileError}
-          onBack={() => { setCurrentModel(null); setProfile(null); setProfileError(null) }}
-          onRefresh={() => openProfile(currentModel.name, true)}
-          onBrief={handleBrief}
-          briefText={briefText}
-          briefLoading={briefLoading}
-        />
-      </>
-    )
-  }
-
-  // ── Default view: search + trending + priority ─────────────────────────────
-
   // Priority cards: find photo from trending list or babepedia guess
+  // NOTE: must be declared BEFORE any conditional return — violating that
+  // breaks the Rules of Hooks (React error #300: rendered fewer hooks)
   const trendingPhotoMap = useMemo(() => {
     const map: Record<string, string> = {}
     trending?.forEach(t => { map[t.name.toLowerCase()] = t.photo_url })
     return map
   }, [trending])
 
+  // ── Profile view ───────────────────────────────────────────────────────────
+  if (currentModel) {
+    return (
+      <ProfileView
+        model={currentModel}
+        profile={profile}
+        loading={profileLoading}
+        profileError={profileError}
+        onBack={() => { setCurrentModel(null); setProfile(null); setProfileError(null) }}
+        onRefresh={() => openProfile(currentModel.name, true)}
+        onBrief={handleBrief}
+        briefText={briefText}
+        briefLoading={briefLoading}
+      />
+    )
+  }
+
+  // ── Default view: search + trending + priority ─────────────────────────────
   return (
     <div>
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
