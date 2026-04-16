@@ -25,21 +25,11 @@ export default async function DescriptionsPage() {
   } catch {}
 
   return (
-    <div>
-      <div className="page-header">
-        <h1 className="tracking-tight">
-          Description Generator
-        </h1>
-        <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
-          Generate SEO-optimised scene descriptions
-        </p>
-      </div>
-      <DescGenerator
-        scenes={scenes}
-        scenesError={error}
-        idToken={(session as { idToken?: string } | null)?.idToken}
-        userRole={userProfile?.role}
-      />
-    </div>
+    <DescGenerator
+      scenes={scenes}
+      scenesError={error}
+      idToken={(session as { idToken?: string } | null)?.idToken}
+      userRole={userProfile?.role}
+    />
   )
 }

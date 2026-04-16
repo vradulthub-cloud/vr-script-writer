@@ -31,13 +31,5 @@ export default async function AdminPage() {
     error = e instanceof Error ? e.message : "Failed to load users"
   }
 
-  return (
-    <div>
-      <div className="mb-6">
-        <h1>Admin</h1>
-        <p data-subtitle>User management and permissions</p>
-      </div>
-      <UsersPanel users={users} error={error} idToken={idToken} />
-    </div>
-  )
+  return <UsersPanel users={users} error={error} idToken={idToken} />
 }

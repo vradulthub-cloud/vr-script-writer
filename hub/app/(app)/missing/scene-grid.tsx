@@ -152,7 +152,11 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
             background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)",
           }}
         />
-        <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>{totalVisible} scenes</span>
+        <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>{totalVisible}</span> shown ·{" "}
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>{stats.missing_any}</span> missing of{" "}
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>{stats.total}</span>
+        </span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           {megaMsg && (
             <span style={{ fontSize: 11, color: megaMsg.includes("Scan") ? "var(--color-ok)" : "var(--color-err)" }}>

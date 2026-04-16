@@ -25,21 +25,11 @@ export default async function ScriptsPage() {
   } catch {}
 
   return (
-    <div>
-      <div className="page-header">
-        <h1 className="tracking-tight">
-          Script Generator
-        </h1>
-        <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
-          Generate AI scripts manually or from a shoot sheet row
-        </p>
-      </div>
-      <ScriptGenerator
-        tabs={tabs}
-        tabsError={error}
-        idToken={(session as { idToken?: string } | null)?.idToken}
-        userRole={userProfile?.role}
-      />
-    </div>
+    <ScriptGenerator
+      tabs={tabs}
+      tabsError={error}
+      idToken={(session as { idToken?: string } | null)?.idToken}
+      userRole={userProfile?.role}
+    />
   )
 }

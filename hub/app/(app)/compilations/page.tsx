@@ -20,20 +20,10 @@ export default async function CompilationsPage() {
   }
 
   return (
-    <div>
-      <div className="page-header">
-        <h1 className="tracking-tight">
-          Compilation Builder
-        </h1>
-        <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
-          Build compilation plans from existing scene library
-        </p>
-      </div>
-      <CompBuilder
-        allScenes={scenes}
-        scenesError={error}
-        idToken={(session as { idToken?: string } | null)?.idToken}
-      />
-    </div>
+    <CompBuilder
+      allScenes={scenes}
+      scenesError={error}
+      idToken={(session as { idToken?: string } | null)?.idToken}
+    />
   )
 }

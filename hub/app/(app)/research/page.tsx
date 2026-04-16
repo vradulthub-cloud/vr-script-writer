@@ -20,17 +20,5 @@ export default async function ResearchPage() {
     error = e instanceof Error ? e.message : "Failed to load models"
   }
 
-  return (
-    <div>
-      <div className="page-header">
-        <h1 className="tracking-tight">
-          Model Research
-        </h1>
-        <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
-          Agency info, rates, and notes for talent
-        </p>
-      </div>
-      <ModelSearch models={models} error={error} idToken={idToken} />
-    </div>
-  )
+  return <ModelSearch models={models} error={error} idToken={idToken} />
 }
