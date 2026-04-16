@@ -388,7 +388,7 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
       )}
 
       {/* ── Header: photo | info | booking history ───────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "140px 1fr 200px", gap: 20, marginBottom: 16 }}>
+      <div className="grid grid-cols-[100px_1fr] md:grid-cols-[140px_1fr_200px] gap-4 md:gap-5 mb-4">
 
         {/* Photo */}
         <div>
@@ -489,8 +489,8 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
           )}
         </div>
 
-        {/* Booking history card */}
-        <div style={{
+        {/* Booking history card — spans both cols on mobile (stacks under photo+info) */}
+        <div className="col-span-2 md:col-span-1" style={{
           background: bh?.total
             ? "color-mix(in srgb, var(--color-ok) 8%, transparent)"
             : "color-mix(in srgb, var(--color-err) 8%, transparent)",
@@ -594,7 +594,7 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "5fr 7fr", gap: 24, alignItems: "start" }}>
+      <div className="grid grid-cols-1 md:grid-cols-[5fr_7fr] gap-4 md:gap-6 items-start">
 
         {/* ── Left: stats + bio ──────────────────────────────────────────────── */}
         <div>
@@ -898,7 +898,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
       )}
 
       {trending && trending.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 24 }}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-6">
           {trending.slice(0, 10).map(t => (
             <ModelCard
               key={t.name}
@@ -928,7 +928,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
         </span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
         {PRIORITY.map(p => {
           const m = models.find(mo => mo.name.toLowerCase() === p.name.toLowerCase())
           const score = m?.opportunity_score
