@@ -4360,7 +4360,7 @@ with tab_tickets:
             # Load asset data — always needed for both grid and detail
             _at_studio = st.session_state.get("at_studio", "All")
             _at_show = st.session_state.get("at_show", "Missing Only")
-            _at_limit = 5
+            _at_limit = 3
             _at_studios_tuple = None if _at_studio == "All" else tuple([_at_studio])
             _asset_data = _cached_load_assets(_at_studios_tuple, _at_limit)
             _scan_date = _asset_data.get("_meta", {}).get("scan_date", "")
@@ -4868,71 +4868,59 @@ with tab_tickets:
                         _sc_color = _studio_colors.get(_scene["studio"], _C["muted"])
                         _pct = int((_scene["completed"] / _scene["total"]) * 100) if _scene["total"] else 0
                         _pct_color = _C["green"] if _pct == 100 else (_C["amber"] if _pct >= 50 else _C["red"])
+
                         _missing_names = _scene.get("missing", [])
-
-                        # Pre-build variables (no dict access in f-string expressions)
-                        _sid = _scene["scene_id"]
-                        _date_d = (_scene.get("release_date") or "")[:10]
-                        _perf_d = _scene["performers"] or "TBD"
-                        _title_raw = _scene.get("title") or ""
-                        _title_d = (_title_raw[:48] + "\u2026") if len(_title_raw) > 48 else (_title_raw or "\u2014")
-                        _score = _scene["completed"]
-                        _stotal = _scene["total"]
-                        _sname = _scene["studio_name"]
-                        _c_text = _C["text"]
-                        _c_muted = _C["muted"]
-                        _c_subtle = _C["subtle"]
-                        _c_surface = _C["surface"]
-                        _c_border = _C["border"]
-                        _c_red = _C["red"]
-                        _c_red_dim = _C["red_dim"]
-                        _c_green = _C["green"]
-                        _c_elevated = _C["elevated"]
-
                         if _missing_names:
-                            _pills_parts = []
-                            for _m in _missing_names:
-                                _pills_parts.append(
-                                    f"<span style='display:inline-block;font-size:0.6rem;padding:1px 5px;"
-                                    f"border-radius:3px;background:{_c_red_dim};color:{_c_red}'>{_m}</span>"
-                                )
-                            _pills_html = " ".join(_pills_parts)
+                            _checks_html = " ".join(
+                                f"<span style='display:inline-block;font-size:0.62rem;padding:1px 5px;"
+                                f"border-radius:3px;background:{_C['red_dim']};color:{_C['red']}'>{m}</span>"
+                                for m in _missing_names
+                            )
                         else:
-                            _pills_html = f"<span style='font-size:0.68rem;color:{_c_green}'>&#10003; complete</span>"
+                            _checks_html = (
+                                f"<span style='font-size:0.72rem;color:{_C['green']}'>"
+                                f"&#10003; All assets complete</span>"
+                            )
 
-                        _comp_tag = ""
-                        if _scene.get("is_compilation"):
-                            _c_accent = _C["accent"]
-                            _comp_tag = f"<span style='font-size:0.58rem;background:{_c_accent};color:#fff;padding:1px 5px;border-radius:3px;margin-left:4px'>COMP</span>"
-
-                        _row_html = (
-                            f"<div style='display:flex;align-items:center;gap:10px;padding:7px 12px;"
-                            f"background:{_c_surface};border:1px solid {_c_border};"
-                            f"border-left:3px solid {_sc_color};border-radius:5px'>"
-                            f"<div style='flex:0 0 110px'>"
-                            f"<span style='font-family:DM Mono,monospace;font-size:0.78rem;font-weight:600;"
-                            f"color:{_c_text}'>{_sid}</span>{_comp_tag}"
-                            f"<div style='font-size:0.62rem;color:{_c_subtle}'>{_sname}  {_date_d}</div>"
+                        _sid = _scene["scene_id"]
+                        _perf_display = _scene["performers"] or "TBD"
+                        _title_display = _scene["title"][:40] + "..." if len(_scene.get("title", "")) > 40 else (_scene.get("title") or "\u2014")
+                        _date_display = _scene.get("release_date", "")[:10] or ""
+                        _card_comp = (
+                            f"<span style='font-size:0.6rem;background:{_C['accent']};color:#fff;"
+                            f"padding:1px 6px;border-radius:3px;margin-left:6px;font-family:inherit'>COMP</span>"
+                        ) if _scene.get("is_compilation") else ""
+                        _date_html = f"<span style='font-size:0.68rem;color:{_C['subtle']}'>{_date_display}</span>" if _date_display else ""
+                        _completed = _scene["completed"]
+                        _total_assets = _scene["total"]
+                        st.markdown(
+                            f"<div style='background:{_C['surface']};border:1px solid {_C['border']};"
+                            f"border-left:3px solid {_sc_color};border-radius:8px;padding:14px 16px;"
+                            f"margin-bottom:6px'>"
+                            f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>"
+                            f"<span style='font-family:DM Mono,monospace;font-size:0.82rem;font-weight:600;"
+                            f"color:{_C['text']}'>{_sid}{_card_comp}</span>"
+                            f"{_date_html}"
                             f"</div>"
-                            f"<div style='flex:1;min-width:0;overflow:hidden'>"
-                            f"<div style='font-size:0.78rem;color:{_c_text};font-weight:500;"
-                            f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>{_perf_d}</div>"
-                            f"<div style='font-size:0.68rem;color:{_c_muted};font-style:italic;"
-                            f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>{_title_d}</div>"
+                            f"<div style='font-size:0.82rem;color:{_C['text']};font-weight:500;"
+                            f"margin-bottom:2px'>{_perf_display}</div>"
+                            f"<div style='font-size:0.72rem;color:{_C['muted']};margin-bottom:8px;"
+                            f"font-style:italic'>{_title_display}</div>"
+                            f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:6px'>"
+                            f"<div style='flex:1;height:4px;background:{_C['elevated']};border-radius:2px;overflow:hidden'>"
+                            f"<div style='width:{_pct}%;height:100%;background:{_pct_color};border-radius:2px'></div>"
                             f"</div>"
-                            f"<div style='flex:0 0 auto;display:flex;flex-wrap:wrap;gap:2px;"
-                            f"max-width:200px;justify-content:flex-end'>{_pills_html}</div>"
-                            f"<div style='flex:0 0 32px;text-align:right;font-size:0.7rem;"
-                            f"font-weight:600;color:{_pct_color}'>{_score}/{_stotal}</div>"
+                            f"<span style='font-size:0.68rem;font-weight:600;color:{_pct_color}'>"
+                            f"{_completed}/{_total_assets}</span>"
                             f"</div>"
+                            f"<div style='display:flex;flex-wrap:wrap;gap:3px'>"
+                            f"{_checks_html}</div>"
+                            f"</div>",
+                            unsafe_allow_html=True,
                         )
-                        _lc1, _lc2 = st.columns([14, 1])
-                        with _lc1:
-                            st.markdown(_row_html, unsafe_allow_html=True)
-                        with _lc2:
-                            if st.button("\u25b8", key=f"at_open_{_sid}", width="stretch"):
-                                st.session_state["at_selected"] = _sid
-                                st.rerun()
+                        if st.button("Open", key=f"at_open_{_sid}", width="stretch"):
+                            st.session_state["at_selected"] = _sid
+                            st.rerun()
 
         # ── SUB-VIEW 2: Approvals ────────────────────────────────────────────────
         elif _tk_mode == _apr_label:
