@@ -29,10 +29,10 @@ export default async function MissingPage() {
     <div>
       <div className="page-header">
         <h1 className="tracking-tight">
-          Missing Assets
+          Asset Tracker
         </h1>
         <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
-          {stats.missing_any} scenes missing assets · {stats.total} total
+          {stats.missing_any} of {stats.total} scenes missing assets
         </p>
       </div>
       <SceneGrid scenes={scenes} stats={stats} error={error} idToken={(session as { idToken?: string } | null)?.idToken} />

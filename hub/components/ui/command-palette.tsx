@@ -16,7 +16,7 @@ import {
 } from "lucide-react"
 
 const COMMANDS = [
-  { id: "missing",      label: "Missing Assets",   href: "/missing",      icon: LayoutGrid,  shortcut: "1" },
+  { id: "missing",      label: "Asset Tracker",    href: "/missing",      icon: LayoutGrid,  shortcut: "1" },
   { id: "research",     label: "Model Research",    href: "/research",     icon: Users,        shortcut: "2" },
   { id: "scripts",      label: "Scripts",           href: "/scripts",      icon: FileText,     shortcut: "3" },
   { id: "call-sheets",  label: "Call Sheets",       href: "/call-sheets",  icon: Phone,        shortcut: "4" },

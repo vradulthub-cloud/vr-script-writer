@@ -19,7 +19,7 @@ import { NotificationFeed } from "./notification-feed"
 export const dynamic = "force-dynamic"
 
 const ALL_MODULES = [
-  { href: "/missing",      label: "Missing Assets",  icon: LayoutGrid,  tabKey: "Tickets",        hint: "Asset gaps" },
+  { href: "/missing",      label: "Asset Tracker",   icon: LayoutGrid,  tabKey: "Tickets",        hint: "Scene status" },
   { href: "/research",     label: "Model Research",  icon: Users,        tabKey: "Model Research", hint: "Performer profiles" },
   { href: "/scripts",      label: "Scripts",          icon: FileText,     tabKey: "Scripts",        hint: "Generate scripts" },
   { href: "/call-sheets",  label: "Call Sheets",      icon: Phone,        tabKey: "Call Sheets",    hint: "Shoot planning" },

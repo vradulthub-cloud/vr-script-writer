@@ -28,7 +28,7 @@ const CORE_ITEMS = [
  * The Streamlit app's auth_config ALL_TABS uses these exact keys.
  */
 const NAV_ITEMS = [
-  { href: "/missing",      label: "Missing",       shortLabel: "Missing",  tabKey: "Tickets",        icon: LayoutGrid },
+  { href: "/missing",      label: "Asset Tracker", shortLabel: "Assets",   tabKey: "Tickets",        icon: LayoutGrid },
   { href: "/research",     label: "Model Research", shortLabel: "Research", tabKey: "Model Research", icon: Users },
   { href: "/scripts",      label: "Scripts",         shortLabel: "Scripts",  tabKey: "Scripts",        icon: FileText },
   { href: "/call-sheets",  label: "Call Sheets",     shortLabel: "Calls",    tabKey: "Call Sheets",    icon: Phone },

@@ -19,7 +19,7 @@ import {
 
 const PRIMARY_ITEMS = [
   { href: "/dashboard",    label: "Home",      icon: Home },
-  { href: "/missing",      label: "Missing",   icon: LayoutGrid },
+  { href: "/missing",      label: "Assets",    icon: LayoutGrid },
   { href: "/scripts",      label: "Scripts",   icon: FileText },
   { href: "/titles",       label: "Titles",    icon: Image },
 ]
