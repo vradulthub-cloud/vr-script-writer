@@ -15,10 +15,13 @@ export default async function MissingPage() {
   let error: string | null = null
 
   try {
-    ;[scenes, stats] = await Promise.all([
-      client.scenes.list({ limit: 40, missing_only: true }),
+    const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
+    const [statsResult, ...studioResults] = await Promise.all([
       client.scenes.stats(),
+      ...STUDIOS.map(s => client.scenes.list({ studio: s, limit: 5, missing_only: true })),
     ])
+    stats = statsResult
+    scenes = studioResults.flat()
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load scenes"
   }
