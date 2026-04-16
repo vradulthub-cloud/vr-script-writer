@@ -274,14 +274,23 @@ def sync_scenes() -> int:
                 kw in grail.get("title", "").lower()
                 for kw in ("vol.", "best", "compilation")
             ) else 0
+            # Pull the first thumbnail filename (e.g. "FPVR0282-..._Thumbnail.jpg")
+            # so the /scenes/{id}/thumbnail proxy endpoint can find the file
+            # in MEGA without re-reading mega_scan.json on every request.
+            thumb_files = mega.get("files", {}).get("thumbnail", [])
+            thumb_file = ""
+            if thumb_files:
+                # Paths in the scan are relative: "Video Thumbnail/xxx.jpg"
+                first = thumb_files[0]
+                thumb_file = first.split("/", 1)[1] if "/" in first else first
             conn.execute(
                 """INSERT INTO scenes
                    (id, studio, grail_tab, site_code, title, performers,
                     categories, tags, grail_row,
                     has_description, has_videos, video_count,
                     has_thumbnail, has_photos, has_storyboard,
-                    storyboard_count, mega_path, is_compilation)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    storyboard_count, mega_path, thumb_file, is_compilation)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     scene_id,
                     grail["studio"],
@@ -300,6 +309,7 @@ def sync_scenes() -> int:
                     1 if mega.get("has_storyboard") else 0,
                     mega.get("storyboard_count", 0),
                     mega.get("path", ""),
+                    thumb_file,
                     is_comp,
                 ),
             )

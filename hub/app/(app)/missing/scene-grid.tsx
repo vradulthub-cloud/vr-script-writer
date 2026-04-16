@@ -28,7 +28,7 @@ function completionPct(scene: Scene): number {
 type SortKey = "studio" | "id" | "title" | "performers" | "completion"
 type SortDir = "asc" | "desc"
 
-const ROW_HEIGHT = 36
+const ROW_HEIGHT = 44
 const OVERSCAN = 8
 
 interface Props {
@@ -419,6 +419,9 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
                 >
                   <span className="inline-flex items-center">ID<SortIcon col="id" /></span>
                 </th>
+                <th className="px-2 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)", width: 56 }}>
+                  Preview
+                </th>
                 <th
                   className="text-left px-3 py-2 font-medium cursor-pointer select-none"
                   style={{ fontSize: 11, color: "var(--color-text-muted)" }}
@@ -478,6 +481,9 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
                         </td>
                         <td className="px-3 py-1.5 font-mono whitespace-nowrap" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
                           {scene.id}
+                        </td>
+                        <td className="px-2 py-1" style={{ width: 56 }}>
+                          <ThumbCell scene={scene} />
                         </td>
                         <td className="px-3 py-1.5" style={{ fontSize: 12, maxWidth: 280 }}>
                           <span className="line-clamp-1">{scene.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}</span>
@@ -542,6 +548,40 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
+
+function ThumbCell({ scene }: { scene: Scene }) {
+  const [failed, setFailed] = useState(false)
+
+  if (!scene.has_thumbnail || failed) {
+    return (
+      <div
+        className="rounded"
+        style={{
+          width: 48, height: 32,
+          background: "var(--color-elevated)",
+          border: "1px dashed var(--color-border)",
+        }}
+      />
+    )
+  }
+
+  return (
+    <img
+      src={`${API_BASE_URL}/api/scenes/${encodeURIComponent(scene.id)}/thumbnail`}
+      alt=""
+      aria-hidden="true"
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="rounded"
+      style={{
+        width: 48, height: 32,
+        objectFit: "cover",
+        background: "var(--color-elevated)",
+        display: "block",
+      }}
+    />
+  )
+}
 
 function MetricCard({ label, value, accent, context }: {
   label: string

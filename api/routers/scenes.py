@@ -19,6 +19,7 @@ import threading
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel, Field
 
 from api.auth import CurrentUser, require_grail_writer
@@ -100,6 +101,63 @@ async def scene_stats(user: CurrentUser):
         by_studio=by_studio,
         complete=complete,
         missing_any=total - complete,
+    )
+
+
+@router.get("/{scene_id}/thumbnail")
+async def get_scene_thumbnail(scene_id: str):
+    """
+    Serve a scene's Video Thumbnail image.
+
+    Public endpoint (no auth) — used as <img src> in the Asset Tracker.
+    Downloads from MEGA once, caches on local disk, serves bytes to client.
+    """
+    import subprocess
+    from pathlib import Path as _Path
+    from api.config import get_settings
+
+    # 1. Look up the scene in the DB
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, grail_tab, thumb_file, has_thumbnail FROM scenes WHERE id = ?",
+            (scene_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    if not row["has_thumbnail"] or not row["thumb_file"]:
+        raise HTTPException(status_code=404, detail="No thumbnail for this scene")
+
+    # 2. Check local cache
+    settings = get_settings()
+    cache_dir = settings.base_dir / "thumb_cache"
+    cache_dir.mkdir(exist_ok=True)
+    # Cache file name: <scene_id>-<original_ext>
+    ext = _Path(row["thumb_file"]).suffix.lower() or ".jpg"
+    cache_path = cache_dir / f"{scene_id}{ext}"
+
+    if not cache_path.exists():
+        # 3. Download from MEGA via mega-get
+        mega_path = f"/Grail/{row['grail_tab']}/{scene_id}/Video Thumbnail/{row['thumb_file']}"
+        mega_get = r"C:\Users\andre\AppData\Local\MEGAcmd\mega-get.bat"
+        try:
+            result = subprocess.run(
+                [mega_get, mega_path, str(cache_path)],
+                capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode != 0 or not cache_path.exists():
+                _log.warning("mega-get failed for %s: %s", scene_id, result.stderr[:200])
+                raise HTTPException(status_code=502, detail="Thumbnail fetch failed")
+        except FileNotFoundError:
+            raise HTTPException(status_code=503, detail="MEGAcmd not available")
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail="Thumbnail fetch timed out")
+
+    # 4. Serve from cache
+    media = "image/jpeg" if ext in (".jpg", ".jpeg") else f"image/{ext.lstrip('.')}"
+    return FileResponse(
+        cache_path,
+        media_type=media,
+        headers={"Cache-Control": "public, max-age=604800"},  # 7 days
     )
 
 

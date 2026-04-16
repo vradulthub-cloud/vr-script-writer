@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS scenes (
     has_storyboard INTEGER DEFAULT 0,
     storyboard_count INTEGER DEFAULT 0,
     mega_path TEXT DEFAULT '',
+    thumb_file TEXT DEFAULT '',     -- Thumbnail filename (relative to Video Thumbnail/ folder)
     is_compilation INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_scenes_studio ON scenes(studio);
@@ -242,6 +243,11 @@ def init_db() -> None:
             if col not in existing_cols:
                 conn.execute(f"ALTER TABLE bookings ADD COLUMN {col} {ddl}")
                 _log.info("Migration: added bookings.%s", col)
+        # Migration: add thumb_file to scenes for thumbnail proxy
+        scene_cols = {row[1] for row in conn.execute("PRAGMA table_info(scenes)").fetchall()}
+        if "thumb_file" not in scene_cols:
+            conn.execute("ALTER TABLE scenes ADD COLUMN thumb_file TEXT DEFAULT ''")
+            _log.info("Migration: added scenes.thumb_file")
         _log.info("Database initialized at %s", get_settings().sqlite_db_path)
 
 
