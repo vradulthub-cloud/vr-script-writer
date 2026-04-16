@@ -200,15 +200,13 @@ async def get_model_profile(
             (name,),
         ).fetchone()
 
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Model '{name}' not found")
-
-    canonical = row["name"]
-    agency_link = row["agency_link"] or ""
+    # Model may not be in bookings (e.g. trending / searched) — still scrape
+    canonical = row["name"] if row else name.strip()
+    agency_link = (row["agency_link"] if row else "") or ""
 
     # Parse sheet_data for SLR/VRP profile URLs
     try:
-        sd = json.loads(row["raw_json"] or "{}")
+        sd = json.loads((row["raw_json"] if row else "") or "{}")
         if not isinstance(sd, dict):
             sd = {}
     except Exception:
@@ -220,14 +218,14 @@ async def get_model_profile(
     # Booking history from scripts table
     booking_history = _get_booking_history(canonical)
 
-    # Cache check
+    # Cache check (exclude the trending aggregate row)
     if not refresh:
         with get_db() as conn:
             cached = conn.execute(
-                "SELECT profile_json, cached_at FROM model_profiles WHERE LOWER(name) = LOWER(?)",
+                "SELECT profile_json, cached_at FROM model_profiles WHERE LOWER(name) = LOWER(?) AND name != '_trending_cache'",
                 (canonical,),
             ).fetchone()
-        if cached and cached["name"] != "_trending_cache":
+        if cached:
             try:
                 ts = datetime.fromisoformat(cached["cached_at"])
                 if ts.tzinfo is None:

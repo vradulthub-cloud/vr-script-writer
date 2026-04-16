@@ -68,6 +68,7 @@ function Photo({ src, name, width, height, radius = 4, objectPos = "50% 15%" }: 
       src={src}
       alt=""
       aria-hidden="true"
+      referrerPolicy="no-referrer"
       onError={() => setFailed(true)}
       style={{
         width, height, borderRadius: radius, flexShrink: 0,
@@ -165,6 +166,8 @@ function SceneCard({ scene }: { scene: ModelProfile["slr_scenes"][0] }) {
         <a href={scene.url || undefined} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0 }}>
           <img
             src={scene.thumb} alt=""
+            referrerPolicy="no-referrer"
+            crossOrigin="anonymous"
             style={{ width: 120, height: 68, objectFit: "cover", borderRadius: 4, display: "block" }}
             onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
           />
