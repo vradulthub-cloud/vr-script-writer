@@ -1,5 +1,7 @@
-import { TitleGenerator } from "./title-generator"
+import nextDynamic from "next/dynamic"
 import { auth } from "@/auth"
+
+const TitleGenerator = nextDynamic(() => import("./title-generator").then(m => m.TitleGenerator))
 
 export const dynamic = "force-dynamic"
 

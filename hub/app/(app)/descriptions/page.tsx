@@ -1,6 +1,8 @@
+import nextDynamic from "next/dynamic"
 import { auth } from "@/auth"
 import { api, type Scene, type UserProfile } from "@/lib/api"
-import { DescGenerator } from "./desc-generator"
+
+const DescGenerator = nextDynamic(() => import("./desc-generator").then(m => m.DescGenerator))
 
 export const dynamic = "force-dynamic"
 
@@ -13,7 +15,7 @@ export default async function DescriptionsPage() {
   let userProfile: UserProfile | null = null
 
   try {
-    scenes = await client.scenes.list({ limit: 500 })
+    scenes = await client.scenes.list({ limit: 100 })
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load scenes"
   }

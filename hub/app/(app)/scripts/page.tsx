@@ -1,6 +1,8 @@
+import nextDynamic from "next/dynamic"
 import { auth } from "@/auth"
 import { api, type UserProfile } from "@/lib/api"
-import { ScriptGenerator } from "./script-generator"
+
+const ScriptGenerator = nextDynamic(() => import("./script-generator").then(m => m.ScriptGenerator))
 
 export const dynamic = "force-dynamic"
 

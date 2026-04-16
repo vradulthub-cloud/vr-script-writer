@@ -235,6 +235,10 @@ button[style*="color-lime"]:hover:not(:disabled) {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 [data-loading] {
   background: linear-gradient(
     90deg,

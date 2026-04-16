@@ -13,17 +13,19 @@ export default async function TicketsPage() {
   let error: string | null = null
   let users: UserProfile[] = []
 
-  try {
-    tickets = await client.tickets.list()
-  } catch (e) {
-    error = e instanceof Error ? e.message : "Failed to load tickets"
+  const [ticketsRes, usersRes] = await Promise.allSettled([
+    client.tickets.list(),
+    client.users.list(),
+  ])
+
+  if (ticketsRes.status === "fulfilled") {
+    tickets = ticketsRes.value
+  } else {
+    error = ticketsRes.reason instanceof Error ? ticketsRes.reason.message : "Failed to load tickets"
   }
 
-  // Fetch users for assignee picker (non-critical — falls back to text input)
-  try {
-    users = await client.users.list()
-  } catch {
-    // Silently fail
+  if (usersRes.status === "fulfilled") {
+    users = usersRes.value
   }
 
   return (

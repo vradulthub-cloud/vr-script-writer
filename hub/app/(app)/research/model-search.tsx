@@ -643,14 +643,28 @@ function ProfileView({ model, profile, loading, onBack, onRefresh, onBrief, brie
           <div style={{ paddingTop: 4 }}>
             {activeTab === "slr" && (
               slr.length
-                ? slr.map((sc, i) => <SceneCard key={i} scene={sc} />)
+                ? <>
+                    {slr.slice(0, 6).map((sc, i) => <SceneCard key={i} scene={sc} />)}
+                    {slr.length > 6 && (
+                      <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 6 }}>
+                        Showing 6 of {slr.length} scenes
+                      </p>
+                    )}
+                  </>
                 : <p style={{ fontSize: 12, color: "var(--color-text-faint)", padding: "12px 0" }}>
                     {loading ? "Loading…" : "No SLR scenes found."}
                   </p>
             )}
             {activeTab === "vrp" && (
               vrp.length
-                ? vrp.map((sc, i) => <SceneCard key={i} scene={sc} />)
+                ? <>
+                    {vrp.slice(0, 6).map((sc, i) => <SceneCard key={i} scene={sc} />)}
+                    {vrp.length > 6 && (
+                      <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 6 }}>
+                        Showing 6 of {vrp.length} scenes
+                      </p>
+                    )}
+                  </>
                 : <p style={{ fontSize: 12, color: "var(--color-text-faint)", padding: "12px 0" }}>
                     {loading ? "Loading…" : "No VRPorn scenes found."}
                   </p>
@@ -762,7 +776,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
   if (currentModel) {
     return (
       <>
-        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+
         <ProfileView
           model={currentModel}
           profile={profile}

@@ -1,6 +1,8 @@
+import nextDynamic from "next/dynamic"
 import { auth } from "@/auth"
 import { api, type Scene, type SceneStats } from "@/lib/api"
-import { SceneGrid } from "./scene-grid"
+
+const SceneGrid = nextDynamic(() => import("./scene-grid").then(m => m.SceneGrid))
 
 export const dynamic = "force-dynamic"
 

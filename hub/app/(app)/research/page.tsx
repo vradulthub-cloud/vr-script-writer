@@ -1,6 +1,8 @@
+import nextDynamic from "next/dynamic"
 import { auth } from "@/auth"
 import { api, type Model } from "@/lib/api"
-import { ModelSearch } from "./model-search"
+
+const ModelSearch = nextDynamic(() => import("./model-search").then(m => m.ModelSearch))
 
 export const dynamic = "force-dynamic"
 

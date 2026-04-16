@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Bell, Ticket, RefreshCw, UserCheck, ClipboardList, CheckCircle, Pin } from "lucide-react"
 import { signOut } from "next-auth/react"
 import { api, ApiError, type Notification } from "@/lib/api"
@@ -21,7 +21,7 @@ interface NotificationBellProps {
 
 export function NotificationBell({ idToken: serverToken }: NotificationBellProps) {
   const idToken = useIdToken(serverToken)
-  const client = api(idToken ?? null)
+  const client = useMemo(() => api(idToken ?? null), [idToken])
 
   const [open, setOpen] = useState(false)
   const [unread, setUnread] = useState(0)
@@ -43,7 +43,7 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
       }
       // Other failures: silently ignore — bell just won't show a badge
     }
-  }, [idToken])
+  }, [client])
 
   useEffect(() => {
     fetchUnread()
@@ -62,7 +62,7 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
       console.warn("[notifications] Failed to load list:", e)
       setLoading(false)
     })
-  }, [open, idToken])
+  }, [open, client])
 
   // Close on outside click
   useEffect(() => {
