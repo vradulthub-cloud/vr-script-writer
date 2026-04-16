@@ -47,8 +47,8 @@ const COLUMNS: { key: string; label: string; sort?: SortKey }[] = [
   { key: "project", label: "Project" },
   { key: "priority", label: "Priority", sort: "priority" },
   { key: "status", label: "Status", sort: "status" },
-  { key: "submitted", label: "Submitted" },
-  { key: "date", label: "Date", sort: "date" },
+  { key: "submitted", label: "Reporter" },
+  { key: "date", label: "Created", sort: "date" },
 ]
 
 interface Props {
@@ -508,9 +508,12 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                                 )}
                               </div>
                               {ticket.notes && (
-                                <p style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 6, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-                                  {ticket.notes}
-                                </p>
+                                <div style={{ marginTop: 6 }}>
+                                  <span style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase" }}>Notes</span>
+                                  <p style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                                    {ticket.notes}
+                                  </p>
+                                </div>
                               )}
                             </div>
 
