@@ -4359,8 +4359,8 @@ with tab_tickets:
 
             # Load asset data — always needed for both grid and detail
             _at_studio = st.session_state.get("at_studio", "All")
-            _at_show = st.session_state.get("at_show", "All")
-            _at_limit = 6
+            _at_show = st.session_state.get("at_show", "Missing Only")
+            _at_limit = 5
             _at_studios_tuple = None if _at_studio == "All" else tuple([_at_studio])
             _asset_data = _cached_load_assets(_at_studios_tuple, _at_limit)
             _scan_date = _asset_data.get("_meta", {}).get("scan_date", "")
@@ -4388,7 +4388,7 @@ with tab_tickets:
                         "Studio", ["All", "FPVR", "VRH", "VRA", "NNJOI"], key="at_studio")
                 with _at_f2:
                     st.selectbox(
-                        "Show", ["All", "Missing Only", "Complete"], key="at_show")
+                        "Show", ["Missing Only", "All", "Complete"], key="at_show")
 
                 if st.button("🔄 Refresh MEGA", key="at_refresh"):
                     try:
@@ -4406,42 +4406,15 @@ with tab_tickets:
                 _at_total = len(_at_scenes)
                 _at_complete = sum(1 for s in _at_scenes if s["completed"] == s["total"])
                 _at_partial = _at_total - _at_complete
-                _m1, _m2, _m3 = st.columns(3)
-                _m1.metric("Total Scenes", _at_total)
-                _m2.metric("Complete", _at_complete)
-                _m3.metric("In Progress", _at_partial)
+                _summary_parts = []
+                if _at_partial:
+                    _summary_parts.append(f"{_at_partial} in progress")
+                if _at_complete:
+                    _summary_parts.append(f"{_at_complete} complete")
                 if _scan_date:
-                    st.caption(f"MEGA scan: {_scan_date}")
-
-                _issue_scenes = [s for s in _at_scenes if s["completed"] < s["total"]]
-                if _issue_scenes:
-                    _issue_scenes.sort(key=lambda s: len(s["missing"]), reverse=True)
-                    with st.expander(f"Scenes with Issues ({len(_issue_scenes)})", expanded=False):
-                        for _is in _issue_scenes:
-                            _is_color = _studio_colors.get(_is["studio"], _C["muted"])
-                            _is_missing_pills = " ".join(
-                                f"<span style='display:inline-block;font-size:0.65rem;padding:1px 6px;"
-                                f"border-radius:3px;background:{_C['red_dim']};color:{_C['red']}'>{m}</span>"
-                                for m in _is["missing"]
-                            )
-                            _ic1, _ic2 = st.columns([3, 1])
-                            with _ic1:
-                                st.markdown(
-                                    f"<div style='display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap'>"
-                                    f"<span style='width:3px;height:16px;border-radius:2px;"
-                                    f"background:{_is_color};display:inline-block'></span>"
-                                    f"<span style='font-family:DM Mono,monospace;font-size:0.78rem;"
-                                    f"font-weight:600;color:{_C['text']}'>{_is['scene_id']}</span>"
-                                    f"{_is_missing_pills}"
-                                    f"</div>",
-                                    unsafe_allow_html=True,
-                                )
-                            with _ic2:
-                                if st.button("View", key=f"issue_{_is['scene_id']}", width="stretch"):
-                                    st.session_state["at_selected"] = _is["scene_id"]
-                                    st.rerun()
-
-                st.divider()
+                    _summary_parts.append(f"MEGA scan {_scan_date}")
+                if _summary_parts:
+                    st.caption("  ·  ".join(_summary_parts))
 
             # ── Detail view (selected scene) ─────────────────────────────────
             _selected_scene = next((s for s in _at_scenes if s["scene_id"] == _selected_scene_id), None) if _selected_scene_id else None
@@ -4881,85 +4854,85 @@ with tab_tickets:
                     }
                     st.rerun()
 
-            # ── Grid view grouped by studio ──────────────────────────────────
+            # ── Flat list (date-sorted, most recent first) ────────────────────
             else:
                 if not _at_scenes:
                     st.info("No scenes found matching your filters.")
                 else:
-                    _studio_names = {"FPVR": "FuckPassVR", "VRH": "VRHush", "VRA": "VRAllure", "NNJOI": "NaughtyJOI"}
-                    for _grp_studio in _at_studios:
-                        _grp_scenes = _at_by_studio.get(_grp_studio, [])
-                        if not _grp_scenes:
-                            continue
-                        _s_color = _studio_colors.get(_grp_studio, _C["muted"])
-                        st.markdown(
-                            f"<div style='display:flex;align-items:center;gap:10px;margin:16px 0 8px'>"
-                            f"<div style='width:4px;height:20px;border-radius:2px;background:{_s_color}'></div>"
-                            f"<span style='font-family:Syne,sans-serif;font-size:1rem;font-weight:700;"
-                            f"color:{_C['text']}'>{_studio_names.get(_grp_studio, _grp_studio)}</span>"
-                            f"<span style='font-size:0.72rem;color:{_C['muted']}'>{len(_grp_scenes)} scenes</span>"
-                            f"</div>",
-                            unsafe_allow_html=True,
+                    _sorted_scenes = sorted(
+                        _at_scenes,
+                        key=lambda s: s.get("release_date", "") or "",
+                        reverse=True,
+                    )
+                    for _scene in _sorted_scenes:
+                        _sc_color = _studio_colors.get(_scene["studio"], _C["muted"])
+                        _pct = int((_scene["completed"] / _scene["total"]) * 100) if _scene["total"] else 0
+                        _pct_color = _C["green"] if _pct == 100 else (_C["amber"] if _pct >= 50 else _C["red"])
+                        _missing_names = _scene.get("missing", [])
+
+                        # Pre-build variables (no dict access in f-string expressions)
+                        _sid = _scene["scene_id"]
+                        _date_d = (_scene.get("release_date") or "")[:10]
+                        _perf_d = _scene["performers"] or "TBD"
+                        _title_raw = _scene.get("title") or ""
+                        _title_d = (_title_raw[:48] + "\u2026") if len(_title_raw) > 48 else (_title_raw or "\u2014")
+                        _score = _scene["completed"]
+                        _stotal = _scene["total"]
+                        _sname = _scene["studio_name"]
+                        _c_text = _C["text"]
+                        _c_muted = _C["muted"]
+                        _c_subtle = _C["subtle"]
+                        _c_surface = _C["surface"]
+                        _c_border = _C["border"]
+                        _c_red = _C["red"]
+                        _c_red_dim = _C["red_dim"]
+                        _c_green = _C["green"]
+                        _c_elevated = _C["elevated"]
+
+                        if _missing_names:
+                            _pills_parts = []
+                            for _m in _missing_names:
+                                _pills_parts.append(
+                                    f"<span style='display:inline-block;font-size:0.6rem;padding:1px 5px;"
+                                    f"border-radius:3px;background:{_c_red_dim};color:{_c_red}'>{_m}</span>"
+                                )
+                            _pills_html = " ".join(_pills_parts)
+                        else:
+                            _pills_html = f"<span style='font-size:0.68rem;color:{_c_green}'>&#10003; complete</span>"
+
+                        _comp_tag = ""
+                        if _scene.get("is_compilation"):
+                            _c_accent = _C["accent"]
+                            _comp_tag = f"<span style='font-size:0.58rem;background:{_c_accent};color:#fff;padding:1px 5px;border-radius:3px;margin-left:4px'>COMP</span>"
+
+                        _row_html = (
+                            f"<div style='display:flex;align-items:center;gap:10px;padding:7px 12px;"
+                            f"background:{_c_surface};border:1px solid {_c_border};"
+                            f"border-left:3px solid {_sc_color};border-radius:5px'>"
+                            f"<div style='flex:0 0 110px'>"
+                            f"<span style='font-family:DM Mono,monospace;font-size:0.78rem;font-weight:600;"
+                            f"color:{_c_text}'>{_sid}</span>{_comp_tag}"
+                            f"<div style='font-size:0.62rem;color:{_c_subtle}'>{_sname}  {_date_d}</div>"
+                            f"</div>"
+                            f"<div style='flex:1;min-width:0;overflow:hidden'>"
+                            f"<div style='font-size:0.78rem;color:{_c_text};font-weight:500;"
+                            f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>{_perf_d}</div>"
+                            f"<div style='font-size:0.68rem;color:{_c_muted};font-style:italic;"
+                            f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>{_title_d}</div>"
+                            f"</div>"
+                            f"<div style='flex:0 0 auto;display:flex;flex-wrap:wrap;gap:2px;"
+                            f"max-width:200px;justify-content:flex-end'>{_pills_html}</div>"
+                            f"<div style='flex:0 0 32px;text-align:right;font-size:0.7rem;"
+                            f"font-weight:600;color:{_pct_color}'>{_score}/{_stotal}</div>"
+                            f"</div>"
                         )
-                        for _ri in range(0, len(_grp_scenes), 3):
-                            _row_scenes = _grp_scenes[_ri:_ri + 3]
-                            _cols = st.columns(3)
-                            for _ci, _scene in enumerate(_row_scenes):
-                                with _cols[_ci]:
-                                    _pct = int((_scene["completed"] / _scene["total"]) * 100) if _scene["total"] else 0
-                                    _pct_color = _C["green"] if _pct == 100 else (_C["amber"] if _pct >= 50 else _C["red"])
-
-                                    _missing_names = _scene.get("missing", [])
-                                    if _missing_names:
-                                        _checks_html = " ".join(
-                                            f"<span style='display:inline-block;font-size:0.62rem;padding:1px 5px;"
-                                            f"border-radius:3px;background:{_C['red_dim']};color:{_C['red']}'>{m}</span>"
-                                            for m in _missing_names
-                                        )
-                                    else:
-                                        _checks_html = (
-                                            f"<span style='font-size:0.72rem;color:{_C['green']}'>"
-                                            f"&#10003; All assets complete</span>"
-                                        )
-
-                                    _perf_display = _scene["performers"] or "TBD"
-                                    _title_display = _scene["title"][:40] + "..." if len(_scene.get("title", "")) > 40 else (_scene.get("title") or "\u2014")
-                                    _date_display = _scene.get("release_date", "")[:10] or ""
-                                    _card_comp = (
-                                        f"<span style='font-size:0.6rem;background:{_C['accent']};color:#fff;"
-                                        f"padding:1px 6px;border-radius:3px;margin-left:6px;font-family:inherit'>COMP</span>"
-                                    ) if _scene.get("is_compilation") else ""
-
-                                    _date_html = f"<span style='font-size:0.68rem;color:{_C['subtle']}'>{_date_display}</span>" if _date_display else ""
-                                    st.markdown(
-                                        f"<div style='background:{_C['surface']};border:1px solid {_C['border']};"
-                                        f"border-left:3px solid {_s_color};border-radius:8px;padding:14px 16px;"
-                                        f"min-height:200px;display:flex;flex-direction:column'>"
-                                        f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>"
-                                        f"<span style='font-family:DM Mono,monospace;font-size:0.82rem;font-weight:600;"
-                                        f"color:{_C['text']}'>{_scene['scene_id']}{_card_comp}</span>"
-                                        f"{_date_html}"
-                                        f"</div>"
-                                        f"<div style='font-size:0.82rem;color:{_C['text']};font-weight:500;"
-                                        f"margin-bottom:2px;overflow:hidden;display:-webkit-box;"
-                                        f"-webkit-line-clamp:2;-webkit-box-orient:vertical'>{_perf_display}</div>"
-                                        f"<div style='font-size:0.72rem;color:{_C['muted']};margin-bottom:auto;"
-                                        f"font-style:italic'>{_title_display}</div>"
-                                        f"<div style='display:flex;align-items:center;gap:8px;margin:8px 0 6px'>"
-                                        f"<div style='flex:1;height:6px;background:{_C['elevated']};border-radius:3px;overflow:hidden'>"
-                                        f"<div style='width:{_pct}%;height:100%;background:{_pct_color};border-radius:3px'></div>"
-                                        f"</div>"
-                                        f"<span style='font-size:0.72rem;font-weight:600;color:{_pct_color}'>"
-                                        f"{_scene['completed']}/{_scene['total']}</span>"
-                                        f"</div>"
-                                        f"<div style='display:flex;flex-wrap:wrap;gap:3px'>"
-                                        f"{_checks_html}</div>"
-                                        f"</div>",
-                                        unsafe_allow_html=True,
-                                    )
-                                    if st.button("Open", key=f"at_open_{_scene['scene_id']}", width="stretch"):
-                                        st.session_state["at_selected"] = _scene["scene_id"]
-                                        st.rerun()
+                        _lc1, _lc2 = st.columns([14, 1])
+                        with _lc1:
+                            st.markdown(_row_html, unsafe_allow_html=True)
+                        with _lc2:
+                            if st.button("\u25b8", key=f"at_open_{_sid}", width="stretch"):
+                                st.session_state["at_selected"] = _sid
+                                st.rerun()
 
         # ── SUB-VIEW 2: Approvals ────────────────────────────────────────────────
         elif _tk_mode == _apr_label:
