@@ -1,9 +1,22 @@
 "use client"
 
+import { usePathname } from "next/navigation"
 import { signOut } from "next-auth/react"
 import { LogOut } from "lucide-react"
 import type { Session } from "next-auth"
 import { NotificationBell } from "./notification-bell"
+
+const PAGE_NAMES: Record<string, string> = {
+  "/missing":      "Missing Assets",
+  "/research":     "Model Research",
+  "/scripts":      "Scripts",
+  "/call-sheets":  "Call Sheets",
+  "/titles":       "Titles",
+  "/descriptions": "Descriptions",
+  "/compilations": "Compilations",
+  "/approvals":    "Approvals",
+  "/tickets":      "Tickets",
+}
 
 interface TopbarProps {
   session: Session
@@ -12,9 +25,12 @@ interface TopbarProps {
 }
 
 export function Topbar({ session, idToken, userRole }: TopbarProps) {
+  const pathname = usePathname()
+  const pageName = Object.entries(PAGE_NAMES).find(([key]) => pathname.startsWith(key))?.[1]
+
   return (
     <header
-      className="fixed top-0 right-0 flex items-center justify-end gap-3 px-4"
+      className="fixed top-0 right-0 flex items-center gap-3 px-4"
       style={{
         left: "var(--spacing-sidebar)",
         height: "var(--spacing-topbar)",
@@ -23,47 +39,58 @@ export function Topbar({ session, idToken, userRole }: TopbarProps) {
         zIndex: 30,
       }}
     >
-      {/* Notifications */}
-      <NotificationBell idToken={idToken} />
-
-      {/* User */}
-      <div className="flex items-center gap-2">
-        {session.user?.image ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={session.user.image}
-            alt={session.user.name ?? "User"}
-            className="rounded-full"
-            style={{ width: 24, height: 24 }}
-          />
-        ) : (
-          <div
-            className="rounded-full flex items-center justify-center font-semibold"
-            style={{
-              width: 24,
-              height: 24,
-              background: "var(--color-elevated)",
-              color: "var(--color-text-muted)",
-              fontSize: 10,
-            }}
-          >
-            {session.user?.name?.charAt(0).toUpperCase() ?? "?"}
-          </div>
-        )}
-        <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-          {session.user?.name ?? session.user?.email}
+      {/* Mobile page title — visible only when sidebar is hidden */}
+      {pageName && (
+        <span
+          className="md:hidden font-semibold"
+          style={{ fontSize: 13, color: "var(--color-text)" }}
+        >
+          {pageName}
         </span>
-      </div>
+      )}
 
-      {/* Sign out */}
-      <button
-        onClick={() => signOut({ callbackUrl: "/login" })}
-        className="p-1.5 rounded transition-colors hover:bg-[--color-elevated]"
-        style={{ color: "var(--color-text-muted)" }}
-        aria-label="Sign out"
-      >
-        <LogOut size={13} />
-      </button>
+      {/* Right-side controls — ml-auto pushes to far right */}
+      <div className="ml-auto flex items-center gap-3">
+        <NotificationBell idToken={idToken} />
+
+        <div className="flex items-center gap-2">
+          {session.user?.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={session.user.image}
+              alt={session.user.name ?? "User"}
+              className="rounded-full"
+              style={{ width: 24, height: 24 }}
+            />
+          ) : (
+            <div
+              className="rounded-full flex items-center justify-center font-semibold"
+              style={{
+                width: 24,
+                height: 24,
+                background: "var(--color-elevated)",
+                color: "var(--color-text-muted)",
+                fontSize: 10,
+              }}
+            >
+              {session.user?.name?.charAt(0).toUpperCase() ?? "?"}
+            </div>
+          )}
+          {/* Hide username text on mobile to save space */}
+          <span className="hidden md:inline" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+            {session.user?.name ?? session.user?.email}
+          </span>
+        </div>
+
+        <button
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          className="p-1.5 rounded transition-colors hover:bg-[--color-elevated]"
+          style={{ color: "var(--color-text-muted)" }}
+          aria-label="Sign out"
+        >
+          <LogOut size={13} />
+        </button>
+      </div>
     </header>
   )
 }

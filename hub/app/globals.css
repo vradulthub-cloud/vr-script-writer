@@ -255,6 +255,17 @@ button[style*="color-lime"]:hover:not(:disabled) {
   }
 }
 
+/* Tablet narrow: stack two-panel layouts before they get cramped */
+@media (max-width: 1023px) {
+  .flex.gap-6 {
+    flex-direction: column !important;
+  }
+  .flex.gap-6 > * {
+    width: 100% !important;
+    flex-shrink: 1 !important;
+  }
+}
+
 /* Mobile: hide sidebar entirely, stack layout */
 @media (max-width: 767px) {
   :root {
@@ -315,12 +326,9 @@ button[style*="color-lime"]:hover:not(:disabled) {
     padding-bottom: 80px !important;
   }
 
-  /* Two-panel layouts stack on mobile */
-  .flex.gap-6 {
-    flex-direction: column !important;
-  }
-  .flex.gap-6 > div:first-child {
-    width: 100% !important;
+  /* Touch targets: raise all buttons to 44px minimum */
+  button {
+    min-height: 44px;
   }
 }
 
