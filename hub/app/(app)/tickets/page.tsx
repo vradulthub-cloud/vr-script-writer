@@ -28,12 +28,5 @@ export default async function TicketsPage() {
     users = usersRes.value
   }
 
-  return (
-    <div>
-      <div className="mb-6">
-        <h1>Tickets</h1>
-      </div>
-      <TicketList tickets={tickets} users={users} error={error} idToken={idToken} />
-    </div>
-  )
+  return <TicketList tickets={tickets} users={users} error={error} idToken={idToken} />
 }

@@ -275,32 +275,21 @@ export default function CallSheetsPage() {
 
   return (
     <div>
-      <div className="mb-5 flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="tracking-tight">
-            Call Sheets
-          </h1>
-          <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
-            Shoot day logistics — generate Google Doc call sheets from the budget sheet
-          </p>
-        </div>
-
-        {/* Door code */}
-        <div className="flex items-center gap-2">
-          <label style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Door code</label>
-          <input
-            type="text"
-            value={doorCode}
-            onChange={e => setDoorCode(e.target.value)}
-            className="px-2.5 py-1.5 rounded text-xs outline-none"
-            style={{
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-text)",
-              width: 72,
-            }}
-          />
-        </div>
+      {/* Door code */}
+      <div className="mb-4 flex items-center gap-2">
+        <label style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Door code</label>
+        <input
+          type="text"
+          value={doorCode}
+          onChange={e => setDoorCode(e.target.value)}
+          className="px-2.5 py-1.5 rounded text-xs outline-none"
+          style={{
+            background: "var(--color-surface)",
+            border: "1px solid var(--color-border)",
+            color: "var(--color-text)",
+            width: 72,
+          }}
+        />
       </div>
 
       {/* Loading / error states */}

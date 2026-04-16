@@ -15,16 +15,7 @@ export function ApprovalsPageShell({ pendingCount, children }: Props) {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1>
-            {tab === "review" ? "Approvals" : "Submit for Approval"}
-          </h1>
-          {tab === "review" && pendingCount > 0 && (
-            <p data-subtitle>{pendingCount} pending decision{pendingCount !== 1 ? "s" : ""}</p>
-          )}
-        </div>
-
+      <div className="mb-4 flex items-center gap-3">
         <div className="flex rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
           {(["review", "submit"] as const).map(t => (
             <button
@@ -43,6 +34,11 @@ export function ApprovalsPageShell({ pendingCount, children }: Props) {
             </button>
           ))}
         </div>
+        {tab === "review" && pendingCount > 0 && (
+          <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+            <span style={{ fontVariantNumeric: "tabular-nums" }}>{pendingCount}</span> pending
+          </span>
+        )}
       </div>
 
       {tab === "review" && children.review}
