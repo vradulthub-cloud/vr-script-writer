@@ -378,36 +378,49 @@ async def generate_booking_brief(
     user: CurrentUser,
     body: BriefRequest,
 ):
-    """Generate a 3-sentence AI booking brief using Claude."""
+    """Generate a 3-sentence AI booking brief via local Ollama (dolphin3)."""
+    import requests as _req
+
+    ctx_lines = [f"Performer: {name}"]
+    for k, v in body.context.items():
+        if v:
+            ctx_lines.append(f"{k}: {v}")
+
+    prompt = (
+        "You are a talent booking advisor for a VR adult content studio. "
+        "Based on the data below, write a concise 3-sentence booking brief. "
+        "Cover: (1) her current market standing and platform performance, "
+        "(2) your studio's history with her and what that means, "
+        "(3) a clear recommendation — Book Now / Re-book / Monitor / Pass — "
+        "with one-line reason. Output only the three sentences, no preamble.\n\n"
+        + "\n".join(ctx_lines)
+    )
+
     try:
-        import anthropic
-        from api.config import get_settings
-        settings = get_settings()
-
-        ctx_lines = [f"Performer: {name}"]
-        for k, v in body.context.items():
-            if v:
-                ctx_lines.append(f"{k}: {v}")
-
-        prompt = (
-            "You are a talent booking advisor for a VR adult content studio. "
-            "Based on the data below, write a concise 3-sentence booking brief. "
-            "Cover: (1) her current market standing and platform performance, "
-            "(2) your studio's history with her and what that means, "
-            "(3) a clear recommendation — Book Now / Re-book / Monitor / Pass — with one-line reason.\n\n"
-            + "\n".join(ctx_lines)
+        r = _req.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "dolphin3:latest",
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.4, "num_predict": 400},
+            },
+            timeout=60,
         )
-
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return BriefResponse(brief=msg.content[0].text)
-
+        r.raise_for_status()
+        data = r.json()
+        text = (data.get("response") or "").strip()
+        if not text:
+            raise HTTPException(status_code=502, detail="Ollama returned empty response")
+        return BriefResponse(brief=text)
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail="Ollama not running on localhost:11434")
+    except _req.exceptions.Timeout:
+        raise HTTPException(status_code=504, detail="Ollama request timed out")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Brief generation failed: {e}")
 
 
 @router.get("/{name}", response_model=ModelResponse)
