@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { api, API_BASE_URL, type Treatment, type LocalTitleResult } from "@/lib/api"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
@@ -28,7 +28,7 @@ interface Props {
 
 export function TitleGenerator({ idToken: serverIdToken }: Props) {
   const idToken = useIdToken(serverIdToken)
-  const client = api(idToken ?? null)
+  const client = useMemo(() => api(idToken ?? null), [idToken])
 
   const [engine, setEngine] = useState<"cloud" | "local">("cloud")
 
@@ -165,7 +165,11 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
         seed: localSeed,
       })
       setLocalResults(prev => prev.map((item, i) => i === idx ? result : item))
-    } catch {}
+    } catch (e) {
+      setLocalResults(prev => prev.map((item, i) =>
+        i === idx ? { ...item, error: e instanceof Error ? e.message : "Refine failed" } : item
+      ))
+    }
   }
 
   function downloadLocalImage(dataUrl: string, treatmentName: string) {
@@ -231,7 +235,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
               onChange={e => setTitleText(e.target.value)}
               onKeyDown={e => e.key === "Enter" && (engine === "cloud" ? generate() : generateLocal())}
               placeholder="Enter scene title…"
-              className="w-full px-2.5 py-1.5 rounded text-xs outline-none"
+              className="w-full px-2.5 py-1.5 rounded text-xs"
               style={{
                 background: "var(--color-surface)",
                 border: "1px solid var(--color-border)",
@@ -327,7 +331,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
                 <input
                   type="number" min={0} max={999999} value={localSeed}
                   onChange={e => setLocalSeed(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 rounded text-xs outline-none"
+                  className="w-full px-2.5 py-1.5 rounded text-xs"
                   style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
                 />
               </div>
@@ -350,7 +354,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
                     <select
                       value={selectedTreatment}
                       onChange={e => setSelectedTreatment(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded text-xs outline-none"
+                      className="w-full px-2.5 py-1.5 rounded text-xs"
                       style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)", maxHeight: 200 }}
                     >
                       <option value="">Select treatment...</option>
@@ -358,8 +362,12 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
                         <option key={t.name} value={t.name}>{t.name}{t.featured ? " ★" : ""}</option>
                       ))}
                     </select>
-                    <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 2 }}>
-                      {filteredTreatments.length} of {allTreatments.length} treatments
+                    <p style={{ fontSize: 10, color: filteredTreatments.length === 0 ? "var(--color-text-muted)" : "var(--color-text-faint)", marginTop: 2 }}>
+                      {filteredTreatments.length === 0
+                        ? allTreatments.length === 0
+                          ? "Loading treatments…"
+                          : "No treatments match — try clearing filters"
+                        : `${filteredTreatments.length} of ${allTreatments.length} treatments`}
                     </p>
                   </div>
                 </>
@@ -492,7 +500,10 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
             {localResults.map((r, i) => (
               <div key={i}>
                 {r.error ? (
-                  <ErrorAlert className="text-xs mb-1">{r.error}</ErrorAlert>
+                  <>
+                    <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginBottom: 4 }}>{r.treatment_name}</p>
+                    <ErrorAlert className="text-xs mb-1">{r.error}</ErrorAlert>
+                  </>
                 ) : (
                   <>
                     <div className="rounded overflow-hidden mb-1.5"
@@ -562,7 +573,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
                 onChange={e => setMnName(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && generateModelName()}
                 placeholder="e.g. Emma Rosie"
-                className="w-full px-2.5 py-1.5 rounded text-xs outline-none"
+                className="w-full px-2.5 py-1.5 rounded text-xs"
                 style={{
                   background: "var(--color-surface)",
                   border: "1px solid var(--color-border)",
