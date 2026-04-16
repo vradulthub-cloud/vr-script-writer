@@ -140,7 +140,7 @@ def _mega_ls_recursive(mega_path: str) -> str:
     """Run mega-ls -R and return stdout. Raises on failure."""
     cmd = [MEGA_LS, "-R", mega_path]
     result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=120,
+        cmd, capture_output=True, text=True, timeout=600,
     )
     stderr = result.stderr.strip() if result.stderr else ""
     if "Not logged in" in stderr:
@@ -174,6 +174,17 @@ def run_scan(progress_callback=None) -> dict:
     all_scenes = []
     errors = []
 
+    # Load existing scan data so we can preserve per-studio results on failure
+    prev_scenes_by_studio: dict[str, list] = {}
+    if OUTPUT_FILE.exists():
+        try:
+            with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+                prev = json.load(f)
+            for s in prev.get("scenes", []):
+                prev_scenes_by_studio.setdefault(s["studio"], []).append(s)
+        except (json.JSONDecodeError, KeyError):
+            pass
+
     for studio, mega_path in STUDIOS.items():
         if progress_callback:
             progress_callback(f"Scanning {studio}...")
@@ -182,9 +193,21 @@ def run_scan(progress_callback=None) -> dict:
         except (subprocess.TimeoutExpired, RuntimeError) as e:
             errors.append(f"{studio}: {e}")
             print(f"[WARN] {studio} scan failed: {e}", file=sys.stderr)
+            # Preserve previous data for this studio
+            if studio in prev_scenes_by_studio:
+                all_scenes.extend(prev_scenes_by_studio[studio])
+                print(f"[{studio}] Preserved {len(prev_scenes_by_studio[studio])} scenes from previous scan")
             continue
 
         scene_files = _parse_mega_ls_tree(output)
+
+        # Guard: if scan returned 0 scenes but we had data before, keep the old data
+        if not scene_files and studio in prev_scenes_by_studio and prev_scenes_by_studio[studio]:
+            errors.append(f"{studio}: scan returned 0 scenes — preserved previous data")
+            print(f"[WARN] {studio} returned 0 scenes, preserving {len(prev_scenes_by_studio[studio])} from previous scan", file=sys.stderr)
+            all_scenes.extend(prev_scenes_by_studio[studio])
+            continue
+
         print(f"[{studio}] {len(scene_files)} scenes found")
 
         for scene_id, file_paths in sorted(scene_files.items()):

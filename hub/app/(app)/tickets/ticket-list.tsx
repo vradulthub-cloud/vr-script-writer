@@ -44,10 +44,8 @@ type SortKey = "date" | "priority" | "status"
 const COLUMNS: { key: string; label: string; sort?: SortKey }[] = [
   { key: "id", label: "ID" },
   { key: "title", label: "Title" },
-  { key: "project", label: "Project" },
   { key: "priority", label: "Priority", sort: "priority" },
   { key: "status", label: "Status", sort: "status" },
-  { key: "submitted", label: "Reporter" },
   { key: "date", label: "Created", sort: "date" },
 ]
 
@@ -63,7 +61,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
   const client = useMemo(() => api(idToken ?? null), [idToken])
 
   const [tickets, setTickets] = useState<Ticket[]>(initialTickets)
-  const [statusFilter, setStatusFilter] = useState("All")
+  const [statusFilter, setStatusFilter] = useState("Active")
   const [searchQuery, setSearchQuery] = useState("")
   const [sortKey, setSortKey] = useState<SortKey>("date")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
@@ -105,8 +103,14 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
     return result
   }, [tickets])
 
+  const activeCount = useMemo(() => tickets.filter(t => t.status !== "Closed" && t.status !== "Rejected").length, [tickets])
+
   const displayTickets = useMemo(() => {
-    let result = statusFilter === "All" ? tickets : tickets.filter(t => t.status === statusFilter)
+    let result = statusFilter === "All"
+      ? tickets
+      : statusFilter === "Active"
+        ? tickets.filter(t => t.status !== "Closed" && t.status !== "Rejected")
+        : tickets.filter(t => t.status === statusFilter)
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
       result = result.filter(t =>
@@ -273,55 +277,34 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
 
   return (
     <div>
-      {/* Stat filter cards */}
+      {/* Compact filter row */}
       {!error && (
-        <div className="flex items-end justify-between mb-4 gap-3 flex-wrap">
-          <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={() => setStatusFilter("All")}
-              aria-pressed={statusFilter === "All"}
-              className="rounded px-3 py-2 transition-colors text-left"
-              style={{
-                background: statusFilter === "All" ? "var(--color-elevated)" : "var(--color-surface)",
-                border: `1px solid ${statusFilter === "All" ? "var(--color-lime)" : "var(--color-border)"}`,
-                minWidth: 56,
-              }}
-            >
-              <p className="font-bold tabular-nums" style={{ fontSize: 24, color: "var(--color-text)", lineHeight: 1, letterSpacing: "-0.02em" }}>
-                {tickets.length}
-              </p>
-              <p style={{ fontSize: 10, color: "var(--color-text-muted)", marginTop: 3, fontWeight: 500, letterSpacing: "0.04em" }}>
-                ALL
-              </p>
-            </button>
-            {STAT_CONFIGS.map(({ key, label, color }) => {
-              const count = counts[key] ?? 0
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+          <div className="flex items-center gap-1 rounded-md" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "3px" }}>
+            {([
+              { key: "Active", label: "Active", count: activeCount, color: undefined as string | undefined },
+              { key: "All",    label: "All",    count: tickets.length, color: undefined as string | undefined },
+              ...STAT_CONFIGS.filter(({ key }) => (counts[key] ?? 0) > 0).map(({ key, label, color }) => ({
+                key, label, count: counts[key] ?? 0, color: color as string | undefined,
+              })),
+            ]).map(({ key, label, count, color }) => {
               const isActive = statusFilter === key
+              const chipColor = color ?? (key === "Active" ? "var(--color-lime)" : "var(--color-text-muted)")
               return (
                 <button
                   key={key}
                   onClick={() => setStatusFilter(key)}
                   aria-pressed={isActive}
-                  className="rounded px-3 py-2 transition-colors text-left"
+                  className="rounded px-2 py-1 transition-colors"
                   style={{
-                    background: isActive
-                      ? `color-mix(in srgb, ${color} 12%, var(--color-surface))`
-                      : count > 0 ? `color-mix(in srgb, ${color} 6%, var(--color-surface))` : "var(--color-surface)",
-                    border: `1px solid ${
-                      isActive
-                        ? `color-mix(in srgb, ${color} 45%, transparent)`
-                        : count > 0 ? `color-mix(in srgb, ${color} 20%, transparent)` : "var(--color-border)"
-                    }`,
-                    minWidth: 56,
-                    opacity: count === 0 ? 0.45 : 1,
+                    fontSize: 11,
+                    fontWeight: isActive ? 600 : 400,
+                    background: isActive ? "var(--color-elevated)" : "transparent",
+                    color: isActive ? chipColor : "var(--color-text-muted)",
+                    border: "none",
                   }}
                 >
-                  <p className="font-bold tabular-nums" style={{ fontSize: 24, color, lineHeight: 1, letterSpacing: "-0.02em" }}>
-                    {count}
-                  </p>
-                  <p style={{ fontSize: 10, color: "var(--color-text-muted)", marginTop: 3, fontWeight: 500, letterSpacing: "0.04em" }}>
-                    {label}
-                  </p>
+                  {label} <span className="tabular-nums" style={{ opacity: 0.7 }}>{count}</span>
                 </button>
               )
             })}
@@ -376,11 +359,13 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
           <p style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 8 }}>
             {searchQuery.trim()
               ? `No tickets matching "${searchQuery.trim()}"`
-              : statusFilter !== "All"
-                ? `No tickets with status "${statusFilter}"`
-                : "No tickets yet"}
+              : statusFilter === "Active"
+                ? "No active tickets"
+                : statusFilter !== "All"
+                  ? `No tickets with status "${statusFilter}"`
+                  : "No tickets yet"}
           </p>
-          {statusFilter === "All" && !searchQuery.trim() && (
+          {(statusFilter === "All" || statusFilter === "Active") && !searchQuery.trim() && (
             <button
               onClick={() => setShowCreate(true)}
               className="text-xs font-medium transition-colors"
@@ -443,28 +428,14 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                           </span>
                         </span>
                       </td>
-                      <td className="px-3 py-2.5" style={{ fontSize: 12, maxWidth: 320 }}>
+                      <td className="px-3 py-2.5" style={{ fontSize: 12 }}>
                         <span className="line-clamp-1">{ticket.title}</span>
-                        {!isExpanded && ticket.description && (
-                          <span
-                            className="block line-clamp-1 mt-0.5"
-                            style={{ fontSize: 11, color: "var(--color-text-muted)" }}
-                          >
-                            {ticket.description}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5" style={{ fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
-                        {ticket.project || "—"}
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap">
                         <Badge label={ticket.priority} color={PRIORITY_COLOR[ticket.priority] ?? "var(--color-text-muted)"} />
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap">
                         <Badge label={ticket.status} color={STATUS_COLOR[ticket.status] ?? "var(--color-text-muted)"} />
-                      </td>
-                      <td className="px-3 py-2.5" style={{ fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
-                        {ticket.submitted_by || "—"}
                       </td>
                       <td className="px-3 py-2.5" style={{ fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
                         {ticket.submitted_at ? ticket.submitted_at.slice(0, 10) : "—"}
@@ -476,7 +447,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                         data-saved={flashId === ticket.ticket_id ? true : undefined}
                         style={{ borderBottom: !isLast ? "1px solid var(--color-border-subtle)" : undefined }}
                       >
-                        <td colSpan={7} className="px-3 pb-4 pt-2" style={{ background: "var(--color-surface)" }}>
+                        <td colSpan={5} className="px-3 pb-4 pt-2" style={{ background: "var(--color-surface)" }}>
                           <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
                             {/* Left: description + meta */}
                             <div style={{ flex: 1, minWidth: 0 }}>
@@ -486,9 +457,19 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                                 </p>
                               )}
                               <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                {ticket.project && (
+                                  <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                                    Project: <span style={{ color: "var(--color-text)" }}>{ticket.project}</span>
+                                  </span>
+                                )}
                                 {ticket.type && (
                                   <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
                                     Type: <span style={{ color: "var(--color-text)" }}>{ticket.type}</span>
+                                  </span>
+                                )}
+                                {ticket.submitted_by && (
+                                  <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                                    Reporter: <span style={{ color: "var(--color-text)" }}>{ticket.submitted_by}</span>
                                   </span>
                                 )}
                                 {ticket.assignee && (
