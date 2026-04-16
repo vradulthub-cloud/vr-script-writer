@@ -298,17 +298,18 @@ button[style*="color-lime"]:hover:not(:disabled) {
     font-size: 0.625rem; /* 10px */
   }
 
-  /* Tables scroll horizontally */
-  table {
-    display: block;
+  /* Tables: scroll container on parent, prevent column squishing */
+  :has(> table) {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
 
-  thead, tbody, tr {
-    display: table;
-    width: 100%;
-    table-layout: fixed;
+  table {
+    min-width: 640px;
+  }
+
+  th {
+    white-space: nowrap;
   }
 
   /* Filter tabs wrap tighter */
