@@ -285,20 +285,14 @@ async def generate_scene_title(scene_id: str, body: TitleGenerateBody, user: Cur
     user_prompt = f"Generate a title for this scene:\n\nPerformer: {female}\nTheme: {theme}\nPlot summary: {plot[:500] if plot else 'N/A'}\n\nGenerate the title now."
 
     try:
-        import anthropic
-        from api.config import get_settings
-        client = anthropic.Anthropic(api_key=get_settings().anthropic_api_key)
-        resp = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=50,
-            system=sys_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        title = resp.content[0].text.strip().strip('"').strip("'")
+        from api.ollama_client import ollama_generate
+        title = ollama_generate("title", user_prompt, system=sys_prompt, max_tokens=60, temperature=0.7)
+        # Strip quotes and take just the first line (Ollama sometimes adds explanation)
+        title = title.split("\n")[0].strip().strip('"').strip("'")
         return {"title": title}
-    except Exception as exc:
+    except RuntimeError as exc:
         _log.error("Title generation failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Title generation failed: {exc}")
+        raise HTTPException(status_code=503, detail=f"Title generation failed: {exc}")
 
 
 # ---------------------------------------------------------------------------

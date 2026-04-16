@@ -378,8 +378,8 @@ async def generate_booking_brief(
     user: CurrentUser,
     body: BriefRequest,
 ):
-    """Generate a 3-sentence AI booking brief via local Ollama (dolphin3)."""
-    import requests as _req
+    """Generate a 3-sentence AI booking brief via local Ollama."""
+    from api.ollama_client import ollama_generate
 
     ctx_lines = [f"Performer: {name}"]
     for k, v in body.context.items():
@@ -397,30 +397,10 @@ async def generate_booking_brief(
     )
 
     try:
-        r = _req.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "dolphin3:latest",
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0.4, "num_predict": 400},
-            },
-            timeout=60,
-        )
-        r.raise_for_status()
-        data = r.json()
-        text = (data.get("response") or "").strip()
-        if not text:
-            raise HTTPException(status_code=502, detail="Ollama returned empty response")
+        text = ollama_generate("brief", prompt, max_tokens=400, temperature=0.4)
         return BriefResponse(brief=text)
-    except _req.exceptions.ConnectionError:
-        raise HTTPException(status_code=503, detail="Ollama not running on localhost:11434")
-    except _req.exceptions.Timeout:
-        raise HTTPException(status_code=504, detail="Ollama request timed out")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Brief generation failed: {e}")
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 @router.get("/{name}", response_model=ModelResponse)

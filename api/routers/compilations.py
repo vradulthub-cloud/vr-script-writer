@@ -131,15 +131,12 @@ async def generate_compilation_ideas(body: IdeasRequest, user: CurrentUser):
 
     def event_stream():
         try:
-            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-            with client.messages.stream(
-                model="claude-opus-4-6",
-                max_tokens=1024,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-            ) as stream:
-                for text in stream.text_stream:
-                    yield f"data: {json.dumps({'type': 'text', 'text': text})}\n\n"
+            from api.ollama_client import ollama_stream
+            for delta in ollama_stream(
+                "comp_idea", user_prompt, system=system_prompt,
+                max_tokens=1024, temperature=0.8,
+            ):
+                yield f"data: {json.dumps({'type': 'text', 'text': delta})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
             _log.error("Compilation ideas generation failed: %s", exc, exc_info=True)
@@ -205,15 +202,12 @@ async def generate_compilation_description(body: CompGenRequest, user: CurrentUs
 
     def event_stream():
         try:
-            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-            with client.messages.stream(
-                model="claude-opus-4-6",
-                max_tokens=2048,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-            ) as stream:
-                for text in stream.text_stream:
-                    yield f"data: {json.dumps({'type': 'text', 'text': text})}\n\n"
+            from api.ollama_client import ollama_stream
+            for delta in ollama_stream(
+                "description", user_prompt, system=system_prompt,
+                max_tokens=2048, temperature=0.7,
+            ):
+                yield f"data: {json.dumps({'type': 'text', 'text': delta})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
             _log.error("Compilation description generation failed: %s", exc, exc_info=True)

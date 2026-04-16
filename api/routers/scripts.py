@@ -161,7 +161,7 @@ async def generate_script(body: ScriptGenRequest, user: CurrentUser):
 
     def event_stream():
         try:
-            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            from api.ollama_client import ollama_stream
             prompt = build_script_prompt(
                 body.studio,
                 body.scene_type,
@@ -170,15 +170,8 @@ async def generate_script(body: ScriptGenRequest, user: CurrentUser):
                 body.destination,
                 body.director_note,
             )
-            with client.messages.stream(
-                model="claude-opus-4-6",
-                max_tokens=4096,
-                system=SYSTEM_PROMPT,
-                tools=[{"type": "web_search_20260209", "name": "web_search"}],
-                messages=[{"role": "user", "content": prompt}],
-            ) as stream:
-                for text in stream.text_stream:
-                    yield f"data: {json.dumps({'type': 'text', 'text': text})}\n\n"
+            for delta in ollama_stream("script", prompt, system=SYSTEM_PROMPT, max_tokens=4096, temperature=0.8):
+                yield f"data: {json.dumps({'type': 'text', 'text': delta})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
             _log.error("Script generation failed: %s", exc, exc_info=True)
@@ -334,18 +327,13 @@ async def generate_script_title(body: TitleGenBody, user: CurrentUser):
     user_prompt = f"Generate a title:\n\nPerformer: {body.female}\nTheme: {body.theme}\nPlot: {body.plot[:500] if body.plot else 'N/A'}"
 
     try:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        resp = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=50,
-            system=sys_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        title = resp.content[0].text.strip().strip('"').strip("'")
+        from api.ollama_client import ollama_generate
+        title = ollama_generate("title", user_prompt, system=sys_prompt, max_tokens=60, temperature=0.7)
+        title = title.split("\n")[0].strip().strip('"').strip("'")
         return {"title": title}
-    except Exception as exc:
+    except RuntimeError as exc:
         _log.error("Script title generation failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Title generation failed: {exc}")
+        raise HTTPException(status_code=503, detail=f"Title generation failed: {exc}")
 
 
 # ---------------------------------------------------------------------------

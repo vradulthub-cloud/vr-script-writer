@@ -101,15 +101,15 @@ async def generate_description(body: DescGenRequest, user: CurrentUser):
 
     def event_stream():
         try:
-            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-            with client.messages.stream(
-                model="claude-opus-4-6",
-                max_tokens=2048,
+            from api.ollama_client import ollama_stream
+            for delta in ollama_stream(
+                "description",
+                user_prompt,
                 system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-            ) as stream:
-                for text in stream.text_stream:
-                    yield f"data: {json.dumps({'type': 'text', 'text': text})}\n\n"
+                max_tokens=2048,
+                temperature=0.7,
+            ):
+                yield f"data: {json.dumps({'type': 'text', 'text': delta})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
             _log.error("Description generation failed: %s", exc, exc_info=True)
@@ -151,18 +151,17 @@ async def generate_seo_tags(body: SeoGenRequest, user: CurrentUser):
     user_prompt = "\n".join(user_parts)
 
     try:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=256,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
+        from api.ollama_client import ollama_generate
+        raw = ollama_generate("seo", user_prompt, system=system_prompt, max_tokens=300, temperature=0.4)
         import json as _json
-        raw = msg.content[0].text.strip()
         # Strip any markdown fences if present
         if raw.startswith("```"):
             raw = raw.split("```")[1].lstrip("json").strip()
+        # Try to find the JSON object if there's extra text around it
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start >= 0 and end > start:
+            raw = raw[start:end + 1]
         data = _json.loads(raw)
         return {
             "meta_title": str(data.get("meta_title", ""))[:60],
@@ -170,7 +169,7 @@ async def generate_seo_tags(body: SeoGenRequest, user: CurrentUser):
         }
     except Exception as exc:
         _log.error("SEO generation failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 @router.post("/docx")
