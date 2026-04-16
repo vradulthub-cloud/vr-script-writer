@@ -81,10 +81,7 @@ export default async function DashboardPage() {
   return (
     <div style={{ maxWidth: 1080 }}>
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div
-        className="page-header"
-        style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}
-      >
+      <div className="page-header flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1>{greeting}, {firstName}</h1>
           <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginTop: 3, letterSpacing: "0.03em" }}>
@@ -116,14 +113,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* ── Stat cards ─────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
-          gap: 12,
-          marginBottom: 20,
-        }}
-      >
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         <StatCard
           label="Pending Approvals"
           value={pendingApprovals.length}
@@ -151,15 +141,15 @@ export default async function DashboardPage() {
       </div>
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, alignItems: "start" }}>
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4 items-start">
 
         {/* Left column */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="flex flex-col gap-3.5">
 
           {/* Studio breakdown */}
           {sceneStats && Object.keys(sceneStats.by_studio).length > 0 && (
             <PanelBlock label="Production Scope">
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 28px" }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-7 gap-y-2.5">
                 {Object.entries(sceneStats.by_studio)
                   .sort(([, a], [, b]) => b - a)
                   .map(([studio, count]) => {
@@ -269,7 +259,7 @@ export default async function DashboardPage() {
         </div>
 
         {/* Right column */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="flex flex-col gap-3.5">
 
           {/* Notifications — client component (needs mark-read state) */}
           <NotificationFeed
@@ -352,19 +342,14 @@ function StatCard({
   return (
     <Link
       href={href}
+      className="hover:bg-[--color-elevated] flex flex-col gap-1.5 p-3 lg:p-4"
       style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 5,
-        padding: "14px 16px",
         background: "var(--color-surface)",
         border: `1px solid ${borderColor}`,
         borderRadius: 6,
         textDecoration: "none",
         color: "inherit",
-        minHeight: 110,
       }}
-      className="hover:bg-[--color-elevated]"
     >
       <span
         style={{
@@ -378,14 +363,14 @@ function StatCard({
         {label}
       </span>
       <span
+        className="text-xl lg:text-3xl"
         style={{
-          fontSize: 30,
           fontWeight: 700,
           lineHeight: 1,
           color: valueColor,
           letterSpacing: "-0.03em",
           fontVariantNumeric: "tabular-nums",
-          marginTop: 4,
+          marginTop: 2,
         }}
       >
         {value}
@@ -394,10 +379,10 @@ function StatCard({
         <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>{context}</span>
       )}
       <span
+        className="hidden sm:flex"
         style={{
           fontSize: 10,
           color: "var(--color-text-faint)",
-          display: "flex",
           alignItems: "center",
           gap: 3,
           marginTop: "auto",
