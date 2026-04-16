@@ -15,10 +15,8 @@ export default async function MissingPage() {
   let error: string | null = null
 
   try {
-    // Fetch all scenes — covers full catalog (~759). This is a local SQLite read
-    // so it's fast enough, and it lets the UI do all filtering/sorting client-side.
     ;[scenes, stats] = await Promise.all([
-      client.scenes.list({ limit: 1000 }),
+      client.scenes.list({ limit: 40, missing_only: true }),
       client.scenes.stats(),
     ])
   } catch (e) {
