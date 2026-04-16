@@ -131,12 +131,14 @@ def extract_talents(file_paths: list[str]) -> tuple[str, str]:
     return "", ""
 
 
-def has_description_docx(file_paths: list[str]) -> bool:
-    """Check if any file path is in a Description folder and ends with .docx."""
+_DESC_EXTS = (".doc", ".docx", ".txt", ".rtf")
+
+
+def has_description(file_paths: list[str]) -> bool:
+    """Check if any file in a Description folder is a text/document type (.doc, .docx, .txt, .rtf)."""
     for p in file_paths:
         p_norm = p.replace("\\", "/")
-        # Match both "Description/file.docx" and "path/Description/file.docx"
-        if ("Description/" in p_norm or p_norm.startswith("Description/")) and p_norm.lower().endswith(".docx"):
+        if ("Description/" in p_norm or p_norm.startswith("Description/")) and p_norm.lower().endswith(_DESC_EXTS):
             return True
     return False
 
@@ -226,7 +228,7 @@ def main():
 
         for folder_name, mtime_str in in_scope:
             file_paths = scene_files.get(folder_name, [])
-            has_desc = has_description_docx(file_paths)
+            has_desc = has_description(file_paths)
             female, male = extract_talents(file_paths)
 
             # Check subfolder statuses

@@ -1,0 +1,611 @@
+"""
+Sync engine: Google Sheets → SQLite mirror.
+
+Runs on a schedule (default: every 5 minutes) and pulls changes from
+all 6 Google Sheets into the local SQLite database. This eliminates
+Sheets API latency from the hot path — all reads go to SQLite.
+
+Sync order:
+  1. Users (auth_config — needed first for permission checks)
+  2. Tickets
+  3. Notifications
+  4. Approvals
+  5. Scenes (Grail + Scripts + MEGA scan joined)
+  6. Bookings
+
+Each sync is independent — a failure in one doesn't block others.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import threading
+import time
+from datetime import datetime, timezone
+
+from api.config import get_settings
+from api.database import get_db, update_sync_meta, init_db
+from api.sheets_client import (
+    open_tickets,
+    open_grail,
+    open_scripts,
+    open_booking,
+    get_or_create_worksheet,
+    with_retry,
+    fetch_all_rows,
+)
+
+_log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Individual sync functions
+# ---------------------------------------------------------------------------
+
+def sync_users() -> int:
+    """Sync Users tab → users table."""
+    sh = open_tickets()
+    ws = get_or_create_worksheet(sh, "Users")
+    rows = fetch_all_rows(ws)
+
+    with get_db() as conn:
+        conn.execute("DELETE FROM users")
+        for row in rows:
+            if len(row) < 4 or not row[0]:
+                continue
+            conn.execute(
+                "INSERT INTO users (email, name, role, allowed_tabs) VALUES (?, ?, ?, ?)",
+                (row[0].strip(), row[1].strip(), row[2].strip(), row[3].strip() if len(row) > 3 else ""),
+            )
+
+    count = len([r for r in rows if r and r[0]])
+    update_sync_meta("users", row_count=count)
+    _log.info("Synced %d users", count)
+    return count
+
+
+def sync_tickets() -> int:
+    """Sync Tickets tab → tickets table.
+
+    Sheet columns (0-indexed, from ticket_tools.py):
+      0  Ticket ID
+      1  Date Submitted  → submitted_at
+      2  Submitted By
+      3  Project
+      4  Type
+      5  Priority
+      6  Title
+      7  Description
+      8  Status
+      9  Approved By     → approved_by (not used in DB, ignored)
+      10 Admin Notes     → notes
+      11 Assigned To     → assignee
+      12 Date Resolved   → resolved_at
+    """
+    sh = open_tickets()
+    # Tab is named "Sheet1" in the actual spreadsheet
+    ws = sh.sheet1
+    rows = fetch_all_rows(ws)
+
+    with get_db() as conn:
+        conn.execute("DELETE FROM tickets")
+        for row in rows:
+            if len(row) < 9 or not row[0]:
+                continue
+            padded = row + [""] * (13 - len(row))
+            conn.execute(
+                """INSERT INTO tickets
+                   (ticket_id, submitted_at, submitted_by, project, type,
+                    priority, title, description, status,
+                    notes, assignee, resolved_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    padded[0],   # Ticket ID
+                    padded[1],   # Date Submitted
+                    padded[2],   # Submitted By
+                    padded[3],   # Project
+                    padded[4],   # Type
+                    padded[5],   # Priority
+                    padded[6],   # Title
+                    padded[7],   # Description
+                    padded[8],   # Status
+                    padded[10],  # Admin Notes
+                    padded[11],  # Assigned To
+                    padded[12],  # Date Resolved
+                ),
+            )
+
+    count = len([r for r in rows if r and r[0]])
+    update_sync_meta("tickets", row_count=count)
+    _log.info("Synced %d tickets", count)
+    return count
+
+
+def sync_notifications() -> int:
+    """Sync Notifications tab → notifications table."""
+    sh = open_tickets()
+    ws = get_or_create_worksheet(
+        sh,
+        "Notifications",
+        headers=[
+            "ID", "Timestamp", "Recipient", "Type",
+            "Title", "Message", "Read", "Link",
+        ],
+    )
+    rows = fetch_all_rows(ws)
+
+    with get_db() as conn:
+        conn.execute("DELETE FROM notifications")
+        for row in rows:
+            if len(row) < 6 or not row[0]:
+                continue
+            padded = row + [""] * (8 - len(row))
+            read_val = 1 if padded[6].upper() == "TRUE" else 0
+            conn.execute(
+                """INSERT INTO notifications
+                   (notif_id, timestamp, recipient, type, title, message, read, link)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (padded[0], padded[1], padded[2], padded[3],
+                 padded[4], padded[5], read_val, padded[7]),
+            )
+
+    count = len([r for r in rows if r and r[0]])
+    update_sync_meta("notifications", row_count=count)
+    _log.info("Synced %d notifications", count)
+    return count
+
+
+def sync_approvals() -> int:
+    """Sync Approvals tab → approvals table."""
+    sh = open_tickets()
+    ws = get_or_create_worksheet(
+        sh,
+        "Approvals",
+        headers=[
+            "Approval ID", "Scene ID", "Studio", "Content Type",
+            "Submitted By", "Submitted At", "Status", "Decided By",
+            "Decided At", "Content JSON", "Notes", "Linked Ticket",
+            "Target Sheet", "Target Range", "Superseded By",
+        ],
+    )
+    rows = fetch_all_rows(ws)
+
+    with get_db() as conn:
+        conn.execute("DELETE FROM approvals")
+        for row in rows:
+            if len(row) < 6 or not row[0]:
+                continue
+            padded = row + [""] * (15 - len(row))
+            conn.execute(
+                """INSERT OR REPLACE INTO approvals
+                   (approval_id, scene_id, studio, content_type,
+                    submitted_by, submitted_at, status, decided_by,
+                    decided_at, content_json, notes, linked_ticket,
+                    target_sheet, target_range, superseded_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                padded[:15],
+            )
+
+    count = len([r for r in rows if r and r[0]])
+    update_sync_meta("approvals", row_count=count)
+    _log.info("Synced %d approvals", count)
+    return count
+
+
+def sync_scenes() -> int:
+    """
+    Sync Grail + Scripts + MEGA scan → scenes table.
+
+    This is the most complex sync — it joins data from three sources:
+      1. Grail sheet (4 studio tabs): scene ID, title, performers, cats, tags
+      2. Scripts sheet (monthly tabs): plot, theme, female, male, wardrobe
+      3. mega_scan.json (local file): asset status (desc, videos, thumb, photos, etc.)
+    """
+    settings = get_settings()
+
+    # --- Load Grail data ---
+    grail_sh = open_grail()
+    grail_scenes: dict[str, dict] = {}
+
+    # Grail tab name → scene ID prefix used in MEGA folders and the scenes table.
+    # NaughtyJOI's Grail tab is "NNJOI" but MEGA uses "NJOI" as the prefix.
+    TAB_TO_PREFIX = {"FPVR": "FPVR", "VRH": "VRH", "VRA": "VRA", "NNJOI": "NJOI"}
+
+    for ui_name, tab_name in settings.grail_tabs.items():
+        try:
+            ws = grail_sh.worksheet(tab_name)
+            rows = fetch_all_rows(ws)
+        except Exception as exc:
+            _log.warning("Failed to read Grail tab %s: %s", tab_name, exc)
+            continue
+
+        prefix = TAB_TO_PREFIX.get(tab_name, tab_name)
+        site_code = settings.studio_site_codes.get(ui_name, "")
+
+        for row_idx, row in enumerate(rows, start=2):  # Row 2 = first data row
+            if len(row) < 5 or not row[1]:
+                continue
+            # Grail column B holds the Scene# (just the digits). The full scene
+            # ID is <prefix><4-digit zero-padded number> to match MEGA folder
+            # names (e.g. "NJOI0003", "FPVR0042") and avoid cross-studio
+            # collisions that were wiping out whole studios.
+            raw = row[1].strip()
+            try:
+                scene_num = f"{int(raw):04d}"
+            except ValueError:
+                _log.debug("Skipping non-numeric scene# %r in %s row %d", raw, tab_name, row_idx)
+                continue
+            scene_id = f"{prefix}{scene_num}"
+            grail_scenes[scene_id] = {
+                "studio": ui_name,
+                "grail_tab": tab_name,
+                "site_code": site_code,
+                "title": row[3].strip() if len(row) > 3 else "",
+                "performers": row[4].strip() if len(row) > 4 else "",
+                "categories": row[5].strip() if len(row) > 5 else "",
+                "tags": row[6].strip() if len(row) > 6 else "",
+                "grail_row": row_idx,
+            }
+
+    # --- Load MEGA scan data ---
+    mega_path = settings.base_dir / "mega_scan.json"
+    mega_data: dict[str, dict] = {}
+    if mega_path.exists():
+        try:
+            with open(mega_path, "r") as f:
+                mega_raw = json.load(f)
+            # mega_scan.json structure: {"scenes": [{scene_id: "VRH0758", ...}, ...]}
+            scenes_list = mega_raw.get("scenes", [])
+            if isinstance(scenes_list, list):
+                mega_data = {s["scene_id"]: s for s in scenes_list if "scene_id" in s}
+            elif isinstance(scenes_list, dict):
+                mega_data = scenes_list
+        except Exception as exc:
+            _log.warning("Failed to read mega_scan.json: %s", exc)
+
+    # --- Merge into scenes table ---
+    with get_db() as conn:
+        conn.execute("DELETE FROM scenes")
+        for scene_id, grail in grail_scenes.items():
+            mega = mega_data.get(scene_id, {})
+            is_comp = 1 if any(
+                kw in grail.get("title", "").lower()
+                for kw in ("vol.", "best", "compilation")
+            ) else 0
+            # Pull the first thumbnail filename (e.g. "FPVR0282-..._Thumbnail.jpg")
+            # so the /scenes/{id}/thumbnail proxy endpoint can find the file
+            # in MEGA without re-reading mega_scan.json on every request.
+            thumb_files = mega.get("files", {}).get("thumbnail", [])
+            thumb_file = ""
+            if thumb_files:
+                # Paths in the scan are relative: "Video Thumbnail/xxx.jpg"
+                first = thumb_files[0]
+                thumb_file = first.split("/", 1)[1] if "/" in first else first
+            conn.execute(
+                """INSERT INTO scenes
+                   (id, studio, grail_tab, site_code, title, performers,
+                    categories, tags, grail_row,
+                    has_description, has_videos, video_count,
+                    has_thumbnail, has_photos, has_storyboard,
+                    storyboard_count, mega_path, thumb_file, is_compilation)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    scene_id,
+                    grail["studio"],
+                    grail["grail_tab"],
+                    grail["site_code"],
+                    grail["title"],
+                    grail["performers"],
+                    grail["categories"],
+                    grail["tags"],
+                    grail["grail_row"],
+                    1 if mega.get("has_description") else 0,
+                    1 if mega.get("has_videos") else 0,
+                    mega.get("video_count", 0),
+                    1 if mega.get("has_thumbnail") else 0,
+                    1 if mega.get("has_photos") else 0,
+                    1 if mega.get("has_storyboard") else 0,
+                    mega.get("storyboard_count", 0),
+                    mega.get("path", ""),
+                    thumb_file,
+                    is_comp,
+                ),
+            )
+
+    count = len(grail_scenes)
+    update_sync_meta("scenes", row_count=count)
+    _log.info("Synced %d scenes (Grail + MEGA)", count)
+    return count
+
+
+def sync_scripts() -> int:
+    """
+    Sync Scripts sheet (monthly tabs) → scripts table.
+
+    Processes current month + last 2 months. Each tab is fully replaced
+    on sync to keep data fresh without accumulating stale rows.
+
+    Sheet columns (0-indexed):
+      A=0 Date, B=1 Studio, C=2 Location, D=3 Scene, E=4 Female,
+      F=5 Male, G=6 Theme, H=7 WardrobeF, I=8 WardrobeM,
+      J=9 Plot, K=10 Title, L=11 Props, M=12 Status
+    """
+    import re
+    from calendar import month_name
+
+    sh = open_scripts()
+    all_titles = [ws.title for ws in sh.worksheets()]
+
+    # Filter to tabs matching "Month YYYY" pattern
+    month_pattern = re.compile(
+        r"^(" + "|".join(month_name[1:]) + r")\s+\d{4}$",
+        re.IGNORECASE,
+    )
+    valid_tabs = [t for t in all_titles if month_pattern.match(t)]
+
+    if not valid_tabs:
+        _log.warning("sync_scripts: no monthly tabs found in Scripts sheet")
+        update_sync_meta("scripts", row_count=0)
+        return 0
+
+    # Sort tabs by date (most recent first), take current + last 2
+    def _tab_sort_key(tab_name: str):
+        parts = tab_name.rsplit(" ", 1)
+        try:
+            month_idx = list(month_name).index(parts[0].capitalize())
+            year = int(parts[1])
+            return (year, month_idx)
+        except (ValueError, IndexError):
+            return (0, 0)
+
+    # Sort all tabs by date, filter to those <= current month (exclude future placeholders)
+    now_dt = datetime.now(timezone.utc)
+    def _is_past_or_current(tab_name: str) -> bool:
+        parts = tab_name.rsplit(" ", 1)
+        try:
+            month_idx = list(month_name).index(parts[0].capitalize())
+            year = int(parts[1])
+            return (year, month_idx) <= (now_dt.year, now_dt.month)
+        except (ValueError, IndexError):
+            return False
+
+    past_tabs = [t for t in valid_tabs if _is_past_or_current(t)]
+    sorted_tabs = sorted(past_tabs, key=_tab_sort_key, reverse=True)
+    tabs_to_sync = sorted_tabs[:3]  # current + last 2
+
+    now = datetime.now(timezone.utc).isoformat()
+    total_count = 0
+
+    for tab_name in tabs_to_sync:
+        try:
+            ws = sh.worksheet(tab_name)
+            rows = fetch_all_rows(ws)
+        except Exception as exc:
+            _log.warning("sync_scripts: failed to read tab %s: %s", tab_name, exc)
+            continue
+
+        with get_db() as conn:
+            # Delete existing rows for this tab before re-inserting
+            conn.execute("DELETE FROM scripts WHERE tab_name = ?", (tab_name,))
+
+            for row_idx, row in enumerate(rows, start=2):  # Row 2 = first data row
+                # Skip rows where studio column (index 1) is empty
+                if len(row) < 2 or not row[1].strip():
+                    continue
+
+                padded = row + [""] * (13 - len(row))
+                conn.execute(
+                    """INSERT INTO scripts
+                       (tab_name, sheet_row, studio, shoot_date, location,
+                        scene_type, female, male, theme, wardrobe_f,
+                        wardrobe_m, plot, title, props, script_status, synced_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        tab_name,
+                        row_idx,
+                        padded[1].strip(),   # Studio
+                        padded[0].strip(),   # Date
+                        padded[2].strip(),   # Location
+                        padded[3].strip(),   # Scene type
+                        padded[4].strip(),   # Female
+                        padded[5].strip(),   # Male
+                        padded[6].strip(),   # Theme
+                        padded[7].strip(),   # WardrobeF
+                        padded[8].strip(),   # WardrobeM
+                        padded[9].strip(),   # Plot
+                        padded[10].strip(),  # Title
+                        padded[11].strip(),  # Props
+                        padded[12].strip(),  # Status
+                        now,
+                    ),
+                )
+                total_count += 1
+
+        _log.info("sync_scripts: synced tab %s (%d rows)", tab_name, total_count)
+
+    update_sync_meta("scripts", row_count=total_count)
+    _log.info("Synced %d script rows across %d tabs", total_count, len(tabs_to_sync))
+    return total_count
+
+
+def sync_bookings() -> int:
+    """Sync Booking sheet → bookings table.
+
+    The Booking spreadsheet has one tab per agency after three utility tabs
+    (📋 Legend, 🔍 Search, 📊 Dashboard).  Each agency tab has:
+      Row 1  — agency name in col A
+      Row 2  — website / link row (first http URL becomes agency_link)
+      Row 3  — column headers: Name, Age, Last Booked Date, Bookings, Location, AVG Rate, Rank, …, Notes, …
+      Row 4+ — model data rows
+    """
+    sh = open_booking()
+
+    # The three non-agency utility tabs always carry these exact names.
+    SKIP_TABS = {"📋 Legend", "🔍 Search", "📊 Dashboard"}
+    agency_tabs = [ws for ws in sh.worksheets() if ws.title not in SKIP_TABS]
+
+    total_count = 0
+
+    with get_db() as conn:
+        conn.execute("DELETE FROM bookings")
+
+        for ws in agency_tabs:
+            agency_name = ws.title
+            try:
+                # include_header=True so we see all rows (agency header + website + col headers + data)
+                all_rows = fetch_all_rows(ws, include_header=True)
+            except Exception as exc:
+                _log.warning("sync_bookings: failed to read tab %s: %s", agency_name, exc)
+                continue
+
+            if len(all_rows) < 4:
+                continue
+
+            # Row index 1 = website/link row — scan for first http URL
+            agency_link = ""
+            for cell in (all_rows[1] if len(all_rows) > 1 else []):
+                if cell.strip().startswith("http"):
+                    agency_link = cell.strip()
+                    break
+
+            # Row index 2 = column headers — build header → index map
+            header_row = all_rows[2] if len(all_rows) > 2 else []
+            col_map = {h.strip().lower(): i for i, h in enumerate(header_row) if h.strip()}
+
+            def _get(row: list, *keys: str) -> str:
+                """Return first non-empty value from the given header keys (case-insensitive)."""
+                for key in keys:
+                    idx = col_map.get(key)
+                    if idx is not None and idx < len(row):
+                        v = row[idx].strip()
+                        if v:
+                            return v
+                return ""
+
+            # Row index 3+ = model data
+            for row in all_rows[3:]:
+                if not row or not row[0].strip():
+                    continue
+                name = row[0].strip()
+                if name.lower() in ("name", "model", "performer"):
+                    continue
+
+                rate = _get(row, "avg rate", "rate")
+                rank = _get(row, "rank")
+                notes = _get(row, "notes", "available for")
+
+                # Operational metadata → compact info string
+                age           = _get(row, "age")
+                last_booked   = _get(row, "last booked date", "last booked")
+                bookings_cnt  = _get(row, "bookings")
+                location      = _get(row, "location")
+                parts = []
+                if age:          parts.append(f"Age: {age}")
+                if last_booked:  parts.append(f"Last booked: {last_booked}")
+                if bookings_cnt: parts.append(f"Bookings: {bookings_cnt}")
+                if location:     parts.append(f"Location: {location}")
+                info = " · ".join(parts)
+
+                # Store all sheet columns as a header-keyed dict so the API
+                # can expose platform stats (SLR/VRP followers, etc.) without re-syncing.
+                row_dict = {
+                    header_row[i].strip().lower(): row[i].strip()
+                    for i in range(min(len(header_row), len(row)))
+                    if i < len(header_row) and header_row[i].strip()
+                    and i < len(row) and row[i].strip()
+                }
+
+                conn.execute(
+                    """INSERT INTO bookings (name, agency, agency_link, rate, rank, notes, info, raw_json)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (name, agency_name, agency_link, rate, rank, notes, info, json.dumps(row_dict)),
+                )
+                total_count += 1
+
+    update_sync_meta("bookings", row_count=total_count)
+    _log.info("Synced %d bookings from %d agency tabs", total_count, len(agency_tabs))
+    return total_count
+
+
+# ---------------------------------------------------------------------------
+# Full sync — runs all individual syncs
+# ---------------------------------------------------------------------------
+
+def run_full_sync() -> dict[str, int | str]:
+    """
+    Run a full sync of all data sources.
+
+    Returns a dict with source names → row counts (or error strings).
+    Each sync is independent — a failure in one doesn't block others.
+    """
+    results: dict[str, int | str] = {}
+
+    syncs = [
+        ("users", sync_users),
+        ("tickets", sync_tickets),
+        ("notifications", sync_notifications),
+        ("approvals", sync_approvals),
+        ("scenes", sync_scenes),
+        ("scripts", sync_scripts),
+        ("bookings", sync_bookings),
+    ]
+
+    for name, func in syncs:
+        try:
+            count = func()
+            results[name] = count
+        except Exception as exc:
+            _log.error("Sync failed for %s: %s", name, exc, exc_info=True)
+            results[name] = f"ERROR: {exc}"
+            update_sync_meta(name, status="error", error=str(exc))
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Background sync thread
+# ---------------------------------------------------------------------------
+
+_sync_thread: threading.Thread | None = None
+_sync_stop_event = threading.Event()
+
+
+def start_sync_loop() -> None:
+    """Start the background sync loop (runs every N seconds)."""
+    global _sync_thread
+
+    if _sync_thread and _sync_thread.is_alive():
+        _log.warning("Sync loop already running")
+        return
+
+    settings = get_settings()
+    interval = settings.sheets_sync_interval_seconds
+
+    def _loop():
+        _log.info("Sync loop started (interval=%ds)", interval)
+        # Initial sync on startup
+        init_db()
+        run_full_sync()
+
+        while not _sync_stop_event.is_set():
+            _sync_stop_event.wait(interval)
+            if not _sync_stop_event.is_set():
+                try:
+                    run_full_sync()
+                except Exception as exc:
+                    _log.error("Sync loop error: %s", exc, exc_info=True)
+
+        _log.info("Sync loop stopped")
+
+    _sync_stop_event.clear()
+    _sync_thread = threading.Thread(target=_loop, daemon=True, name="sheets-sync")
+    _sync_thread.start()
+
+
+def stop_sync_loop() -> None:
+    """Stop the background sync loop."""
+    _sync_stop_event.set()
+    if _sync_thread:
+        _sync_thread.join(timeout=5)

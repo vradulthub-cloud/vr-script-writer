@@ -211,7 +211,10 @@ Respond with ONLY the two titles separated by a newline — no quotes, no explan
 
 def _generate_title(studio, female, theme, plot, description=""):
     """Generate a scene title using Claude based on script content."""
-    _claude_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    try:
+        _claude_key = st.secrets.get("ANTHROPIC_API_KEY", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+    except Exception:
+        _claude_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not _claude_key:
         return None
 
@@ -355,7 +358,7 @@ _C = hub_ui.COLORS  # shorthand for inline style references
 # ── Globally cached data loaders (shared across all sessions) ────────────────
 # Data loads once, serves everyone for 30 min. Refresh button clears on demand.
 
-@st.cache_data(ttl=1800, show_spinner="Loading asset data...")
+@st.cache_data(ttl=3600, show_spinner="Loading asset data...")
 def _cached_load_assets(_studios_tuple, limit):
     import asset_tracker as _at_inner
     studios = list(_studios_tuple) if _studios_tuple else None
@@ -4356,8 +4359,8 @@ with tab_tickets:
 
             # Load asset data — always needed for both grid and detail
             _at_studio = st.session_state.get("at_studio", "All")
-            _at_show = st.session_state.get("at_show", "All")
-            _at_limit = 6
+            _at_show = st.session_state.get("at_show", "Missing Only")
+            _at_limit = 3
             _at_studios_tuple = None if _at_studio == "All" else tuple([_at_studio])
             _asset_data = _cached_load_assets(_at_studios_tuple, _at_limit)
             _scan_date = _asset_data.get("_meta", {}).get("scan_date", "")
@@ -4385,52 +4388,33 @@ with tab_tickets:
                         "Studio", ["All", "FPVR", "VRH", "VRA", "NNJOI"], key="at_studio")
                 with _at_f2:
                     st.selectbox(
-                        "Show", ["All", "Missing Only", "Complete"], key="at_show")
+                        "Show", ["Missing Only", "All", "Complete"], key="at_show")
 
-                if st.button("Refresh", key="at_refresh"):
+                if st.button("🔄 Refresh MEGA", key="at_refresh"):
+                    try:
+                        import mega_scan_worker as _msw
+                        with st.status("Scanning MEGA folders…", expanded=True) as _scan_status:
+                            _msw.run_scan(progress_callback=lambda m: _scan_status.update(label=m))
+                            _scan_status.update(label="Scan complete", state="complete")
+                    except Exception as _scan_err:
+                        st.error(f"MEGA scan failed: {_scan_err}")
                     _at.bust_caches()
                     _cached_load_assets.clear()
+                    st.session_state.pop("scan_data", None)
                     st.rerun()
 
                 _at_total = len(_at_scenes)
                 _at_complete = sum(1 for s in _at_scenes if s["completed"] == s["total"])
                 _at_partial = _at_total - _at_complete
-                _m1, _m2, _m3 = st.columns(3)
-                _m1.metric("Total Scenes", _at_total)
-                _m2.metric("Complete", _at_complete)
-                _m3.metric("In Progress", _at_partial)
+                _summary_parts = []
+                if _at_partial:
+                    _summary_parts.append(f"{_at_partial} in progress")
+                if _at_complete:
+                    _summary_parts.append(f"{_at_complete} complete")
                 if _scan_date:
-                    st.caption(f"MEGA scan: {_scan_date}")
-
-                _issue_scenes = [s for s in _at_scenes if s["completed"] < s["total"]]
-                if _issue_scenes:
-                    _issue_scenes.sort(key=lambda s: len(s["missing"]), reverse=True)
-                    with st.expander(f"Scenes with Issues ({len(_issue_scenes)})", expanded=False):
-                        for _is in _issue_scenes:
-                            _is_color = _studio_colors.get(_is["studio"], _C["muted"])
-                            _is_missing_pills = " ".join(
-                                f"<span style='display:inline-block;font-size:0.65rem;padding:1px 6px;"
-                                f"border-radius:3px;background:{_C['red_dim']};color:{_C['red']}'>{m}</span>"
-                                for m in _is["missing"]
-                            )
-                            _ic1, _ic2 = st.columns([3, 1])
-                            with _ic1:
-                                st.markdown(
-                                    f"<div style='display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap'>"
-                                    f"<span style='width:3px;height:16px;border-radius:2px;"
-                                    f"background:{_is_color};display:inline-block'></span>"
-                                    f"<span style='font-family:DM Mono,monospace;font-size:0.78rem;"
-                                    f"font-weight:600;color:{_C['text']}'>{_is['scene_id']}</span>"
-                                    f"{_is_missing_pills}"
-                                    f"</div>",
-                                    unsafe_allow_html=True,
-                                )
-                            with _ic2:
-                                if st.button("View", key=f"issue_{_is['scene_id']}", width="stretch"):
-                                    st.session_state["at_selected"] = _is["scene_id"]
-                                    st.rerun()
-
-                st.divider()
+                    _summary_parts.append(f"MEGA scan {_scan_date}")
+                if _summary_parts:
+                    st.caption("  ·  ".join(_summary_parts))
 
             # ── Detail view (selected scene) ─────────────────────────────────
             _selected_scene = next((s for s in _at_scenes if s["scene_id"] == _selected_scene_id), None) if _selected_scene_id else None
@@ -4515,16 +4499,18 @@ with tab_tickets:
                 _editing_title = st.session_state.get("at_editing_title", False)
 
                 if _editing_title and _user_can_write_grail:
+                    _edit_default = st.session_state.pop("at_generated_title", None) or _cur_title
                     _new_title = st.text_input(
-                        "Title", value=_cur_title, key="at_title_input",
+                        "Title", value=_edit_default, key="at_title_input",
                         placeholder="Enter scene title")
-                    _tc1, _tc2 = st.columns(2)
+                    _tc1, _tc2, _tc3 = st.columns(3)
                     with _tc1:
                         if st.button("Save Title", key="at_title_save", width="stretch"):
                             if _new_title.strip() and _grail_tab and _grail_row:
                                 _ok_t, _msg_t = _write_grail_cell(_grail_tab, _grail_row, 4, _new_title.strip())
                                 if _ok_t:
                                     st.session_state.pop("at_editing_title", None)
+                                    st.session_state.pop("at_generated_title", None)
                                     _cached_load_assets.clear()
                                     st.rerun()
                                 else:
@@ -4532,8 +4518,23 @@ with tab_tickets:
                             else:
                                 st.warning("Title cannot be empty.")
                     with _tc2:
+                        if st.button("Regenerate", key="at_title_regen", width="stretch"):
+                            with st.spinner("Generating..."):
+                                _gen = _generate_title(
+                                    _sc.get("studio_name", "VRHush"),
+                                    _sc.get("female", ""),
+                                    _sc.get("theme", ""),
+                                    _sc.get("plot_preview", ""))
+                                if _gen:
+                                    st.session_state["at_generated_title"] = _gen
+                                    st.session_state["at_title_input"] = _gen
+                                    st.rerun()
+                                else:
+                                    st.error("Title generation failed. Check API key.")
+                    with _tc3:
                         if st.button("Cancel", key="at_title_cancel", width="stretch"):
                             st.session_state.pop("at_editing_title", None)
+                            st.session_state.pop("at_generated_title", None)
                             st.rerun()
                 else:
                     _title_icon = f"<span style='color:{_C['green']}'>&#10003;</span>" if _cur_title else f"<span style='color:{_C['red']}'>&#10007;</span>"
@@ -4544,12 +4545,30 @@ with tab_tickets:
                         unsafe_allow_html=True,
                     )
                     if _user_can_write_grail:
-                        _title_btn_label = "Edit Title" if _cur_title else "Add Title"
-                        if st.button(_title_btn_label, key="at_title_edit"):
-                            st.session_state["at_editing_title"] = True
-                            st.session_state.pop("at_editing_cats", None)
-                            st.session_state.pop("at_editing_tags", None)
-                            st.rerun()
+                        _tb1, _tb2 = st.columns(2)
+                        with _tb1:
+                            _title_btn_label = "Edit Title" if _cur_title else "Add Title"
+                            if st.button(_title_btn_label, key="at_title_edit", width="stretch"):
+                                st.session_state["at_editing_title"] = True
+                                st.session_state.pop("at_editing_cats", None)
+                                st.session_state.pop("at_editing_tags", None)
+                                st.rerun()
+                        with _tb2:
+                            if st.button("AI Generate Title", key="at_gen_title", width="stretch"):
+                                with st.spinner("Generating title..."):
+                                    _gen = _generate_title(
+                                        _sc.get("studio_name", "VRHush"),
+                                        _sc.get("female", ""),
+                                        _sc.get("theme", ""),
+                                        _sc.get("plot_preview", ""))
+                                    if _gen:
+                                        st.session_state["at_generated_title"] = _gen
+                                        st.session_state["at_editing_title"] = True
+                                        st.session_state.pop("at_editing_cats", None)
+                                        st.session_state.pop("at_editing_tags", None)
+                                        st.rerun()
+                                    else:
+                                        st.error("Title generation failed. Check API key.")
 
                 # — Categories —
                 hub_ui.section("Categories")
@@ -4622,6 +4641,7 @@ with tab_tickets:
                                 st.session_state["at_cats_prefill"] = ""
                             st.session_state["at_editing_cats"] = True
                             st.session_state.pop("at_editing_title", None)
+                            st.session_state.pop("at_generated_title", None)
                             st.session_state.pop("at_editing_tags", None)
                             st.rerun()
 
@@ -4683,6 +4703,7 @@ with tab_tickets:
                                 st.session_state["at_tags_prefill"] = ""
                             st.session_state["at_editing_tags"] = True
                             st.session_state.pop("at_editing_title", None)
+                            st.session_state.pop("at_generated_title", None)
                             st.session_state.pop("at_editing_cats", None)
                             st.rerun()
 
@@ -4833,85 +4854,73 @@ with tab_tickets:
                     }
                     st.rerun()
 
-            # ── Grid view grouped by studio ──────────────────────────────────
+            # ── Flat list (date-sorted, most recent first) ────────────────────
             else:
                 if not _at_scenes:
                     st.info("No scenes found matching your filters.")
                 else:
-                    _studio_names = {"FPVR": "FuckPassVR", "VRH": "VRHush", "VRA": "VRAllure", "NNJOI": "NaughtyJOI"}
-                    for _grp_studio in _at_studios:
-                        _grp_scenes = _at_by_studio.get(_grp_studio, [])
-                        if not _grp_scenes:
-                            continue
-                        _s_color = _studio_colors.get(_grp_studio, _C["muted"])
+                    _sorted_scenes = sorted(
+                        _at_scenes,
+                        key=lambda s: s.get("release_date", "") or "",
+                        reverse=True,
+                    )
+                    for _scene in _sorted_scenes:
+                        _sc_color = _studio_colors.get(_scene["studio"], _C["muted"])
+                        _pct = int((_scene["completed"] / _scene["total"]) * 100) if _scene["total"] else 0
+                        _pct_color = _C["green"] if _pct == 100 else (_C["amber"] if _pct >= 50 else _C["red"])
+
+                        _missing_names = _scene.get("missing", [])
+                        if _missing_names:
+                            _checks_html = " ".join(
+                                f"<span style='display:inline-block;font-size:0.62rem;padding:1px 5px;"
+                                f"border-radius:3px;background:{_C['red_dim']};color:{_C['red']}'>{m}</span>"
+                                for m in _missing_names
+                            )
+                        else:
+                            _checks_html = (
+                                f"<span style='font-size:0.72rem;color:{_C['green']}'>"
+                                f"&#10003; All assets complete</span>"
+                            )
+
+                        _sid = _scene["scene_id"]
+                        _perf_display = _scene["performers"] or "TBD"
+                        _title_display = _scene["title"][:40] + "..." if len(_scene.get("title", "")) > 40 else (_scene.get("title") or "\u2014")
+                        _date_display = _scene.get("release_date", "")[:10] or ""
+                        _card_comp = (
+                            f"<span style='font-size:0.6rem;background:{_C['accent']};color:#fff;"
+                            f"padding:1px 6px;border-radius:3px;margin-left:6px;font-family:inherit'>COMP</span>"
+                        ) if _scene.get("is_compilation") else ""
+                        _date_html = f"<span style='font-size:0.68rem;color:{_C['subtle']}'>{_date_display}</span>" if _date_display else ""
+                        _completed = _scene["completed"]
+                        _total_assets = _scene["total"]
                         st.markdown(
-                            f"<div style='display:flex;align-items:center;gap:10px;margin:16px 0 8px'>"
-                            f"<div style='width:4px;height:20px;border-radius:2px;background:{_s_color}'></div>"
-                            f"<span style='font-family:Syne,sans-serif;font-size:1rem;font-weight:700;"
-                            f"color:{_C['text']}'>{_studio_names.get(_grp_studio, _grp_studio)}</span>"
-                            f"<span style='font-size:0.72rem;color:{_C['muted']}'>{len(_grp_scenes)} scenes</span>"
+                            f"<div style='background:{_C['surface']};border:1px solid {_C['border']};"
+                            f"border-left:3px solid {_sc_color};border-radius:8px;padding:14px 16px;"
+                            f"margin-bottom:6px'>"
+                            f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>"
+                            f"<span style='font-family:DM Mono,monospace;font-size:0.82rem;font-weight:600;"
+                            f"color:{_C['text']}'>{_sid}{_card_comp}</span>"
+                            f"{_date_html}"
+                            f"</div>"
+                            f"<div style='font-size:0.82rem;color:{_C['text']};font-weight:500;"
+                            f"margin-bottom:2px'>{_perf_display}</div>"
+                            f"<div style='font-size:0.72rem;color:{_C['muted']};margin-bottom:8px;"
+                            f"font-style:italic'>{_title_display}</div>"
+                            f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:6px'>"
+                            f"<div style='flex:1;height:4px;background:{_C['elevated']};border-radius:2px;overflow:hidden'>"
+                            f"<div style='width:{_pct}%;height:100%;background:{_pct_color};border-radius:2px'></div>"
+                            f"</div>"
+                            f"<span style='font-size:0.68rem;font-weight:600;color:{_pct_color}'>"
+                            f"{_completed}/{_total_assets}</span>"
+                            f"</div>"
+                            f"<div style='display:flex;flex-wrap:wrap;gap:3px'>"
+                            f"{_checks_html}</div>"
                             f"</div>",
                             unsafe_allow_html=True,
                         )
-                        for _ri in range(0, len(_grp_scenes), 3):
-                            _row_scenes = _grp_scenes[_ri:_ri + 3]
-                            _cols = st.columns(3)
-                            for _ci, _scene in enumerate(_row_scenes):
-                                with _cols[_ci]:
-                                    _pct = int((_scene["completed"] / _scene["total"]) * 100) if _scene["total"] else 0
-                                    _pct_color = _C["green"] if _pct == 100 else (_C["amber"] if _pct >= 50 else _C["red"])
-
-                                    _missing_names = _scene.get("missing", [])
-                                    if _missing_names:
-                                        _checks_html = " ".join(
-                                            f"<span style='display:inline-block;font-size:0.62rem;padding:1px 5px;"
-                                            f"border-radius:3px;background:{_C['red_dim']};color:{_C['red']}'>{m}</span>"
-                                            for m in _missing_names
-                                        )
-                                    else:
-                                        _checks_html = (
-                                            f"<span style='font-size:0.72rem;color:{_C['green']}'>"
-                                            f"&#10003; All assets complete</span>"
-                                        )
-
-                                    _perf_display = _scene["performers"] or "TBD"
-                                    _title_display = _scene["title"][:40] + "..." if len(_scene.get("title", "")) > 40 else (_scene.get("title") or "\u2014")
-                                    _date_display = _scene.get("release_date", "")[:10] or ""
-                                    _card_comp = (
-                                        f"<span style='font-size:0.6rem;background:{_C['accent']};color:#fff;"
-                                        f"padding:1px 6px;border-radius:3px;margin-left:6px;font-family:inherit'>COMP</span>"
-                                    ) if _scene.get("is_compilation") else ""
-
-                                    _date_html = f"<span style='font-size:0.68rem;color:{_C['subtle']}'>{_date_display}</span>" if _date_display else ""
-                                    st.markdown(
-                                        f"<div style='background:{_C['surface']};border:1px solid {_C['border']};"
-                                        f"border-left:3px solid {_s_color};border-radius:8px;padding:14px 16px;"
-                                        f"min-height:200px;display:flex;flex-direction:column'>"
-                                        f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>"
-                                        f"<span style='font-family:DM Mono,monospace;font-size:0.82rem;font-weight:600;"
-                                        f"color:{_C['text']}'>{_scene['scene_id']}{_card_comp}</span>"
-                                        f"{_date_html}"
-                                        f"</div>"
-                                        f"<div style='font-size:0.82rem;color:{_C['text']};font-weight:500;"
-                                        f"margin-bottom:2px;overflow:hidden;display:-webkit-box;"
-                                        f"-webkit-line-clamp:2;-webkit-box-orient:vertical'>{_perf_display}</div>"
-                                        f"<div style='font-size:0.72rem;color:{_C['muted']};margin-bottom:auto;"
-                                        f"font-style:italic'>{_title_display}</div>"
-                                        f"<div style='display:flex;align-items:center;gap:8px;margin:8px 0 6px'>"
-                                        f"<div style='flex:1;height:6px;background:{_C['elevated']};border-radius:3px;overflow:hidden'>"
-                                        f"<div style='width:{_pct}%;height:100%;background:{_pct_color};border-radius:3px'></div>"
-                                        f"</div>"
-                                        f"<span style='font-size:0.72rem;font-weight:600;color:{_pct_color}'>"
-                                        f"{_scene['completed']}/{_scene['total']}</span>"
-                                        f"</div>"
-                                        f"<div style='display:flex;flex-wrap:wrap;gap:3px'>"
-                                        f"{_checks_html}</div>"
-                                        f"</div>",
-                                        unsafe_allow_html=True,
-                                    )
-                                    if st.button("Open", key=f"at_open_{_scene['scene_id']}", width="stretch"):
-                                        st.session_state["at_selected"] = _scene["scene_id"]
-                                        st.rerun()
+                        if st.button("Open", key=f"at_open_{_sid}", width="stretch"):
+                            st.session_state["at_selected"] = _sid
+                            st.rerun()
 
         # ── SUB-VIEW 2: Approvals ────────────────────────────────────────────────
         elif _tk_mode == _apr_label:

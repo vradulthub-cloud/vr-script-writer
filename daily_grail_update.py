@@ -754,6 +754,11 @@ def generate_title(studio: str, female: str, theme: str, plot: str) -> str:
             messages=[{"role": "user", "content": user_msg}]
         )
         title = resp.content[0].text.strip().strip('"').strip("'")
+        # Reject responses that look like prices, numbers, or non-titles
+        import re as _re
+        if _re.search(r'^\$[\d,]+(\.\d+)?$', title) or _re.search(r'^\d', title):
+            log.warning(f"  Title generation returned non-title value '{title}' — discarding")
+            return ""
         log.info(f"  Generated title: '{title}' for {studio}/{female}")
         return title
     except Exception as e:

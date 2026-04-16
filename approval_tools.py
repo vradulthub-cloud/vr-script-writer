@@ -47,67 +47,113 @@ HEADERS = [
     "Target Sheet", "Version",
 ]
 
-# ── Sheet client (reuse ticket_tools pattern) ────────────────────────────────
+# ── Sheet client + worksheet (both cached 30 min) ────────────────────────────
 _cached_client = None
 _cached_at = 0
+_cached_ws = None
+_cached_ws_at = 0
+
+# ── Approvals data cache (5 min TTL) ─────────────────────────────────────────
+_approvals_cache = None
+_approvals_cached_at = 0.0
+
+
+def _with_retry(fn, max_retries=3):
+    """Call fn(), retrying up to max_retries times on 429 rate-limit errors."""
+    delay = 2
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except gspread.exceptions.APIError as e:
+            if "429" in str(e) and attempt < max_retries - 1:
+                time.sleep(delay)
+                delay *= 2
+            else:
+                raise
 
 
 def _get_client():
-    global _cached_client, _cached_at
+    global _cached_client, _cached_at, _cached_ws, _cached_ws_at
     now = time.time()
     if _cached_client and (now - _cached_at) < 1800:
         return _cached_client
     creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
     _cached_client = gspread.authorize(creds)
     _cached_at = now
+    # Invalidate worksheet cache when client refreshes
+    _cached_ws = None
+    _cached_ws_at = 0
     return _cached_client
 
 
 def _get_worksheet():
-    """Get the Approvals worksheet, creating it + headers if needed."""
+    """Get the Approvals worksheet (cached 30 min). Header init runs only on cache miss."""
+    global _cached_ws, _cached_ws_at
+    now = time.time()
+    if _cached_ws and (now - _cached_ws_at) < 1800:
+        return _cached_ws
     gc = _get_client()
-    sh = gc.open_by_key(SHEET_ID)
+    sh = _with_retry(lambda: gc.open_by_key(SHEET_ID))
     try:
         ws = sh.worksheet(TAB_NAME)
     except gspread.exceptions.WorksheetNotFound:
         ws = sh.add_worksheet(title=TAB_NAME, rows=500, cols=15)
-    first_row = ws.row_values(1)
+    # One-time header initialization (only on cache miss, not every read)
+    first_row = _with_retry(lambda: ws.row_values(1))
     if not first_row or first_row[0] != "Approval ID":
         ws.update("A1:O1", [HEADERS])
         ws.format("A1:O1", {"textFormat": {"bold": True}})
         ws.freeze(rows=1)
-    return ws
+    _cached_ws = ws
+    _cached_ws_at = now
+    return _cached_ws
 
 
 # ── Read operations ──────────────────────────────────────────────────────────
 
+def _bust_approvals_cache():
+    global _approvals_cache
+    _approvals_cache = None
+
+
 def load_approvals(status_filter=None):
     """Load all approval items. Optionally filter by status."""
-    ws = _get_worksheet()
-    rows = ws.get_all_values()
-    if len(rows) <= 1:
-        return []
+    global _approvals_cache, _approvals_cached_at
+    now = time.time()
+    if _approvals_cache is not None and (now - _approvals_cached_at) < 300:
+        all_items = _approvals_cache
+    else:
+        ws = _get_worksheet()
+        rows = _with_retry(lambda: ws.get_all_values())
+        if len(rows) <= 1:
+            _approvals_cache = []
+            _approvals_cached_at = now
+            return []
+        all_items = []
+        for i, row in enumerate(rows[1:], start=2):
+            row = row + [""] * (15 - len(row))
+            all_items.append({
+                "row_index": i,
+                "id": row[COL_ID],
+                "date": row[COL_DATE],
+                "submitted_by": row[COL_SUBMITTED_BY],
+                "content_type": row[COL_TYPE],
+                "scene_id": row[COL_SCENE_ID],
+                "studio": row[COL_STUDIO],
+                "status": row[COL_STATUS],
+                "preview": row[COL_PREVIEW],
+                "content_json": row[COL_JSON],
+                "approved_by": row[COL_APPROVED_BY],
+                "date_decided": row[COL_DATE_DECIDED],
+                "notes": row[COL_NOTES],
+                "linked_ticket": row[COL_LINKED_TICKET],
+                "target_sheet": row[COL_TARGET],
+                "version": row[COL_VERSION],
+            })
+        _approvals_cache = all_items
+        _approvals_cached_at = now
     items = []
-    for i, row in enumerate(rows[1:], start=2):
-        row = row + [""] * (15 - len(row))
-        item = {
-            "row_index": i,
-            "id": row[COL_ID],
-            "date": row[COL_DATE],
-            "submitted_by": row[COL_SUBMITTED_BY],
-            "content_type": row[COL_TYPE],
-            "scene_id": row[COL_SCENE_ID],
-            "studio": row[COL_STUDIO],
-            "status": row[COL_STATUS],
-            "preview": row[COL_PREVIEW],
-            "content_json": row[COL_JSON],
-            "approved_by": row[COL_APPROVED_BY],
-            "date_decided": row[COL_DATE_DECIDED],
-            "notes": row[COL_NOTES],
-            "linked_ticket": row[COL_LINKED_TICKET],
-            "target_sheet": row[COL_TARGET],
-            "version": row[COL_VERSION],
-        }
+    for item in all_items:
         if status_filter and item["status"] != status_filter:
             continue
         items.append(item)
@@ -187,6 +233,7 @@ def submit_for_approval(submitted_by, content_type, scene_id, studio,
         str(version),
     ]
     ws.append_row(new_row, value_input_option="USER_ENTERED")
+    _bust_approvals_cache()
     return approval_id
 
 
@@ -214,6 +261,8 @@ def approve_item(row_index, approved_by, notes=""):
         "target_sheet": row[COL_TARGET],
         "linked_ticket": row[COL_LINKED_TICKET],
     }
+
+    _bust_approvals_cache()
 
     # Execute the write
     execute_approval_write(approval)
@@ -244,6 +293,7 @@ def reject_item(row_index, rejected_by, notes):
     ws.update_cell(row_index, COL_APPROVED_BY + 1, rejected_by)
     ws.update_cell(row_index, COL_DATE_DECIDED + 1, now)
     ws.update_cell(row_index, COL_NOTES + 1, notes)
+    _bust_approvals_cache()
 
 
 # ── Target sheet write execution ─────────────────────────────────────────────

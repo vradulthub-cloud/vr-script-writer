@@ -1,0 +1,36 @@
+import nextDynamic from "next/dynamic"
+import { auth } from "@/auth"
+import { api, type Model } from "@/lib/api"
+
+const ModelSearch = nextDynamic(() => import("./model-search").then(m => m.ModelSearch))
+
+export const dynamic = "force-dynamic"
+
+export default async function ResearchPage() {
+  const session = await auth()
+  const client = api(session)
+  const idToken = (session as { idToken?: string } | null)?.idToken
+
+  let models: Model[] = []
+  let error: string | null = null
+
+  try {
+    models = await client.models.list()
+  } catch (e) {
+    error = e instanceof Error ? e.message : "Failed to load models"
+  }
+
+  return (
+    <div>
+      <div className="page-header">
+        <h1 className="tracking-tight">
+          Model Research
+        </h1>
+        <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
+          Agency info, rates, and notes for talent
+        </p>
+      </div>
+      <ModelSearch models={models} error={error} idToken={idToken} />
+    </div>
+  )
+}
