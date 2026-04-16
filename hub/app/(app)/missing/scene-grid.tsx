@@ -42,8 +42,10 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
   const idToken = useIdToken(serverIdToken)
   const [scenes, setScenes] = useState(initialScenes)
   const [studio, setStudio] = useState("All")
-  const [missingOnly, setMissingOnly] = useState(false)
+  // Missing tab defaults to showing only what's missing — matches the old Streamlit UX
+  const [missingOnly, setMissingOnly] = useState(true)
   const [search, setSearch] = useState("")
+  const [issuesOpen, setIssuesOpen] = useState(false)
   const [megaRefreshing, setMegaRefreshing] = useState(false)
   const [megaMsg, setMegaMsg] = useState<string | null>(null)
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null)
@@ -70,6 +72,38 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
     }
     return counts
   }, [scenes])
+
+  // Overall metrics — mirrors the old Streamlit "Total / Complete / In Progress" row
+  const metrics = useMemo(() => {
+    const inScope = studio === "All" ? scenes : scenes.filter(s => s.studio === studio)
+    const total = inScope.length
+    const complete = inScope.filter(s => ASSET_COLS.every(a => s[a.key])).length
+    return { total, complete, inProgress: total - complete }
+  }, [scenes, studio])
+
+  // Per-studio missing counts for the filter pills
+  const missingPerStudio = useMemo(() => {
+    const m: Record<string, number> = { All: 0 }
+    for (const s of STUDIOS.slice(1)) m[s] = 0
+    m.All = scenes.filter(s => !ASSET_COLS.every(a => s[a.key])).length
+    for (const s of STUDIOS.slice(1)) {
+      m[s] = scenes.filter(sc => sc.studio === s && !ASSET_COLS.every(a => sc[a.key])).length
+    }
+    return m
+  }, [scenes])
+
+  // Scenes sorted by most-missing — shown in the Issues expander
+  const issuesList = useMemo(() => {
+    const inScope = studio === "All" ? scenes : scenes.filter(s => s.studio === studio)
+    const withIssues = inScope
+      .map(s => {
+        const missing = ASSET_COLS.filter(a => !s[a.key]).map(a => a.label)
+        return { scene: s, missing }
+      })
+      .filter(x => x.missing.length > 0)
+    withIssues.sort((a, b) => b.missing.length - a.missing.length)
+    return withIssues
+  }, [scenes, studio])
 
   const filtered = useMemo(() => {
     let result = scenes.filter(s => {
@@ -176,13 +210,113 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
 
   return (
     <div>
+      {/* ── Metrics strip ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-3 gap-3 mb-5">
+        <MetricCard
+          label={studio === "All" ? "Total Scenes" : `Total · ${studio}`}
+          value={metrics.total}
+        />
+        <MetricCard
+          label="Complete"
+          value={metrics.complete}
+          accent="ok"
+          context={metrics.total ? `${Math.round((metrics.complete / metrics.total) * 100)}%` : undefined}
+        />
+        <MetricCard
+          label="In Progress"
+          value={metrics.inProgress}
+          accent={metrics.inProgress > 0 ? "warn" : "muted"}
+          context={metrics.total ? `${Math.round((metrics.inProgress / metrics.total) * 100)}%` : undefined}
+        />
+      </div>
+
+      {/* ── Scenes with issues (collapsible, sorted by most-missing) ──────── */}
+      {issuesList.length > 0 && (
+        <div
+          className="rounded mb-5"
+          style={{ border: "1px solid var(--color-border)", background: "var(--color-surface)" }}
+        >
+          <button
+            onClick={() => setIssuesOpen(o => !o)}
+            className="w-full flex items-center justify-between px-3 py-2 text-left transition-colors hover:bg-[--color-elevated]"
+            style={{ fontSize: 12, color: "var(--color-text)", background: "transparent", border: "none", cursor: "pointer" }}
+            aria-expanded={issuesOpen}
+          >
+            <span className="flex items-center gap-2">
+              <span style={{ fontWeight: 600 }}>Scenes with issues</span>
+              <span
+                className="rounded px-1.5"
+                style={{
+                  fontSize: 10, fontWeight: 600,
+                  background: "color-mix(in srgb, var(--color-err) 15%, transparent)",
+                  color: "var(--color-err)",
+                }}
+              >
+                {issuesList.length}
+              </span>
+              <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                sorted by most missing
+              </span>
+            </span>
+            {issuesOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+
+          {issuesOpen && (
+            <div
+              className="overflow-y-auto"
+              style={{ maxHeight: 280, borderTop: "1px solid var(--color-border-subtle)" }}
+            >
+              {issuesList.slice(0, 150).map(({ scene, missing }) => (
+                <button
+                  key={scene.id}
+                  onClick={() => setSelectedScene(scene)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-[--color-elevated]"
+                  style={{
+                    background: "transparent", border: "none", cursor: "pointer",
+                    borderBottom: "1px solid var(--color-border-subtle)",
+                  }}
+                >
+                  <StudioBadge studio={scene.studio} />
+                  <span className="font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)", minWidth: 70 }}>
+                    {scene.id}
+                  </span>
+                  <span className="line-clamp-1 flex-1" style={{ fontSize: 12 }}>
+                    {scene.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}
+                  </span>
+                  <span className="flex gap-1 flex-shrink-0">
+                    {missing.map(m => (
+                      <span
+                        key={m}
+                        className="rounded px-1.5"
+                        style={{
+                          fontSize: 10, fontWeight: 600,
+                          background: "color-mix(in srgb, var(--color-err) 12%, transparent)",
+                          color: "var(--color-err)",
+                        }}
+                      >
+                        {m}
+                      </span>
+                    ))}
+                  </span>
+                </button>
+              ))}
+              {issuesList.length > 150 && (
+                <div className="px-3 py-2 text-center" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                  + {issuesList.length - 150} more — use the table below
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Filter bar */}
       <div className="flex items-center gap-3 mb-5 flex-wrap">
         <FilterTabs
           options={STUDIOS}
           value={studio}
           onChange={setStudio}
-          counts={studioCounts}
+          counts={missingOnly ? missingPerStudio : studioCounts}
         />
         <button
           role="switch"
@@ -403,6 +537,58 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Sub-components ─────────────────────────────────────────────────────────
+
+function MetricCard({ label, value, accent, context }: {
+  label: string
+  value: number
+  accent?: "ok" | "warn" | "muted"
+  context?: string
+}) {
+  const valueColor =
+    accent === "ok"   ? "var(--color-ok)"   :
+    accent === "warn" ? "var(--color-warn)" :
+    accent === "muted" ? "var(--color-text-muted)" :
+    "var(--color-text)"
+
+  return (
+    <div
+      style={{
+        background: "var(--color-surface)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 6,
+        padding: "10px 14px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10, fontWeight: 600, letterSpacing: "0.07em",
+          textTransform: "uppercase", color: "var(--color-text-faint)",
+        }}
+      >
+        {label}
+      </div>
+      <div className="flex items-baseline gap-2 mt-1">
+        <span
+          style={{
+            fontSize: 24, fontWeight: 700, lineHeight: 1,
+            color: valueColor,
+            letterSpacing: "-0.02em",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {value.toLocaleString()}
+        </span>
+        {context && (
+          <span style={{ fontSize: 11, color: "var(--color-text-faint)", fontVariantNumeric: "tabular-nums" }}>
+            {context}
+          </span>
+        )}
+      </div>
     </div>
   )
 }
