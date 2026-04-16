@@ -95,7 +95,7 @@ export default async function TicketsPage() {
 const STAT_CONFIGS = [
   { key: "New",         label: "New",         color: "var(--color-text)" },
   { key: "Approved",    label: "Approved",    color: "var(--color-ok)" },
-  { key: "In Progress", label: "In Progress", color: "#60a5fa" },
+  { key: "In Progress", label: "In Progress", color: "var(--color-fpvr)" },
   { key: "In Review",   label: "In Review",   color: "var(--color-lime)" },
   { key: "Closed",      label: "Closed",      color: "var(--color-text-faint)" },
 ] as const

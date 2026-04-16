@@ -22,10 +22,10 @@ const PRIORITY: { name: string; agency: string }[] = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function scoreColor(s: number) {
-  if (s >= 70) return "#22c55e"
-  if (s >= 50) return "#bed62f"
-  if (s >= 30) return "#eab308"
-  return "#6b7280"
+  if (s >= 70) return "var(--color-ok)"
+  if (s >= 50) return "var(--color-lime)"
+  if (s >= 30) return "var(--color-warn)"
+  return "var(--color-text-muted)"
 }
 
 function babepediaUrl(name: string) {
@@ -37,7 +37,7 @@ function initials(name: string) {
 }
 
 const RANK_COLOR: Record<string, string> = {
-  great: "#22c55e", good: "#bed62f", moderate: "#eab308", poor: "#ef4444",
+  great: "var(--color-ok)", good: "var(--color-lime)", moderate: "var(--color-warn)", poor: "var(--color-err)",
 }
 
 // ─── Photo component ──────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ function ModelCard({ name, photoSrc, statLine, score, onView }: {
           padding: "28px 8px 8px",
         }}>
           <div style={{
-            fontSize: 12, fontWeight: 700, color: "#f0ede8",
+            fontSize: 12, fontWeight: 700, color: "var(--color-text)",
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>
             {name}
@@ -446,9 +446,9 @@ function ProfileView({ model, profile, loading, onBack, onRefresh, onBrief, brie
           {sd["notes"] && (
             <div style={{
               marginTop: 8, padding: "6px 10px", borderRadius: 4,
-              background: "color-mix(in srgb, #eab308 10%, transparent)",
-              border: "1px solid color-mix(in srgb, #eab308 25%, transparent)",
-              fontSize: 11, color: "#eab308",
+              background: "color-mix(in srgb, var(--color-warn) 10%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--color-warn) 25%, transparent)",
+              fontSize: 11, color: "var(--color-warn)",
             }}>
               ⚠️ {sd["notes"]}
             </div>
@@ -458,14 +458,14 @@ function ProfileView({ model, profile, loading, onBack, onRefresh, onBrief, brie
         {/* Booking history card */}
         <div style={{
           background: bh?.total
-            ? "color-mix(in srgb, #22c55e 8%, transparent)"
-            : "color-mix(in srgb, #ef4444 8%, transparent)",
-          border: `1px solid color-mix(in srgb, ${bh?.total ? "#22c55e" : "#ef4444"} 20%, transparent)`,
+            ? "color-mix(in srgb, var(--color-ok) 8%, transparent)"
+            : "color-mix(in srgb, var(--color-err) 8%, transparent)",
+          border: `1px solid color-mix(in srgb, ${bh?.total ? "var(--color-ok)" : "var(--color-err)"} 20%, transparent)`,
           borderRadius: 8, padding: "12px 14px",
         }}>
           {bh?.total ? (
             <>
-              <div style={{ color: "#22c55e", fontSize: 20, fontWeight: 700, lineHeight: 1 }}>
+              <div style={{ color: "var(--color-ok)", fontSize: 20, fontWeight: 700, lineHeight: 1 }}>
                 {bh.total}× booked
               </div>
               <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 6 }}>
@@ -486,7 +486,7 @@ function ProfileView({ model, profile, loading, onBack, onRefresh, onBrief, brie
               )}
             </>
           ) : (
-            <div style={{ color: "#ef4444", fontSize: 12 }}>
+            <div style={{ color: "var(--color-err)", fontSize: 12 }}>
               🔴 Never booked with your studio
             </div>
           )}
@@ -812,7 +812,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <span style={{
           fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
-          textTransform: "uppercase", color: "#f97316",
+          textTransform: "uppercase", color: "var(--color-njoi)",
         }}>
           🔥 Trending Now
         </span>
@@ -833,7 +833,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
         <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 20, paddingTop: 4 }}>
           <div style={{
             width: 11, height: 11, borderRadius: "50%",
-            border: "2px solid #f97316", borderTopColor: "transparent",
+            border: "2px solid var(--color-njoi)", borderTopColor: "transparent",
             animation: "spin 0.7s linear infinite",
           }} />
           <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>Loading trending models…</span>
@@ -865,7 +865,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
       <div style={{ marginBottom: 10 }}>
         <span style={{
           fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
-          textTransform: "uppercase", color: "#22c55e",
+          textTransform: "uppercase", color: "var(--color-ok)",
         }}>
           ⭐ Priority Outreach
         </span>
@@ -893,7 +893,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
       </div>
 
       {error && (
-        <p style={{ fontSize: 12, color: "#ef4444", marginTop: 16 }}>{error}</p>
+        <p style={{ fontSize: 12, color: "var(--color-err)", marginTop: 16 }}>{error}</p>
       )}
     </div>
   )

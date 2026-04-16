@@ -542,7 +542,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
                     style={{
                       background: mnStudio === s ? "var(--color-elevated)" : "transparent",
                       color: mnStudio === s
-                        ? s === "VRA" ? "#ec4899" : "#8b5cf6"
+                        ? s === "VRA" ? "var(--color-vra)" : "var(--color-vrh)"
                         : "var(--color-text-faint)",
                       border: `1px solid ${mnStudio === s ? "var(--color-border)" : "transparent"}`,
                     }}

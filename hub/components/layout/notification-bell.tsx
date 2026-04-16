@@ -111,7 +111,7 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
               height: 14,
               fontSize: 9,
               background: "var(--color-err)",
-              color: "#fff",
+              color: "var(--color-text)",
               padding: "0 3px",
               animation: "countBounce 0.4s var(--ease-out-quart)",
             }}
