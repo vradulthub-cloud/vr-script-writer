@@ -110,7 +110,7 @@ async def list_scenes(
     missing_only: bool = False,
     search: Optional[str] = None,
     page: int = Query(default=1, ge=1),
-    limit: int = Query(default=50, ge=1, le=500),
+    limit: int = Query(default=50, ge=1, le=2000),
 ):
     """
     List scenes with optional filters.

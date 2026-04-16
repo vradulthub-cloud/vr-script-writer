@@ -209,6 +209,10 @@ def sync_scenes() -> int:
     grail_sh = open_grail()
     grail_scenes: dict[str, dict] = {}
 
+    # Grail tab name → scene ID prefix used in MEGA folders and the scenes table.
+    # NaughtyJOI's Grail tab is "NNJOI" but MEGA uses "NJOI" as the prefix.
+    TAB_TO_PREFIX = {"FPVR": "FPVR", "VRH": "VRH", "VRA": "VRA", "NNJOI": "NJOI"}
+
     for ui_name, tab_name in settings.grail_tabs.items():
         try:
             ws = grail_sh.worksheet(tab_name)
@@ -217,11 +221,23 @@ def sync_scenes() -> int:
             _log.warning("Failed to read Grail tab %s: %s", tab_name, exc)
             continue
 
+        prefix = TAB_TO_PREFIX.get(tab_name, tab_name)
+        site_code = settings.studio_site_codes.get(ui_name, "")
+
         for row_idx, row in enumerate(rows, start=2):  # Row 2 = first data row
             if len(row) < 5 or not row[1]:
                 continue
-            scene_id = row[1].strip()
-            site_code = settings.studio_site_codes.get(ui_name, "")
+            # Grail column B holds the Scene# (just the digits). The full scene
+            # ID is <prefix><4-digit zero-padded number> to match MEGA folder
+            # names (e.g. "NJOI0003", "FPVR0042") and avoid cross-studio
+            # collisions that were wiping out whole studios.
+            raw = row[1].strip()
+            try:
+                scene_num = f"{int(raw):04d}"
+            except ValueError:
+                _log.debug("Skipping non-numeric scene# %r in %s row %d", raw, tab_name, row_idx)
+                continue
+            scene_id = f"{prefix}{scene_num}"
             grail_scenes[scene_id] = {
                 "studio": ui_name,
                 "grail_tab": tab_name,
