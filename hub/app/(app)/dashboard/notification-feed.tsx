@@ -1,0 +1,209 @@
+"use client"
+
+import { useState } from "react"
+import Link from "next/link"
+import { Bell, Check, Ticket, CheckSquare } from "lucide-react"
+import type { Notification } from "@/lib/api"
+import { API_BASE_URL } from "@/lib/api"
+
+const TYPE_ICON: Record<string, React.ComponentType<{ size?: number; style?: React.CSSProperties }>> = {
+  ticket_created:     Ticket,
+  ticket_status:      Ticket,
+  approval_submitted: CheckSquare,
+  approval_decided:   CheckSquare,
+}
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const m = Math.floor(diff / 60_000)
+  if (m < 2)  return "just now"
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  return `${d}d ago`
+}
+
+interface NotificationFeedProps {
+  initialNotifications: Notification[]
+  idToken: string | undefined
+  unreadCount: number
+}
+
+export function NotificationFeed({
+  initialNotifications,
+  idToken,
+  unreadCount: initialUnread,
+}: NotificationFeedProps) {
+  const [notifications, setNotifications] = useState(initialNotifications)
+  const [unreadCount, setUnreadCount]     = useState(initialUnread)
+  const [marking, setMarking]             = useState(false)
+
+  async function markAllRead() {
+    if (!idToken || unreadCount === 0 || marking) return
+    setMarking(true)
+    try {
+      await fetch(`${API_BASE_URL}/api/notifications/mark-read`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({}),
+      })
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: 1 as const })))
+      setUnreadCount(0)
+    } catch {
+      // Non-critical — silent failure
+    } finally {
+      setMarking(false)
+    }
+  }
+
+  return (
+    <div
+      style={{
+        background: "var(--color-surface)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 6,
+        overflow: "hidden",
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          padding: "9px 14px",
+          borderBottom: "1px solid var(--color-border)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <h3 style={{ margin: 0 }}>Notifications</h3>
+          {unreadCount > 0 && (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                background: "var(--color-lime)",
+                color: "oklch(15% 0.05 82)",
+                borderRadius: 10,
+                padding: "1px 5px",
+                lineHeight: 1.5,
+              }}
+            >
+              {unreadCount}
+            </span>
+          )}
+        </div>
+        {unreadCount > 0 && (
+          <button
+            onClick={markAllRead}
+            disabled={marking}
+            style={{
+              fontSize: 10,
+              color: "var(--color-text-faint)",
+              background: "none",
+              border: "none",
+              cursor: marking ? "wait" : "pointer",
+              padding: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 3,
+            }}
+          >
+            <Check size={10} />
+            Mark all read
+          </button>
+        )}
+      </div>
+
+      {/* List */}
+      {notifications.length === 0 ? (
+        <div
+          style={{
+            padding: "24px 14px",
+            textAlign: "center",
+            color: "var(--color-text-faint)",
+            fontSize: 12,
+          }}
+        >
+          No notifications
+        </div>
+      ) : (
+        <div>
+          {notifications.map((n) => {
+            const Icon   = TYPE_ICON[n.type] ?? Bell
+            const unread = n.read === 0
+            return (
+              <Link
+                key={n.notif_id}
+                href={n.link || "#"}
+                style={{
+                  display: "flex",
+                  gap: 9,
+                  padding: "8px 14px",
+                  borderBottom: "1px solid var(--color-border-subtle)",
+                  background: unread
+                    ? "color-mix(in srgb, var(--color-lime) 4%, transparent)"
+                    : "transparent",
+                  textDecoration: "none",
+                  color: "inherit",
+                }}
+                className="hover:bg-[--color-elevated]"
+              >
+                {/* Icon */}
+                <div style={{ flexShrink: 0, marginTop: 2 }}>
+                  <Icon size={12} style={{ color: "var(--color-text-faint)" }} />
+                </div>
+
+                {/* Text */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: unread ? 500 : 400,
+                      color: "var(--color-text)",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {n.title}
+                  </div>
+                  {n.message && (
+                    <div
+                      style={{
+                        fontSize: 10,
+                        color: "var(--color-text-faint)",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        marginTop: 1,
+                      }}
+                    >
+                      {n.message}
+                    </div>
+                  )}
+                </div>
+
+                {/* Timestamp */}
+                <div
+                  style={{
+                    flexShrink: 0,
+                    fontSize: 10,
+                    color: "var(--color-text-faint)",
+                    paddingTop: 2,
+                  }}
+                >
+                  {relativeTime(n.timestamp)}
+                </div>
+              </Link>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}

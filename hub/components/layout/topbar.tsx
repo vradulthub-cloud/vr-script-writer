@@ -7,6 +7,7 @@ import type { Session } from "next-auth"
 import { NotificationBell } from "./notification-bell"
 
 const PAGE_NAMES: Record<string, string> = {
+  "/dashboard":    "Dashboard",
   "/missing":      "Missing Assets",
   "/research":     "Model Research",
   "/scripts":      "Scripts",

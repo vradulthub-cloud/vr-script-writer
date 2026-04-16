@@ -4,6 +4,7 @@ import { useMemo } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
+  Home,
   LayoutGrid,
   Users,
   FileText,
@@ -13,8 +14,14 @@ import {
   Layers,
   Ticket,
   CheckSquare,
+  Shield,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+
+/** Always-visible items — shown for every user regardless of RBAC. */
+const CORE_ITEMS = [
+  { href: "/dashboard", label: "Dashboard", shortLabel: "Home", icon: Home },
+] as const
 
 /**
  * Map from nav label → the key used in the users.allowed_tabs column.
@@ -88,6 +95,46 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-2">
+        {/* Core items — always visible */}
+        {CORE_ITEMS.map(({ href, label, shortLabel, icon: Icon }) => {
+          const active = pathname === href
+          return (
+            <Link
+              key={href}
+              href={href}
+              title={label}
+              data-active={active || undefined}
+              className={cn(
+                "flex items-center gap-2.5 py-2 transition-colors",
+                "flex-col gap-0.5 lg:flex-col lg:justify-center lg:px-0",
+                "xl:flex-row xl:justify-start xl:px-4 xl:gap-2.5",
+                "text-sm leading-none",
+                active
+                  ? "font-medium"
+                  : "hover:bg-[--color-elevated]"
+              )}
+              style={{
+                color: active ? "var(--color-text)" : "var(--color-text-muted)",
+              }}
+            >
+              <Icon
+                size={14}
+                style={{ color: active ? "var(--color-lime)" : undefined }}
+              />
+              <span className="hidden xl:inline">{label}</span>
+              <span
+                className="hidden lg:block xl:hidden text-center leading-none"
+                style={{ fontSize: 8, letterSpacing: "0.02em", opacity: 0.85 }}
+              >
+                {shortLabel}
+              </span>
+            </Link>
+          )
+        })}
+
+        {/* Divider between core and RBAC-filtered items */}
+        <div style={{ height: 1, background: "var(--color-border)", margin: "6px 12px" }} />
+
         {visibleItems.map(({ href, label, shortLabel, icon: Icon }) => {
           const active = pathname.startsWith(href)
           return (
@@ -126,6 +173,37 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
             </Link>
           )
         })}
+
+        {/* Admin — separated, admin-only */}
+        {userRole === "admin" && (
+          <>
+            <div style={{ height: 1, background: "var(--color-border)", margin: "6px 12px" }} />
+            {(() => {
+              const active = pathname.startsWith("/admin")
+              return (
+                <Link
+                  href="/admin"
+                  title="Admin"
+                  data-active={active || undefined}
+                  className={cn(
+                    "flex items-center gap-2.5 py-2 transition-colors",
+                    "flex-col gap-0.5 lg:flex-col lg:justify-center lg:px-0",
+                    "xl:flex-row xl:justify-start xl:px-4 xl:gap-2.5",
+                    "text-sm leading-none",
+                    active ? "font-medium" : "hover:bg-[--color-elevated]"
+                  )}
+                  style={{ color: active ? "var(--color-text)" : "var(--color-text-muted)" }}
+                >
+                  <Shield size={14} style={{ color: active ? "var(--color-lime)" : undefined }} />
+                  <span className="hidden xl:inline">Admin</span>
+                  <span className="hidden lg:block xl:hidden text-center leading-none" style={{ fontSize: 8, letterSpacing: "0.02em", opacity: 0.85 }}>
+                    Admin
+                  </span>
+                </Link>
+              )
+            })()}
+          </>
+        )}
       </nav>
 
       {/* Bottom: version */}
