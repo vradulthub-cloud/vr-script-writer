@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { ArrowLeft, Wand2, FolderPlus } from "lucide-react"
 import { api, type Scene, type NamingIssue } from "@/lib/api"
+import { formatApiError } from "@/lib/errors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioBadge } from "@/components/ui/studio-badge"
 import { studioColor } from "@/lib/studio-colors"
@@ -78,7 +79,7 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
       setSaveMsg("Saved")
       setTimeout(() => { setEditingField(null); setSaveMsg("") }, 800)
     } catch (e) {
-      setSaveMsg(e instanceof Error ? e.message : "Save failed")
+      setSaveMsg(formatApiError(e, "Save"))
     } finally {
       setSaving(false)
     }
@@ -113,7 +114,7 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
       setSaveMsg("Title saved")
       setTimeout(() => setSaveMsg(""), 1200)
     } catch (e) {
-      setSaveMsg(e instanceof Error ? e.message : "Save failed")
+      setSaveMsg(formatApiError(e, "Save"))
     } finally {
       setSaving(false)
     }

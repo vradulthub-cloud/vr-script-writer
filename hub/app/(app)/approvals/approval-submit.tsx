@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { api, type Ticket } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
+import { formatApiError } from "@/lib/errors"
 
 const CONTENT_TYPES = ["Script", "Description", "Compilation", "Title", "Tags", "Categories"]
 const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
@@ -51,7 +52,7 @@ export function ApprovalSubmit({ idToken: serverToken }: Props) {
       setNotes("")
       setLinkedTicket("")
     } catch (e) {
-      setSubmitMsg(e instanceof Error ? e.message : "Submit failed")
+      setSubmitMsg(formatApiError(e, "Submit"))
     } finally {
       setSubmitting(false)
     }

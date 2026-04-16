@@ -610,7 +610,7 @@ function ProfileView({ model, profile, loading, onBack, onRefresh, onBrief, brie
         {/* ── Right: scene tabs ──────────────────────────────────────────────── */}
         <div>
           {/* Tab bar */}
-          <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--color-border)", marginBottom: 0 }}>
+          <div className="flex gap-1 mb-3">
             {(["slr", "vrp"] as const).map(tab => {
               const count = tab === "slr" ? slr.length : vrp.length
               const label = tab === "slr" ? `SexLikeReal${count ? ` (${count})` : ""}` : `VRPorn${count ? ` (${count})` : ""}`
@@ -619,13 +619,12 @@ function ProfileView({ model, profile, loading, onBack, onRefresh, onBrief, brie
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
+                  className="px-3 py-1 rounded text-xs transition-colors"
                   style={{
-                    fontSize: 12, fontWeight: active ? 600 : 400,
+                    fontWeight: active ? 600 : 400,
                     color: active ? "var(--color-text)" : "var(--color-text-faint)",
-                    background: "none", border: "none",
-                    borderBottom: active ? "2px solid var(--color-lime)" : "2px solid transparent",
-                    padding: "6px 14px", cursor: "pointer",
-                    marginBottom: -1,
+                    background: active ? "color-mix(in srgb, var(--color-lime) 10%, transparent)" : "transparent",
+                    border: `1px solid ${active ? "color-mix(in srgb, var(--color-lime) 25%, transparent)" : "transparent"}`,
                   }}
                 >
                   {label}

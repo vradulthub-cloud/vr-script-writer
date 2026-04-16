@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from "react"
 import { useStream } from "@/lib/sse"
 import { api, API_BASE_URL, type Scene } from "@/lib/api"
+import { formatApiError } from "@/lib/errors"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
@@ -229,7 +230,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
       })
       setSaveMsg("Saved to Grail.")
     } catch (e) {
-      setSaveMsg(e instanceof Error ? e.message : "Save to Grail failed")
+      setSaveMsg(formatApiError(e, "Save to Grail"))
     } finally {
       setGrailSaving(false)
     }
@@ -316,7 +317,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
       })
       setSaveMsg("Saved.")
     } catch (e) {
-      setSaveMsg(e instanceof Error ? e.message : "Save failed")
+      setSaveMsg(formatApiError(e, "Save"))
     } finally {
       setSaving(false)
     }
@@ -349,7 +350,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
-      setDocxError(e instanceof Error ? e.message : "Download failed")
+      setDocxError(formatApiError(e, "Download"))
     } finally {
       setDocxLoading(false)
     }

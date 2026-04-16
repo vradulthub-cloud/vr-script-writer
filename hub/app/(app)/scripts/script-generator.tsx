@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { Download, Wand2, Link2, RotateCcw } from "lucide-react"
+import { formatApiError } from "@/lib/errors"
 import { useStream } from "@/lib/sse"
 import { api, API_BASE_URL, type Script, type Ticket } from "@/lib/api"
 import { ErrorAlert } from "@/components/ui/error-alert"
@@ -182,7 +183,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
       })
       setSaveMsg("Saved to sheet.")
     } catch (e) {
-      setSaveMsg(e instanceof Error ? e.message : "Save failed")
+      setSaveMsg(formatApiError(e, "Save"))
     } finally {
       setSaving(false)
     }
@@ -204,7 +205,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
       })
       setSaveMsg("Submitted for approval.")
     } catch (e) {
-      setSaveMsg(e instanceof Error ? e.message : "Submit failed")
+      setSaveMsg(formatApiError(e, "Submit"))
     } finally {
       setSaving(false)
     }

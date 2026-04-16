@@ -1,9 +1,11 @@
 "use client"
 
 import { useState, useMemo } from "react"
+import { X } from "lucide-react"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { api, type Ticket, type TicketCreate, type TicketUpdate } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
+import { formatApiError } from "@/lib/errors"
 
 const PRIORITY_COLOR: Record<string, string> = {
   Critical: "var(--color-err)",
@@ -21,7 +23,9 @@ const STATUS_COLOR: Record<string, string> = {
   "Rejected":    "var(--color-err)",
 }
 
-const STATUSES = ["All", "New", "Approved", "In Progress", "In Review", "Closed", "Rejected"]
+const ACTIVE_STATUSES = ["New", "Approved", "In Progress", "In Review"]
+const TERMINAL_STATUSES = ["Closed", "Rejected"]
+const STATUSES = ["All", ...ACTIVE_STATUSES, ...TERMINAL_STATUSES]
 const TICKET_STATUSES = ["New", "Approved", "In Progress", "In Review", "Closed", "Rejected"]
 const PRIORITIES = ["Low", "Medium", "High", "Critical"]
 const PROJECTS = ["", "Hub", "Content", "Infrastructure", "Scripts", "Descriptions", "MEGA", "Other"]
@@ -97,7 +101,7 @@ export function TicketList({ tickets: initialTickets, error, idToken: serverIdTo
       setSaveMsg("Saved.")
       setEditNote("")
     } catch (e) {
-      setSaveMsg(e instanceof Error ? e.message : "Save failed")
+      setSaveMsg(formatApiError(e, "Save"))
     } finally {
       setSaving(false)
     }
@@ -116,7 +120,7 @@ export function TicketList({ tickets: initialTickets, error, idToken: serverIdTo
       setShowCreate(false)
       setCreateForm({ title: "", description: "", project: "", type: "", priority: "Medium", linked_items: "" })
     } catch (e) {
-      setCreateErr(e instanceof Error ? e.message : "Create failed")
+      setCreateErr(formatApiError(e, "Create ticket"))
     } finally {
       setCreating(false)
     }
@@ -126,8 +130,22 @@ export function TicketList({ tickets: initialTickets, error, idToken: serverIdTo
     <div>
       {/* Filter bar + new ticket button */}
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <div className="flex gap-1 flex-wrap">
-          {STATUSES.map((s) => (
+        <div className="flex items-center gap-1 flex-wrap">
+          {/* "All" — visually separated */}
+          <button
+            onClick={() => setStatusFilter("All")}
+            className="px-2.5 py-1 rounded text-xs transition-colors"
+            style={{
+              background: statusFilter === "All" ? "var(--color-elevated)" : "transparent",
+              color: statusFilter === "All" ? "var(--color-text)" : "var(--color-text-muted)",
+              border: `1px solid ${statusFilter === "All" ? "var(--color-border)" : "transparent"}`,
+            }}
+          >
+            All
+          </button>
+          <span style={{ width: 1, height: 14, background: "var(--color-border)", margin: "0 2px", flexShrink: 0 }} />
+          {/* Active statuses */}
+          {ACTIVE_STATUSES.map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
@@ -135,6 +153,22 @@ export function TicketList({ tickets: initialTickets, error, idToken: serverIdTo
               style={{
                 background: statusFilter === s ? "var(--color-elevated)" : "transparent",
                 color: statusFilter === s ? "var(--color-text)" : "var(--color-text-muted)",
+                border: `1px solid ${statusFilter === s ? "var(--color-border)" : "transparent"}`,
+              }}
+            >
+              {s}
+            </button>
+          ))}
+          <span style={{ width: 1, height: 14, background: "var(--color-border)", margin: "0 2px", flexShrink: 0 }} />
+          {/* Terminal statuses — muted by default */}
+          {TERMINAL_STATUSES.map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className="px-2.5 py-1 rounded text-xs transition-colors"
+              style={{
+                background: statusFilter === s ? "var(--color-elevated)" : "transparent",
+                color: statusFilter === s ? "var(--color-text)" : "var(--color-text-faint)",
                 border: `1px solid ${statusFilter === s ? "var(--color-border)" : "transparent"}`,
               }}
             >
@@ -193,14 +227,12 @@ export function TicketList({ tickets: initialTickets, error, idToken: serverIdTo
                   <>
                     <tr
                       key={ticket.ticket_id}
-                      className="transition-colors cursor-pointer"
+                      className={`transition-colors cursor-pointer${isExpanded ? "" : " hover:bg-[--color-elevated]"}`}
                       onClick={() => openTicket(ticket)}
                       style={{
                         borderBottom: !isExpanded && !isLast ? "1px solid var(--color-border-subtle)" : undefined,
                         background: isExpanded ? "var(--color-surface)" : undefined,
                       }}
-                      onMouseEnter={e => { if (!isExpanded) (e.currentTarget as HTMLElement).style.background = "var(--color-elevated)" }}
-                      onMouseLeave={e => { if (!isExpanded) (e.currentTarget as HTMLElement).style.background = "" }}
                     >
                       <td className="px-3 py-2.5 font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
                         {ticket.ticket_id}
@@ -380,9 +412,10 @@ export function TicketList({ tickets: initialTickets, error, idToken: serverIdTo
               <h2 style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text)" }}>New Ticket</h2>
               <button
                 onClick={() => setShowCreate(false)}
-                style={{ fontSize: 18, color: "var(--color-text-muted)", lineHeight: 1, padding: "0 4px" }}
+                className="transition-colors hover:opacity-70"
+                style={{ color: "var(--color-text-muted)", display: "flex", alignItems: "center" }}
               >
-                ×
+                <X size={14} />
               </button>
             </div>
 

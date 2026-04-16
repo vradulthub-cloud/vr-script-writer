@@ -21,15 +21,15 @@ import { cn } from "@/lib/utils"
  * The Streamlit app's auth_config ALL_TABS uses these exact keys.
  */
 const NAV_ITEMS = [
-  { href: "/missing",      label: "Missing",        tabKey: "Tickets",        icon: LayoutGrid },
-  { href: "/research",     label: "Model Research",  tabKey: "Model Research", icon: Users },
-  { href: "/scripts",      label: "Scripts",          tabKey: "Scripts",        icon: FileText },
-  { href: "/call-sheets",  label: "Call Sheets",      tabKey: "Call Sheets",    icon: Phone },
-  { href: "/titles",       label: "Titles",            tabKey: "Titles",         icon: Image },
-  { href: "/descriptions", label: "Descriptions",    tabKey: "Descriptions",   icon: AlignLeft },
-  { href: "/compilations", label: "Compilations",    tabKey: "Compilations",   icon: Layers },
-  { href: "/approvals",    label: "Approvals",        tabKey: "Tickets",        icon: CheckSquare },
-  { href: "/tickets",      label: "Tickets",          tabKey: "Tickets",        icon: Ticket },
+  { href: "/missing",      label: "Missing",       shortLabel: "Missing",  tabKey: "Tickets",        icon: LayoutGrid },
+  { href: "/research",     label: "Model Research", shortLabel: "Research", tabKey: "Model Research", icon: Users },
+  { href: "/scripts",      label: "Scripts",         shortLabel: "Scripts",  tabKey: "Scripts",        icon: FileText },
+  { href: "/call-sheets",  label: "Call Sheets",     shortLabel: "Calls",    tabKey: "Call Sheets",    icon: Phone },
+  { href: "/titles",       label: "Titles",           shortLabel: "Titles",   tabKey: "Titles",         icon: Image },
+  { href: "/descriptions", label: "Descriptions",   shortLabel: "Descs",    tabKey: "Descriptions",   icon: AlignLeft },
+  { href: "/compilations", label: "Compilations",   shortLabel: "Comps",    tabKey: "Compilations",   icon: Layers },
+  { href: "/approvals",    label: "Approvals",       shortLabel: "Approve",  tabKey: "Tickets",        icon: CheckSquare },
+  { href: "/tickets",      label: "Tickets",          shortLabel: "Tickets",  tabKey: "Tickets",        icon: Ticket },
 ] as const
 
 interface SidebarProps {
@@ -83,7 +83,7 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-2">
-        {visibleItems.map(({ href, label, icon: Icon }) => {
+        {visibleItems.map(({ href, label, shortLabel, icon: Icon }) => {
           const active = pathname.startsWith(href)
           return (
             <Link
@@ -93,7 +93,9 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
               data-active={active || undefined}
               className={cn(
                 "flex items-center gap-2.5 py-2 transition-colors",
-                "justify-center px-0 xl:justify-start xl:px-4",
+                // lg: stacked icon+label in 52px rail; xl: horizontal with full label
+                "flex-col gap-0.5 lg:flex-col lg:justify-center lg:px-0",
+                "xl:flex-row xl:justify-start xl:px-4 xl:gap-2.5",
                 "text-sm leading-none",
                 active
                   ? "font-medium"
@@ -107,7 +109,15 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
                 size={14}
                 style={{ color: active ? "var(--color-lime)" : undefined }}
               />
+              {/* Full label at xl+ */}
               <span className="hidden xl:inline">{label}</span>
+              {/* Short label at lg–xl (52px rail) */}
+              <span
+                className="hidden lg:block xl:hidden text-center leading-none"
+                style={{ fontSize: 8, letterSpacing: "0.02em", opacity: 0.85 }}
+              >
+                {shortLabel}
+              </span>
             </Link>
           )
         })}
