@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo, useCallback, useRef } from "react"
-import { api, type Model, type ModelProfile, type TrendingModel } from "@/lib/api"
+import { api, API_BASE_URL, type Model, type ModelProfile, type TrendingModel } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 
 // ─── Priority outreach (hardcoded) ───────────────────────────────────────────
@@ -28,8 +28,9 @@ function scoreColor(s: number) {
   return "var(--color-text-muted)"
 }
 
-function babepediaUrl(name: string) {
-  return `https://www.babepedia.com/pics/${name.trim().split(/\s+/).map(w => w[0].toUpperCase() + w.slice(1).toLowerCase()).join("_")}.jpg`
+/** Server-side photo proxy — bypasses hotlink blocks, tries cache → VRPorn → Babepedia */
+function modelPhotoUrl(name: string) {
+  return `${API_BASE_URL}/api/models/${encodeURIComponent(name.trim())}/photo`
 }
 
 function initials(name: string) {
@@ -42,13 +43,15 @@ const RANK_COLOR: Record<string, string> = {
 
 // ─── Photo component ──────────────────────────────────────────────────────────
 
-function Photo({ src, name, width, height, radius = 4, objectPos = "50% 15%" }: {
-  src: string; name: string; width: number | string; height: number; radius?: number; objectPos?: string
+function Photo({ src, fallbackSrc, name, width, height, radius = 4, objectPos = "50% 15%" }: {
+  src: string; fallbackSrc?: string; name: string; width: number | string; height: number; radius?: number; objectPos?: string
 }) {
-  const [failed, setFailed] = useState(false)
+  const [srcIdx, setSrcIdx] = useState(0)
   const ini = initials(name)
+  const srcs = [src, fallbackSrc].filter(Boolean) as string[]
+  const activeSrc = srcs[srcIdx]
 
-  if (failed || !src) {
+  if (!activeSrc) {
     return (
       <div style={{
         width, height, borderRadius: radius,
@@ -65,11 +68,11 @@ function Photo({ src, name, width, height, radius = 4, objectPos = "50% 15%" }: 
 
   return (
     <img
-      src={src}
+      src={activeSrc}
       alt=""
       aria-hidden="true"
       referrerPolicy="no-referrer"
-      onError={() => setFailed(true)}
+      onError={() => setSrcIdx(i => i + 1)}
       style={{
         width, height, borderRadius: radius, flexShrink: 0,
         objectFit: "cover", objectPosition: objectPos, display: "block",
@@ -92,7 +95,7 @@ function ModelCard({ name, photoSrc, statLine, score, onView }: {
     }}>
       {/* Photo */}
       <div style={{ position: "relative", flexShrink: 0 }}>
-        <Photo src={photoSrc} name={name} width="100%" height={180} radius={0} objectPos="50% 15%" />
+        <Photo src={photoSrc} fallbackSrc={modelPhotoUrl(name)} name={name} width="100%" height={180} radius={0} objectPos="50% 15%" />
 
         {score !== undefined && (
           <div style={{
@@ -363,7 +366,8 @@ function ProfileView({ model, profile, loading, onBack, onRefresh, onBrief, brie
         {/* Photo */}
         <div>
           <Photo
-            src={profile?.photo_url || babepediaUrl(model.name)}
+            src={profile?.photo_url || ""}
+            fallbackSrc={modelPhotoUrl(model.name)}
             name={model.name}
             width={140}
             height={190}
@@ -878,7 +882,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
         {PRIORITY.map(p => {
           const m = models.find(mo => mo.name.toLowerCase() === p.name.toLowerCase())
           const score = m?.opportunity_score
-          const photo = trendingPhotoMap[p.name.toLowerCase()] || babepediaUrl(p.name)
+          const photo = trendingPhotoMap[p.name.toLowerCase()] || modelPhotoUrl(p.name)
           const statLine = m
             ? [p.agency, m.last_booked ? `Last: ${m.last_booked}` : "Never booked"].join(" · ")
             : [p.agency, "Never booked"].join(" · ")

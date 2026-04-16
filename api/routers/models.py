@@ -5,6 +5,7 @@ Routes:
   GET  /api/models/                  — list all models with sheet stats
   GET  /api/models/trending          — trending performers from SLR + VRPorn (cached 6h)
   GET  /api/models/{name}            — single model
+  GET  /api/models/{name}/photo      — proxied model photo (public, no auth)
   GET  /api/models/{name}/profile    — full profile: bio, photo, recent scenes (cached 7d)
   POST /api/models/{name}/brief      — AI booking brief (Claude)
 """
@@ -19,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from api.auth import CurrentUser
@@ -185,6 +187,67 @@ async def get_trending_models(
         )
 
     return results[:n]
+
+
+@router.get("/{name}/photo")
+async def get_model_photo(name: str):
+    """
+    Serve a model's photo proxied through the server.
+
+    Public endpoint (no auth) — used as <img src> in the frontend.
+    Tries in order: cached profile photo, VRPorn CDN, Babepedia.
+    Returns image bytes with 24h cache header, or 404.
+    """
+    import requests as _req
+
+    # 1. Check cached profile for a photo URL
+    photo_url = ""
+    with get_db() as conn:
+        cached = conn.execute(
+            "SELECT profile_json FROM model_profiles WHERE LOWER(name) = LOWER(?) AND name != '_trending_cache'",
+            (name,),
+        ).fetchone()
+    if cached:
+        try:
+            data = json.loads(cached["profile_json"])
+            photo_url = data.get("photo_url", "") or ""
+        except Exception:
+            pass
+
+    # 2. If no cached photo, try known URL patterns
+    if not photo_url:
+        candidates = [
+            f"https://cdn.vrporn.com/models/{_slug(name)}/photo.jpg",
+            f"https://www.babepedia.com/pics/{_slug_caps(name)}.jpg",
+            f"https://www.babepedia.com/pics/{name.strip().replace(' ', '_')}.jpg",
+        ]
+        for url in candidates:
+            try:
+                hr = _req.head(url, timeout=5, headers=_HEADERS, allow_redirects=True)
+                ct = hr.headers.get("content-type", "")
+                if hr.status_code == 200 and "image" in ct:
+                    photo_url = url
+                    break
+            except Exception:
+                pass
+
+    if not photo_url:
+        raise HTTPException(status_code=404, detail="No photo found")
+
+    # 3. Fetch and proxy the image bytes
+    try:
+        r = _req.get(photo_url, timeout=10, headers=_HEADERS, allow_redirects=True)
+        if r.status_code == 200 and len(r.content) > 500:
+            ct = r.headers.get("content-type", "image/jpeg")
+            return Response(
+                content=r.content,
+                media_type=ct,
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+    except Exception:
+        pass
+
+    raise HTTPException(status_code=404, detail="Photo fetch failed")
 
 
 @router.get("/{name}/profile", response_model=ProfileResponse)
