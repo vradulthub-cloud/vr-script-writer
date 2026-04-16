@@ -204,7 +204,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
               ) : (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
                   {studioScenes.map(scene => (
-                    <SceneCard key={scene.id} scene={scene} color={color} onClick={() => setSelectedScene(scene)} />
+                    <SceneCard key={scene.id} scene={scene} onClick={() => setSelectedScene(scene)} />
                   ))}
                 </div>
               )}
@@ -225,7 +225,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
   )
 }
 
-function SceneCard({ scene, color, onClick }: { scene: Scene; color: string; onClick: () => void }) {
+function SceneCard({ scene, onClick }: { scene: Scene; onClick: () => void }) {
   const missing = missingAssets(scene)
   const pct = completionPct(scene)
   const pctColor = pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)"
@@ -240,7 +240,6 @@ function SceneCard({ scene, color, onClick }: { scene: Scene; color: string; onC
       style={{
         background: "var(--color-surface)",
         border: "1px solid var(--color-border)",
-        borderLeft: `3px solid ${color}`,
         borderRadius: 6,
         padding: "12px 14px",
         textAlign: "left",
