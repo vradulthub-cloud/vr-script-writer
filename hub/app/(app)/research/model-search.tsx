@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo, useCallback, useRef } from "react"
-import { api, API_BASE_URL, type Model, type ModelProfile, type TrendingModel } from "@/lib/api"
+import { api, ApiError, API_BASE_URL, type Model, type ModelProfile, type TrendingModel } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 
 // ─── Priority outreach (hardcoded) ───────────────────────────────────────────
@@ -217,10 +217,11 @@ function SceneCard({ scene }: { scene: ModelProfile["slr_scenes"][0] }) {
 
 // ─── Profile view ─────────────────────────────────────────────────────────────
 
-function ProfileView({ model, profile, loading, onBack, onRefresh, onBrief, briefText, briefLoading }: {
+function ProfileView({ model, profile, loading, profileError, onBack, onRefresh, onBrief, briefText, briefLoading }: {
   model: Model
   profile: ModelProfile | null
   loading: boolean
+  profileError: string | null
   onBack: () => void
   onRefresh: () => void
   onBrief: (ctx: Record<string, string>) => void
@@ -359,6 +360,32 @@ function ProfileView({ model, profile, loading, onBack, onRefresh, onBrief, brie
           {loading ? "Refreshing…" : "🔄 Refresh"}
         </button>
       </div>
+
+      {/* ── Profile load error ──────────────────────────────────────────────── */}
+      {profileError && !loading && (
+        <div style={{
+          marginBottom: 12,
+          padding: "8px 12px",
+          borderRadius: 6,
+          background: "color-mix(in srgb, var(--color-err) 10%, transparent)",
+          border: "1px solid color-mix(in srgb, var(--color-err) 30%, transparent)",
+          fontSize: 12,
+          color: "var(--color-err)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}>
+          <span>{profileError}</span>
+          <button
+            onClick={onRefresh}
+            style={{ fontSize: 11, color: "var(--color-err)", background: "none", border: "none",
+                     cursor: "pointer", padding: 0, opacity: 0.8, flexShrink: 0 }}
+          >
+            Retry ↺
+          </button>
+        </div>
+      )}
 
       {/* ── Header: photo | info | booking history ───────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "140px 1fr 200px", gap: 20, marginBottom: 16 }}>
@@ -698,6 +725,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
   const [currentModel, setCurrentModel]   = useState<Model | null>(null)
   const [profile, setProfile]             = useState<ModelProfile | null>(null)
   const [profileLoading, setProfileLoading] = useState(false)
+  const [profileError, setProfileError]   = useState<string | null>(null)
   const [trending, setTrending]           = useState<TrendingModel[] | null>(null)
   const [trendingLoading, setTrendingLoading] = useState(false)
   const [trendingLoaded, setTrendingLoaded] = useState(false)
@@ -733,14 +761,21 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
 
     setCurrentModel(m)
     setProfile(null)
+    setProfileError(null)
     setBriefText("")
     setProfileLoading(true)
 
     try {
       const data = await client.models.profile(name, refresh)
       setProfile(data)
-    } catch {
-      // profile stays null; panel still shows booking-sheet data
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        setProfileError("Session expired — please refresh the page or sign in again.")
+      } else if (e instanceof ApiError && e.status === 404) {
+        setProfileError("Profile not found for this model.")
+      } else {
+        setProfileError("Failed to load profile data.")
+      }
     } finally {
       setProfileLoading(false)
     }
@@ -781,7 +816,8 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
           model={currentModel}
           profile={profile}
           loading={profileLoading}
-          onBack={() => { setCurrentModel(null); setProfile(null) }}
+          profileError={profileError}
+          onBack={() => { setCurrentModel(null); setProfile(null); setProfileError(null) }}
           onRefresh={() => openProfile(currentModel.name, true)}
           onBrief={handleBrief}
           briefText={briefText}
