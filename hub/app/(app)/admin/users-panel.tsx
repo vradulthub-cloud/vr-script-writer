@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { api, type UserProfile, type UserUpdate } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
@@ -23,7 +23,7 @@ interface UsersPanelProps {
 
 export function UsersPanel({ users: initialUsers, error, idToken: serverToken }: UsersPanelProps) {
   const idToken = useIdToken(serverToken)
-  const client = api(idToken ?? null)
+  const client = useMemo(() => api(idToken ?? null), [idToken])
 
   const [users, setUsers] = useState<UserProfile[]>(initialUsers)
   const [editingEmail, setEditingEmail] = useState<string | null>(null)
@@ -85,20 +85,16 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken }:
   if (error) return <ErrorAlert>{error}</ErrorAlert>
 
   return (
-    <div>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+    <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
+      <table className="w-full" style={{ borderCollapse: "collapse" }}>
         <thead>
-          <tr>
+          <tr style={{ background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
             {["Name", "Email", "Role", "Allowed Tabs", ""].map((h) => (
               <th
                 key={h}
-                className="text-left font-medium"
-                style={{
-                  fontSize: 11,
-                  color: "var(--color-text-faint)",
-                  padding: "6px 10px",
-                  borderBottom: "1px solid var(--color-border)",
-                }}
+                scope="col"
+                className="text-left px-3 py-2 font-medium"
+                style={{ fontSize: 11, color: "var(--color-text-muted)" }}
               >
                 {h}
               </th>
@@ -112,29 +108,23 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken }:
               <tr
                 key={u.email}
                 style={{
-                  borderBottom: "1px solid var(--color-border)",
-                  background: isEditing ? "var(--color-elevated)" : undefined,
+                  borderBottom: "1px solid var(--color-border-subtle)",
+                  background: isEditing ? "var(--color-surface)" : undefined,
                 }}
               >
-                <td style={{ padding: "8px 10px", fontSize: 13, color: "var(--color-text)", fontWeight: 500 }}>
+                <td className="px-3 py-2.5" style={{ fontSize: 13, color: "var(--color-text)", fontWeight: 500 }}>
                   {u.name}
                 </td>
-                <td style={{ padding: "8px 10px", fontSize: 12, color: "var(--color-text-muted)" }}>
+                <td className="px-3 py-2.5" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
                   {u.email}
                 </td>
-                <td style={{ padding: "8px 10px" }}>
+                <td className="px-3 py-2.5">
                   {isEditing ? (
                     <select
                       value={editRole}
                       onChange={(e) => setEditRole(e.target.value)}
-                      style={{
-                        background: "var(--color-base)",
-                        color: "var(--color-text)",
-                        border: "1px solid var(--color-border)",
-                        borderRadius: 4,
-                        padding: "3px 6px",
-                        fontSize: 12,
-                      }}
+                      className="px-2 py-1 rounded text-xs"
+                      style={{ background: "var(--color-elevated)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
                     >
                       <option value="admin">admin</option>
                       <option value="editor">editor</option>
@@ -155,7 +145,7 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken }:
                     </span>
                   )}
                 </td>
-                <td style={{ padding: "8px 10px" }}>
+                <td className="px-3 py-2.5">
                   {isEditing ? (
                     <div className="flex flex-wrap gap-1.5">
                       {ALL_TABS.map((tab) => (
@@ -168,7 +158,7 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken }:
                             fontWeight: 500,
                             background: editTabs.has(tab)
                               ? "color-mix(in srgb, var(--color-lime) 20%, transparent)"
-                              : "var(--color-base)",
+                              : "var(--color-elevated)",
                             color: editTabs.has(tab) ? "var(--color-lime)" : "var(--color-text-faint)",
                             border: `1px solid ${editTabs.has(tab) ? "color-mix(in srgb, var(--color-lime) 35%, transparent)" : "var(--color-border)"}`,
                           }}
@@ -183,17 +173,17 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken }:
                     </span>
                   )}
                 </td>
-                <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>
+                <td className="px-3 py-2.5" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                   {isEditing ? (
                     <div className="flex items-center gap-2 justify-end">
                       {saveMsg && (
-                        <span style={{ fontSize: 11, color: saveMsg === "Saved" ? "var(--color-ok)" : "var(--color-err)" }}>
+                        <span role="status" aria-live="polite" style={{ fontSize: 11, color: saveMsg === "Saved" ? "var(--color-ok)" : "var(--color-err)" }}>
                           {saveMsg}
                         </span>
                       )}
                       <button
                         onClick={cancelEdit}
-                        className="rounded px-2 py-1 transition-colors hover:bg-[--color-base]"
+                        className="rounded px-2 py-1 transition-colors hover:bg-[--color-elevated]"
                         style={{ fontSize: 11, color: "var(--color-text-muted)" }}
                       >
                         Cancel
@@ -202,14 +192,9 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken }:
                         onClick={saveUser}
                         disabled={saving}
                         className="rounded px-3 py-1 font-medium transition-colors"
-                        style={{
-                          fontSize: 11,
-                          background: "var(--color-lime)",
-                          color: "#000",
-                          opacity: saving ? 0.5 : 1,
-                        }}
+                        style={{ fontSize: 11, background: "var(--color-lime)", color: "var(--color-base)", opacity: saving ? 0.5 : 1 }}
                       >
-                        {saving ? "Saving..." : "Save"}
+                        {saving ? "Saving…" : "Save"}
                       </button>
                     </div>
                   ) : (

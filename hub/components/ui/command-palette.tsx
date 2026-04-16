@@ -25,6 +25,7 @@ const COMMANDS = [
   { id: "compilations", label: "Compilations",      href: "/compilations", icon: Layers,       shortcut: "7" },
   { id: "approvals",    label: "Approvals",         href: "/approvals",    icon: CheckSquare,  shortcut: "8" },
   { id: "tickets",      label: "Tickets",           href: "/tickets",      icon: Ticket,       shortcut: "9" },
+  { id: "admin",        label: "Admin",             href: "/admin",        icon: Users,        shortcut: "0" },
 ]
 
 export function CommandPalette() {

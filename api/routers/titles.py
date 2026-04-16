@@ -172,7 +172,7 @@ async def generate_local_title(body: LocalTitleRequest, user: CurrentUser):
         for i, name in enumerate(names):
             try:
                 render_fn = treatments[name]
-                img = render_fn(body.text, seed=seed + i * 1000)
+                img = render_fn(body.text, random.Random(seed + i * 1000))
                 # Apply UnsharpMask for sharpness
                 from PIL import ImageFilter
                 img = img.filter(ImageFilter.UnsharpMask(radius=1.5, percent=60))
@@ -226,7 +226,7 @@ async def refine_title(body: RefineRequest, user: CurrentUser):
         # Simple keyword-based adjustment as fallback
         render_fn = treatments[body.treatment_name]
         try:
-            img = render_fn(body.text, seed=seed)
+            img = render_fn(body.text, random.Random(seed))
             from PIL import ImageFilter, ImageEnhance
             img = img.filter(ImageFilter.UnsharpMask(radius=1.5, percent=60))
 
