@@ -69,13 +69,18 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
           borderBottom: "1px solid var(--color-border)",
         }}
       >
-        <span
-          className="font-bold"
-          style={{ fontSize: 15, color: "var(--color-lime)", letterSpacing: "0.08em" }}
-        >
-          <span className="xl:hidden">E</span>
-          <span className="hidden xl:inline">ECLATECH</span>
+        {/* Collapsed: single letter */}
+        <span className="xl:hidden font-bold" style={{ fontSize: 15, color: "var(--color-lime)", letterSpacing: "0.08em" }}>E</span>
+
+        {/* Full wordmark with film-frame flanking rules */}
+        <span className="hidden xl:inline-flex items-center gap-2">
+          {/* Left perforation */}
+          <span aria-hidden="true" style={{ display: "inline-block", width: 1, height: 16, background: "var(--color-lime)", opacity: 0.4 }} />
+          <span className="font-bold" style={{ fontSize: 15, color: "var(--color-lime)", letterSpacing: "0.08em" }}>ECLATECH</span>
+          {/* Right perforation */}
+          <span aria-hidden="true" style={{ display: "inline-block", width: 1, height: 16, background: "var(--color-lime)", opacity: 0.4 }} />
         </span>
+
         <span className="hidden xl:inline" style={{ fontSize: 13, color: "var(--color-text-faint)", fontWeight: 400, letterSpacing: "0.12em" }}>
           HUB
         </span>
@@ -132,7 +137,7 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
           fontSize: 11,
         }}
       >
-        v2.0 — Next.js
+        Eclatech Hub
       </div>
     </aside>
   )

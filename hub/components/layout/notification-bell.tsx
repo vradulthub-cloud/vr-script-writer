@@ -27,6 +27,7 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
   const [unread, setUnread] = useState(0)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [loading, setLoading] = useState(false)
+  const [sessionExpired, setSessionExpired] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
 
   // Poll unread count every 60s
@@ -36,8 +37,9 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
       setUnread(count)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
-        // Token is dead — sign out so the user gets redirected to login cleanly
-        signOut({ redirectTo: "/login" })
+        // Show a brief message before redirecting so the sign-out doesn't feel like a crash
+        setSessionExpired(true)
+        setTimeout(() => signOut({ redirectTo: "/login" }), 1500)
       }
       // Other failures: silently ignore — bell just won't show a badge
     }
@@ -159,7 +161,23 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
             )}
           </div>
 
-          {/* List */}
+          {/* List — relative wrapper so the scroll shadow can be positioned inside */}
+          <div style={{ position: "relative" }}>
+          {notifications.length >= 5 && (
+            <div
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: 40,
+                background: "linear-gradient(to bottom, transparent, var(--color-surface))",
+                pointerEvents: "none",
+                zIndex: 1,
+              }}
+            />
+          )}
           <div className="overflow-y-auto" style={{ maxHeight: 370 }}>
             {loading && (
               <div className="py-6 text-center" style={{ color: "var(--color-text-faint)", fontSize: 12 }}>
@@ -217,6 +235,29 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
               </div>
             ))}
           </div>
+          </div>{/* end scroll shadow wrapper */}
+        </div>
+      )}
+
+      {/* Session expired toast — shown briefly before signOut redirect fires */}
+      {sessionExpired && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            zIndex: 500,
+            background: "var(--color-elevated)",
+            border: "1px solid var(--color-border)",
+            borderRadius: 4,
+            padding: "9px 14px",
+            fontSize: 12,
+            color: "var(--color-text-muted)",
+            boxShadow: "0 8px 24px rgba(0,0,0,.4)",
+            animation: "toastSlideUp 200ms cubic-bezier(0.16, 1, 0.3, 1) both",
+          }}
+        >
+          Session expired — signing you out…
         </div>
       )}
     </div>

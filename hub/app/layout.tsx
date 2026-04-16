@@ -20,7 +20,7 @@ const generalSans = localFont({
     { path: "../public/fonts/GeneralSans-Semibold.woff2", weight: "600", style: "normal" },
     { path: "../public/fonts/GeneralSans-Bold.woff2", weight: "700", style: "normal" },
   ],
-  variable: "--font-display",
+  variable: "--font-general-sans",
   display: "swap",
 })
 

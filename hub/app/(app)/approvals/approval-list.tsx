@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { X, ChevronRight } from "lucide-react"
 import { FilterTabs } from "@/components/ui/filter-tabs"
 import { StudioBadge } from "@/components/ui/studio-badge"
-import { api, type Approval } from "@/lib/api"
+import { api, ApiError, type Approval } from "@/lib/api"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -57,8 +57,8 @@ function parseContentJson(raw: string | null | undefined): ParsedContent {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface UndoEntry {
-  approvalId: string
-  previousStatus: string
+  approvalIds: string[]
+  previousStatuses: Record<string, string>
   decision: "Approved" | "Rejected"
 }
 
@@ -66,12 +66,13 @@ interface UndoEntry {
 
 interface UndoToastProps {
   decision: "Approved" | "Rejected"
+  count: number
   progress: number // 0–100
   onUndo: () => void
   onDismiss: () => void
 }
 
-function UndoToast({ decision, progress, onUndo, onDismiss }: UndoToastProps) {
+function UndoToast({ decision, count, progress, onUndo, onDismiss }: UndoToastProps) {
   const barColor = decision === "Approved" ? "var(--color-ok)" : "var(--color-err)"
 
   return (
@@ -88,7 +89,7 @@ function UndoToast({ decision, progress, onUndo, onDismiss }: UndoToastProps) {
         borderRadius: 4,
         overflow: "hidden",
         minWidth: 200,
-        boxShadow: "0 8px 32px color-mix(in srgb, #000 55%, transparent)",
+        boxShadow: "0 8px 24px rgba(0,0,0,.4)",
         animation: "toastSlideUp 200ms cubic-bezier(0.16, 1, 0.3, 1) both",
       }}
     >
@@ -109,11 +110,11 @@ function UndoToast({ decision, progress, onUndo, onDismiss }: UndoToastProps) {
           display: "flex",
           alignItems: "center",
           gap: 12,
-          padding: "9px 12px",
+          padding: "8px 12px",
         }}
       >
         <span style={{ fontSize: 12, color: "var(--color-text)", flex: 1 }}>
-          {decision}
+          {count > 1 ? `${decision} (${count})` : decision}
         </span>
         <button
           onClick={onUndo}
@@ -354,13 +355,13 @@ function ApprovalPanel({ approval, onClose, onApprove, onReject }: PanelProps) {
                       outline: "none",
                     }}
                   />
-                  <div style={{
-                    fontSize: 10,
-                    color: "var(--color-text-faint)",
-                    textAlign: "right",
-                    marginTop: 3,
-                  }}>
-                    {reason.length}/280
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 3 }}>
+                    <span style={{ fontSize: 10, color: reason.length < 10 ? "var(--color-text-faint)" : "var(--color-ok)" }}>
+                      {reason.length < 10 ? "Minimum 10 characters" : "✓"}
+                    </span>
+                    <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
+                      {reason.length}/280
+                    </span>
                   </div>
                 </div>
               </div>
@@ -438,7 +439,7 @@ function ApprovalPanel({ approval, onClose, onApprove, onReject }: PanelProps) {
                     border: "1px solid color-mix(in srgb, var(--color-err) 28%, transparent)",
                   }}
                 >
-                  Confirm Rejection
+                  {reason.length < 10 ? "Add more detail to confirm" : "Confirm Rejection"}
                 </button>
               </div>
             )}
@@ -486,17 +487,19 @@ interface Props {
 export function ApprovalList({ initialApprovals, error: initialError, idToken }: Props) {
   const [approvals, setApprovals] = useState<Approval[]>(initialApprovals)
   const [error, setError] = useState<string | null>(initialError)
+  const [retryFn, setRetryFn] = useState<(() => void) | null>(null)
   const [statusFilter, setStatusFilter] = useState("Pending")
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set())
   const [undo, setUndo] = useState<UndoEntry | null>(null)
   const [undoProgress, setUndoProgress] = useState(100)
 
   // Refs for timers — don't trigger re-renders
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  // Tracks pending API commit even after the undo toast is dismissed
+  // Tracks pending API commit even after the undo toast is dismissed (supports single and bulk)
   const pendingCommitRef = useRef<{
-    approvalId: string
+    approvalIds: string[]
     decision: "Approved" | "Rejected"
     notes?: string
   } | null>(null)
@@ -519,14 +522,44 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
     Rejected: approvals.filter(a => a.status === "Rejected").length,
   }), [approvals])
 
-  // Escape key closes panel
+  // Pending items visible in current filter — used for select-all checkbox
+  const pendingInView = useMemo(() =>
+    filtered.filter(a => a.status === "Pending"),
+    [filtered]
+  )
+
+  const allPendingSelected = pendingInView.length > 0 &&
+    pendingInView.every(a => bulkSelected.has(a.approval_id))
+
+  const somePendingSelected = !allPendingSelected &&
+    pendingInView.some(a => bulkSelected.has(a.approval_id))
+
+  function toggleSelectAll() {
+    if (allPendingSelected) {
+      setBulkSelected(new Set())
+    } else {
+      setBulkSelected(new Set(pendingInView.map(a => a.approval_id)))
+    }
+  }
+
+  function toggleBulkSelect(approvalId: string) {
+    setBulkSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(approvalId)) { next.delete(approvalId) } else { next.add(approvalId) }
+      return next
+    })
+  }
+
+  // Escape: close panel first, then clear selection
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape" && selectedId) setSelectedId(null)
+      if (e.key !== "Escape") return
+      if (selectedId) setSelectedId(null)
+      else if (bulkSelected.size > 0) setBulkSelected(new Set())
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [selectedId])
+  }, [selectedId, bulkSelected])
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -559,32 +592,48 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
     try {
       const updated = await client.approvals.decide(approvalId, { decision, notes })
       setApprovals(prev => prev.map(a => a.approval_id === updated.approval_id ? updated : a))
+      setRetryFn(null)
     } catch (e) {
+      // Roll back optimistic update
       setApprovals(prev =>
         prev.map(a => a.approval_id === approvalId ? { ...a, status: "Pending" } : a)
       )
-      setError(e instanceof Error ? e.message : "Couldn't save. Try again.")
+      if (e instanceof ApiError && e.status === 401) {
+        setError("Session expired — refresh the page to sign in again.")
+        setRetryFn(null)
+      } else if (e instanceof ApiError) {
+        setError(`Couldn't save: ${e.message}`)
+        setRetryFn(() => () => commitDecision(approvalId, decision, notes))
+      } else {
+        setError("Network error — check your connection and try again.")
+        setRetryFn(() => () => commitDecision(approvalId, decision, notes))
+      }
     }
   }, [client])
 
-  const decide = useCallback((decision: "Approved" | "Rejected", notes?: string) => {
-    if (!selectedApproval) return
-    const { approval_id, status: previousStatus } = selectedApproval
-
-    // If there's an in-flight commit from a previous decision, fire it immediately
+  // Flush any pending in-flight commit immediately — shared by decide() and decideBulk()
+  function flushPending() {
     if (undoTimerRef.current) {
       clearTimeout(undoTimerRef.current)
       undoTimerRef.current = null
-      if (pendingCommitRef.current) {
-        const { approvalId, decision: prevDecision, notes: prevNotes } = pendingCommitRef.current
-        commitDecision(approvalId, prevDecision, prevNotes)
-        pendingCommitRef.current = null
-      }
     }
     if (progressIntervalRef.current) {
       clearInterval(progressIntervalRef.current)
       progressIntervalRef.current = null
     }
+    if (pendingCommitRef.current) {
+      const { approvalIds, decision: d, notes } = pendingCommitRef.current
+      Promise.all(approvalIds.map(id => commitDecision(id, d, notes)))
+      pendingCommitRef.current = null
+    }
+  }
+
+  const decide = useCallback((decision: "Approved" | "Rejected", notes?: string) => {
+    if (!selectedApproval) return
+    const { approval_id, status: previousStatus } = selectedApproval
+
+    // Flush any in-flight pending commit before starting a new one
+    flushPending()
 
     // Optimistic update
     setApprovals(prev =>
@@ -595,21 +644,65 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
     setSelectedId(null)
 
     // Store pending commit in ref (survives toast dismissal)
-    pendingCommitRef.current = { approvalId: approval_id, decision, notes }
+    pendingCommitRef.current = { approvalIds: [approval_id], decision, notes }
 
     // Start undo window
     startProgressCountdown()
-    setUndo({ approvalId: approval_id, previousStatus, decision })
+    setUndo({ approvalIds: [approval_id], previousStatuses: { [approval_id]: previousStatus }, decision })
 
     undoTimerRef.current = setTimeout(() => {
       if (pendingCommitRef.current) {
-        commitDecision(pendingCommitRef.current.approvalId, pendingCommitRef.current.decision, pendingCommitRef.current.notes)
+        const { approvalIds, decision: d, notes: n } = pendingCommitRef.current
+        Promise.all(approvalIds.map(id => commitDecision(id, d, n)))
         pendingCommitRef.current = null
       }
       setUndo(null)
       undoTimerRef.current = null
     }, UNDO_DURATION_MS)
   }, [selectedApproval, commitDecision])
+
+  const decideBulk = useCallback((decision: "Approved" | "Rejected") => {
+    const ids = [...bulkSelected].filter(id =>
+      approvals.find(a => a.approval_id === id)?.status === "Pending"
+    )
+    if (ids.length === 0) return
+
+    // Flush any in-flight pending commit before starting a new one
+    flushPending()
+
+    // Record previous statuses for undo
+    const previousStatuses: Record<string, string> = {}
+    ids.forEach(id => {
+      const a = approvals.find(a => a.approval_id === id)
+      if (a) previousStatuses[id] = a.status
+    })
+
+    // Optimistic update
+    setApprovals(prev =>
+      prev.map(a => ids.includes(a.approval_id) ? { ...a, status: decision } : a)
+    )
+
+    // Close panel if the selected item was in the batch
+    if (selectedId && ids.includes(selectedId)) setSelectedId(null)
+
+    // Clear selection
+    setBulkSelected(new Set())
+
+    pendingCommitRef.current = { approvalIds: ids, decision }
+
+    startProgressCountdown()
+    setUndo({ approvalIds: ids, previousStatuses, decision })
+
+    undoTimerRef.current = setTimeout(() => {
+      if (pendingCommitRef.current) {
+        const { approvalIds, decision: d } = pendingCommitRef.current
+        Promise.all(approvalIds.map(id => commitDecision(id, d)))
+        pendingCommitRef.current = null
+      }
+      setUndo(null)
+      undoTimerRef.current = null
+    }, UNDO_DURATION_MS)
+  }, [bulkSelected, approvals, selectedId, commitDecision])
 
   const handleUndo = useCallback(() => {
     if (!undo) return
@@ -626,13 +719,16 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
     // Cancel pending commit
     pendingCommitRef.current = null
 
-    // Revert optimistic update
+    // Revert all optimistic updates
     setApprovals(prev =>
-      prev.map(a => a.approval_id === undo.approvalId ? { ...a, status: undo.previousStatus } : a)
+      prev.map(a => undo.approvalIds.includes(a.approval_id)
+        ? { ...a, status: undo.previousStatuses[a.approval_id] ?? a.status }
+        : a
+      )
     )
 
-    // Reopen the panel for the reverted item
-    setSelectedId(undo.approvalId)
+    // Reopen panel only for single-item undo
+    if (undo.approvalIds.length === 1) setSelectedId(undo.approvalIds[0])
     setUndo(null)
     setUndoProgress(100)
   }, [undo])
@@ -657,7 +753,7 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
         <FilterTabs
           options={STATUSES}
           value={statusFilter}
-          onChange={(v) => { setStatusFilter(v); setSelectedId(null) }}
+          onChange={(v) => { setStatusFilter(v); setSelectedId(null); setBulkSelected(new Set()) }}
           counts={statusCounts}
         />
       </div>
@@ -679,13 +775,23 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
           }}
         >
           <span>{error}</span>
-          <button
-            onClick={() => setError(null)}
-            aria-label="Dismiss error"
-            style={{ color: "inherit", opacity: 0.7, background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex" }}
-          >
-            <X size={13} />
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            {retryFn && (
+              <button
+                onClick={() => { retryFn(); setRetryFn(null); setError(null) }}
+                style={{ fontSize: 11, fontWeight: 600, color: "var(--color-lime)", background: "none", border: "none", cursor: "pointer", padding: "0 2px" }}
+              >
+                Retry
+              </button>
+            )}
+            <button
+              onClick={() => { setError(null); setRetryFn(null) }}
+              aria-label="Dismiss error"
+              style={{ color: "inherit", opacity: 0.7, background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex" }}
+            >
+              <X size={13} />
+            </button>
+          </div>
         </div>
       )}
 
@@ -711,6 +817,18 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
               <table className="w-full" style={{ borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
+                    <th className="px-3 py-2" style={{ width: 32 }}>
+                      {pendingInView.length > 0 && (
+                        <input
+                          type="checkbox"
+                          checked={allPendingSelected}
+                          ref={(el) => { if (el) el.indeterminate = somePendingSelected }}
+                          onChange={toggleSelectAll}
+                          aria-label="Select all pending"
+                          style={{ cursor: "pointer", accentColor: "var(--color-lime)" }}
+                        />
+                      )}
+                    </th>
                     {["Scene", "Studio", "Type", "Submitted by", "Date", "Status", ""].map((h, i) => (
                       <th
                         key={i}
@@ -753,6 +871,21 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
                         }}
                         className={!isSelected ? "hover:bg-[--color-elevated]" : ""}
                       >
+                        <td
+                          className="px-3 py-2.5"
+                          style={{ width: 32 }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {approval.status === "Pending" && (
+                            <input
+                              type="checkbox"
+                              checked={bulkSelected.has(approval.approval_id)}
+                              onChange={() => toggleBulkSelect(approval.approval_id)}
+                              aria-label={`Select ${approval.scene_id || "this item"}`}
+                              style={{ cursor: "pointer", accentColor: "var(--color-lime)" }}
+                            />
+                          )}
+                        </td>
                         <td className="px-3 py-2.5 font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
                           {approval.scene_id || "—"}
                         </td>
@@ -801,6 +934,66 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
               </table>
             </div>
           )}
+
+          {/* Bulk action bar — appears when rows are checked */}
+          {bulkSelected.size > 0 && (
+            <div
+              style={{
+                position: "sticky",
+                bottom: 0,
+                marginTop: 10,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 12px",
+                background: "var(--color-elevated)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 4,
+                animation: "fadeIn 160ms var(--ease-out-expo) both",
+              }}
+            >
+              <span style={{ fontSize: 12, color: "var(--color-text-muted)", flex: 1 }}>
+                {bulkSelected.size} selected
+              </span>
+              <button
+                onClick={() => decideBulk("Approved")}
+                style={{
+                  padding: "5px 12px",
+                  borderRadius: 3,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  background: "color-mix(in srgb, var(--color-lime) 12%, transparent)",
+                  color: "var(--color-lime)",
+                  border: "1px solid color-mix(in srgb, var(--color-lime) 28%, transparent)",
+                }}
+              >
+                Approve {bulkSelected.size}
+              </button>
+              <button
+                onClick={() => decideBulk("Rejected")}
+                style={{
+                  padding: "5px 12px",
+                  borderRadius: 3,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  background: "transparent",
+                  color: "var(--color-text-muted)",
+                  border: "1px solid var(--color-border)",
+                }}
+              >
+                Reject {bulkSelected.size}
+              </button>
+              <button
+                onClick={() => setBulkSelected(new Set())}
+                aria-label="Clear selection"
+                style={{ color: "var(--color-text-faint)", background: "none", border: "none", cursor: "pointer", padding: "0 4px", display: "flex", alignItems: "center" }}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Panel wrapper — slides in with transform (no layout thrash) */}
@@ -834,6 +1027,7 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
       {undo && (
         <UndoToast
           decision={undo.decision}
+          count={undo.approvalIds.length}
           progress={undoProgress}
           onUndo={handleUndo}
           onDismiss={handleDismissUndo}

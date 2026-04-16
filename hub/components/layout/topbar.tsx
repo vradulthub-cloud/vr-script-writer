@@ -49,6 +49,16 @@ export function Topbar({ session, idToken, userRole }: TopbarProps) {
         </span>
       )}
 
+      {/* Desktop page title — lightweight orientation label */}
+      {pageName && (
+        <span
+          className="hidden md:block"
+          style={{ fontSize: 12, color: "var(--color-text-muted)", letterSpacing: "0.01em" }}
+        >
+          {pageName}
+        </span>
+      )}
+
       {/* Right-side controls — ml-auto pushes to far right */}
       <div className="ml-auto flex items-center gap-3">
         <NotificationBell idToken={idToken} />
