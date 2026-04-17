@@ -128,12 +128,21 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTab, mode])
 
-  // True if the user has typed anything in manual mode that a sheet row would overwrite
+  // True if the user has typed anything in manual mode that a sheet row
+  // would either overwrite (female/male/studio) or hide from view
+  // (directorNote/destination — preserved across row selection, but not
+  // visible in sheet mode, so we warn before the view shift).
   const manualIsDirty = useMemo(
-    () => female !== "" || male !== "" || directorNote !== "",
-    [female, male, directorNote]
+    () => female !== "" || male !== "" || directorNote !== "" || destination !== "",
+    [female, male, directorNote, destination]
   )
 
+  /**
+   * Populate manual fields from a sheet row.
+   * Overwrites: selectedRow, studio, female, male.
+   * Preserves:  directorNote, destination, sceneType, feedback, stream output.
+   * Callers must route through selectRow() so the dirty-check fires.
+   */
   function applyRow(row: Script) {
     setSelectedRow(row)
     setStudio(row.studio || "FuckPassVR")
@@ -144,13 +153,35 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
   }
 
   function selectRow(row: Script) {
+    // Row selection clobbers studio/female/male. Warn if any of those
+    // three would meaningfully change AND the user has typed anything
+    // manually. directorNote/destination are preserved by applyRow, so
+    // they flag dirtiness but don't gate the overwrite check.
     const wouldOverwrite =
-      (row.female || "") !== female || (row.male || "") !== male
+      (row.female || "") !== female ||
+      (row.male || "") !== male ||
+      (row.studio || "FuckPassVR") !== studio
     if (manualIsDirty && wouldOverwrite) {
       setPendingRow(row)
       return
     }
     applyRow(row)
+  }
+
+  /**
+   * Guarded mode switch — when moving from manual to sheet with dirty
+   * inputs, surface a confirmation so the user knows their manual state
+   * is preserved (just hidden) and doesn't assume they've lost work.
+   */
+  function switchMode(next: "manual" | "sheet") {
+    if (mode === next) return
+    if (mode === "manual" && next === "sheet" && manualIsDirty) {
+      const ok = window.confirm(
+        "Your manual inputs will be hidden while you browse sheet rows. They'll still be there when you return — continue?",
+      )
+      if (!ok) return
+    }
+    setMode(next)
   }
 
   function generate() {
@@ -289,20 +320,38 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
       <div style={{ width: 300, flexShrink: 0 }}>
         {/* Mode tabs */}
         <div className="flex gap-1 mb-5">
-          {(["manual", "sheet"] as const).map(m => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              className="px-3 py-1.5 rounded text-xs transition-colors capitalize"
-              style={{
-                background: mode === m ? "var(--color-elevated)" : "transparent",
-                color: mode === m ? "var(--color-text)" : "var(--color-text-muted)",
-                border: `1px solid ${mode === m ? "var(--color-border)" : "transparent"}`,
-              }}
-            >
-              {m === "manual" ? "Manual" : "From Sheet"}
-            </button>
-          ))}
+          {(["manual", "sheet"] as const).map(m => {
+            const showDirtyDot = m === "manual" && mode !== "manual" && manualIsDirty
+            return (
+              <button
+                key={m}
+                onClick={() => switchMode(m)}
+                className="px-3 py-1.5 rounded text-xs transition-colors capitalize relative"
+                style={{
+                  background: mode === m ? "var(--color-elevated)" : "transparent",
+                  color: mode === m ? "var(--color-text)" : "var(--color-text-muted)",
+                  border: `1px solid ${mode === m ? "var(--color-border)" : "transparent"}`,
+                }}
+                title={showDirtyDot ? "You have unsaved manual inputs" : undefined}
+              >
+                {m === "manual" ? "Manual" : "From Sheet"}
+                {showDirtyDot && (
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      display: "inline-block",
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: "var(--color-lime)",
+                      marginLeft: 6,
+                      verticalAlign: "middle",
+                    }}
+                  />
+                )}
+              </button>
+            )
+          })}
         </div>
 
         {mode === "sheet" ? (
