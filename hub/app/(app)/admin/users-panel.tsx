@@ -70,19 +70,56 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
       setSaveMsg("You can't clear your own tabs — you'd lock yourself out.")
       return
     }
+    const allSelected = ALL_TABS.every((t) => editTabs.has(t))
+    const nextTabs = allSelected ? "ALL" : Array.from(editTabs).join(", ")
+    const previous = users.find((u) => u.email === editingEmail)
+    const prevRole = previous?.role ?? ""
+    const prevTabs = previous?.allowed_tabs ?? ""
+    const roleChanged = editRole !== prevRole
+    const tabsChanged = nextTabs !== prevTabs
+
+    if (!roleChanged && !tabsChanged) {
+      setSaveMsg("No changes.")
+      return
+    }
+
+    // Role changes are privileged — require explicit confirmation so a
+    // slip-of-the-finger doesn't promote an editor to admin.
+    if (roleChanged) {
+      const verb = editRole === "admin" ? "PROMOTE to admin" : `DOWNGRADE to ${editRole}`
+      const ok = window.confirm(
+        `${verb} ${editingEmail}?\n\nThis change is logged in the tickets sheet as an audit entry.`,
+      )
+      if (!ok) return
+    }
+
     setSaving(true)
     setSaveMsg("")
     try {
-      const allSelected = ALL_TABS.every((t) => editTabs.has(t))
-      const body: UserUpdate = {
-        role: editRole,
-        allowed_tabs: allSelected ? "ALL" : Array.from(editTabs).join(", "),
-      }
+      const body: UserUpdate = { role: editRole, allowed_tabs: nextTabs }
       const updated = await client.users.update(editingEmail, body)
       setUsers((prev) =>
         prev.map((u) => (u.email === editingEmail ? updated : u))
       )
       setSaveMsg("Saved")
+
+      // Audit trail — log every permission change as a Hub ticket. The
+      // tickets sheet is the closest thing we have to an audit log (users
+      // sheet has no audit column, no dedicated endpoint exists). Swallow
+      // failures so the audit log never blocks the save.
+      const changes: string[] = []
+      if (roleChanged) changes.push(`role ${prevRole || "(none)"} → ${editRole}`)
+      if (tabsChanged) changes.push(`tabs ${prevTabs || "(none)"} → ${nextTabs}`)
+      void client.tickets.create({
+        title: `Admin change: ${editingEmail} — ${changes.join("; ")}`,
+        description: `Changed by ${currentEmail || "unknown admin"} at ${new Date().toISOString()}.\n\n${changes.join("\n")}`,
+        project: "Hub",
+        type: "Audit",
+        priority: "Low",
+      }).catch((err) => {
+        console.warn("[admin] audit log failed:", err)
+      })
+
       setTimeout(() => {
         setEditingEmail(null)
         setSaveMsg("")
