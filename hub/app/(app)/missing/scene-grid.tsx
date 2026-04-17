@@ -1,12 +1,30 @@
 "use client"
 
 import { useState, useMemo, useCallback, useDeferredValue, memo } from "react"
+import { flushSync } from "react-dom"
 import { FilterTabs } from "@/components/ui/filter-tabs"
 import { RetryError } from "@/components/ui/retry-error"
 import { useIdToken } from "@/hooks/use-id-token"
 import type { Scene, SceneStats } from "@/lib/api"
 import { API_BASE_URL } from "@/lib/api"
 import { SceneDetail } from "./scene-detail"
+
+/**
+ * Wraps a state update in the View Transitions API so the browser captures
+ * before/after DOM snapshots and morphs shared `view-transition-name`
+ * elements between them. Falls back to an instant update in Firefox and
+ * anywhere the API is absent.
+ */
+function morphTo(fn: () => void) {
+  const doc = typeof document !== "undefined" ? document : null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const startViewTransition = (doc as any)?.startViewTransition
+  if (!startViewTransition) {
+    fn()
+    return
+  }
+  startViewTransition.call(doc, () => flushSync(fn))
+}
 
 const STUDIOS = ["All", "FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
 const STUDIO_ORDER = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
@@ -117,7 +135,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
       <SceneDetail
         scene={selectedScene}
         idToken={idToken}
-        onBack={() => setSelectedScene(null)}
+        onBack={() => morphTo(() => setSelectedScene(null))}
         onSceneUpdate={handleSceneUpdate}
       />
     )
@@ -216,7 +234,11 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
               ) : (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
                   {studioScenes.map(scene => (
-                    <SceneCard key={scene.id} scene={scene} onClick={() => setSelectedScene(scene)} />
+                    <SceneCard
+                      key={scene.id}
+                      scene={scene}
+                      onClick={() => morphTo(() => setSelectedScene(scene))}
+                    />
                   ))}
                 </div>
               )}
@@ -250,6 +272,12 @@ const SceneCard = memo(function SceneCard({
     ? (scene.title.length > 44 ? scene.title.slice(0, 44) + "…" : scene.title)
     : "—"
 
+  // Unique view-transition-name tied to scene.id so the browser pairs
+  // this card with the corresponding element in scene-detail.tsx when the
+  // user clicks in or hits "Back to grid". CSS-safe: scene IDs use [A-Z0-9-].
+  const frameName = `scene-frame-${scene.id}`
+  const codeName  = `scene-code-${scene.id}`
+
   return (
     <button
       onClick={onClick}
@@ -261,12 +289,13 @@ const SceneCard = memo(function SceneCard({
         textAlign: "left",
         cursor: "pointer",
         width: "100%",
+        viewTransitionName: frameName,
       }}
       onMouseEnter={e => (e.currentTarget.style.background = "var(--color-elevated)")}
       onMouseLeave={e => (e.currentTarget.style.background = "var(--color-surface)")}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 700, color: "var(--color-text)" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 700, color: "var(--color-text)", viewTransitionName: codeName }}>
           {scene.id}
         </span>
         {dateStr && <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>{dateStr}</span>}
