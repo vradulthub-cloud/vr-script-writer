@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { X, Wand2, FolderPlus, ImageOff } from "lucide-react"
 import { api, thumbnailUrl, type Scene, type NamingIssue } from "@/lib/api"
 import { formatApiError } from "@/lib/errors"
@@ -68,6 +68,7 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
   // Naming validation
   const [namingIssues, setNamingIssues] = useState<NamingIssue[] | null>(null)
   const [namingOk, setNamingOk] = useState<boolean | null>(null)
+  const [namingError, setNamingError] = useState<string | null>(null)
 
   // MEGA folder
   const [folderCreating, setFolderCreating] = useState(false)
@@ -107,16 +108,23 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
   }, [isDirty])
 
   // Load naming issues when scene changes
-  useEffect(() => {
+  const loadNamingIssues = useCallback(() => {
     setNamingIssues(null)
     setNamingOk(null)
+    setNamingError(null)
     client.scenes.namingIssues(scene.id).then((data) => {
       setNamingIssues(data.issues)
       setNamingOk(data.ok)
     }).catch((e) => {
       console.warn("[scene-detail] Failed to load naming issues:", e)
+      setNamingError(formatApiError(e, "Check naming"))
     })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene.id])
+
+  useEffect(() => {
+    loadNamingIssues()
+  }, [loadNamingIssues])
 
   function startEdit(field: "title" | "categories" | "tags") {
     setEditingField(field)
@@ -478,7 +486,27 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
         {/* ── Zone: Naming & Folder ──────────────────────────────────── */}
         <SectionLabel>Naming &amp; Folder</SectionLabel>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
-          {namingOk === null ? (
+          {namingError ? (
+            <div
+              className="rounded flex items-center justify-between gap-2"
+              style={{
+                padding: "7px 10px",
+                fontSize: 11,
+                color: "var(--color-err)",
+                background: "color-mix(in srgb, var(--color-err) 8%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--color-err) 20%, transparent)",
+              }}
+            >
+              <span>{namingError}</span>
+              <button
+                onClick={loadNamingIssues}
+                className="px-2 py-0.5 rounded"
+                style={{ fontSize: 11, color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+              >
+                Retry
+              </button>
+            </div>
+          ) : namingOk === null ? (
             <div style={{ fontSize: 11, color: "var(--color-text-faint)", padding: "6px 0" }}>
               Checking naming…
             </div>
