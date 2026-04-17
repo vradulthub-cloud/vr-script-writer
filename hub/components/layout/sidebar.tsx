@@ -206,17 +206,6 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
         )}
       </nav>
 
-      {/* Bottom: version */}
-      <div
-        className="hidden xl:block px-4 py-3 shrink-0"
-        style={{
-          borderTop: "1px solid var(--color-border)",
-          color: "var(--color-text-faint)",
-          fontSize: 11,
-        }}
-      >
-        Eclatech Hub
-      </div>
     </aside>
   )
 }

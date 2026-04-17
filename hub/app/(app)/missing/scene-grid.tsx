@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useMemo, useCallback, useDeferredValue, memo } from "react"
+import { useState, useMemo, useCallback, useDeferredValue, useEffect, memo } from "react"
 import { flushSync } from "react-dom"
+import { useSearchParams } from "next/navigation"
 import { FilterTabs } from "@/components/ui/filter-tabs"
 import { RetryError } from "@/components/ui/retry-error"
 import { useIdToken } from "@/hooks/use-id-token"
@@ -71,6 +72,19 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null)
   const [error, setError] = useState(initialError)
 
+  // Deep-link support: /missing?scene=VRH0762 opens the panel on that scene
+  const searchParams = useSearchParams()
+  useEffect(() => {
+    const sceneId = searchParams?.get("scene")
+    if (!sceneId) return
+    const match = scenes.find(s => s.id === sceneId)
+    if (match && (!selectedScene || selectedScene.id !== sceneId)) {
+      setSelectedScene(match)
+    }
+    // scenes is stable across renders (loaded once from server); we intentionally
+    // only re-run when the URL param changes so typing in search doesn't reselect.
+  }, [searchParams])
+
   const handleSceneUpdate = useCallback((updated: Scene) => {
     setScenes(prev => prev.map(s => s.id === updated.id ? updated : s))
     setSelectedScene(updated)
@@ -130,19 +144,8 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
     }
   }
 
-  if (selectedScene) {
-    return (
-      <SceneDetail
-        scene={selectedScene}
-        idToken={idToken}
-        onBack={() => morphTo(() => setSelectedScene(null))}
-        onSceneUpdate={handleSceneUpdate}
-      />
-    )
-  }
-
   return (
-    <div>
+    <div style={{ position: "relative" }}>
       {/* Filter bar */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24, flexWrap: "wrap" }}>
         <FilterTabs
@@ -207,54 +210,140 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
         <RetryError message={error} onRetry={() => { setError(null); window.location.reload() }} className="mb-4" />
       )}
 
-      {/* Studio sections */}
-      {STUDIO_ORDER
-        .filter(s => studio === "All" || s === studio)
-        .map(studioName => {
-          const studioScenes = byStudio[studioName] ?? []
-          const color = STUDIO_COLOR[studioName] ?? "var(--color-border)"
-          return (
-            <div key={studioName} style={{ marginBottom: 32 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                <div style={{ width: 3, height: 18, borderRadius: 2, background: color, flexShrink: 0 }} />
-                <span style={{ fontWeight: 700, fontSize: 13, color: "var(--color-text)" }}>{studioName}</span>
-                {studioScenes.length === 0
-                  ? <span style={{ fontSize: 11, color: "var(--color-ok)" }}>all clear</span>
-                  : <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>{studioScenes.length} scene{studioScenes.length !== 1 ? "s" : ""} missing assets</span>
-                }
-              </div>
+      {/* Grid + slide-in detail panel.
+          Animating grid-template-columns (instead of width) lets the browser
+          coordinate both tracks in one layout pass rather than re-flowing
+          per frame on a width transition. */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: selectedScene ? "minmax(0, 1fr) 480px" : "minmax(0, 1fr) 0px",
+          columnGap: selectedScene ? 12 : 0,
+          alignItems: "flex-start",
+          transition: "grid-template-columns 260ms cubic-bezier(0.16, 1, 0.3, 1), column-gap 260ms cubic-bezier(0.16, 1, 0.3, 1)",
+        }}
+      >
+        {/* Grid zone — shrinks when panel is open */}
+        <div style={{ minWidth: 0 }}>
+          {STUDIO_ORDER
+            .filter(s => studio === "All" || s === studio)
+            .map(studioName => {
+              const studioScenes = byStudio[studioName] ?? []
+              const color = STUDIO_COLOR[studioName] ?? "var(--color-border)"
+              const isAllClear = studioScenes.length === 0
+              return (
+                <div key={studioName} style={{ marginBottom: 32 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <div style={{ width: 3, height: 18, borderRadius: 2, background: color, flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700, fontSize: 13, color: "var(--color-text)" }}>{studioName}</span>
+                    {isAllClear
+                      ? <span style={{ fontSize: 11, color: "var(--color-ok)" }}>all clear</span>
+                      : <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>{studioScenes.length} scene{studioScenes.length !== 1 ? "s" : ""} missing assets</span>
+                    }
+                  </div>
 
-              {studioScenes.length === 0 ? (
-                <div style={{
-                  padding: "10px 14px", borderRadius: 6, fontSize: 12,
-                  border: "1px dashed var(--color-border)", color: "var(--color-text-faint)",
-                }}>
-                  No missing assets in recent scenes.
+                  {isAllClear ? (
+                    <AllClearCard color={color} />
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: selectedScene ? "repeat(auto-fill, minmax(180px, 1fr))" : "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
+                      {studioScenes.map(scene => (
+                        <SceneCard
+                          key={scene.id}
+                          scene={scene}
+                          selected={selectedScene?.id === scene.id}
+                          onClick={() => morphTo(() => setSelectedScene(scene))}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
-                  {studioScenes.map(scene => (
-                    <SceneCard
-                      key={scene.id}
-                      scene={scene}
-                      onClick={() => morphTo(() => setSelectedScene(scene))}
-                    />
-                  ))}
-                </div>
-              )}
+              )
+            })}
+
+          {totalVisible === 0 && !error && (
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              height: 160, border: "1px dashed var(--color-border)", borderRadius: 6,
+              color: "var(--color-text-faint)", fontSize: 13,
+            }}>
+              {missingOnly ? "All assets accounted for ✓" : "No scenes found"}
             </div>
-          )
-        })}
-
-      {totalVisible === 0 && !error && (
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "center",
-          height: 160, border: "1px dashed var(--color-border)", borderRadius: 6,
-          color: "var(--color-text-faint)", fontSize: 13,
-        }}>
-          {missingOnly ? "All assets accounted for ✓" : "No scenes found"}
+          )}
         </div>
-      )}
+
+        {/* Side panel wrapper — GPU-accelerated transform+opacity only */}
+        <div
+          style={{
+            minWidth: 0,
+            position: "sticky",
+            top: 12,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              transform: selectedScene ? "translateX(0)" : "translateX(calc(100% + 12px))",
+              opacity: selectedScene ? 1 : 0,
+              transition: "transform 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease-out",
+              pointerEvents: selectedScene ? "auto" : "none",
+            }}
+          >
+            {selectedScene && (
+              <SceneDetail
+                key={selectedScene.id}
+                scene={selectedScene}
+                idToken={idToken}
+                onClose={() => morphTo(() => setSelectedScene(null))}
+                onSceneUpdate={handleSceneUpdate}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── All-clear card: delightful empty state ──────────────────────────────────
+
+function AllClearCard({ color }: { color: string }) {
+  return (
+    <div
+      style={{
+        padding: "14px 16px",
+        borderRadius: 6,
+        fontSize: 12,
+        border: "1px solid color-mix(in srgb, var(--color-ok) 20%, transparent)",
+        background: "color-mix(in srgb, var(--color-ok) 4%, transparent)",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 20, height: 20,
+          borderRadius: "50%",
+          background: "color-mix(in srgb, var(--color-ok) 20%, transparent)",
+          color: "var(--color-ok)",
+          fontWeight: 700,
+          fontSize: 12,
+          flexShrink: 0,
+        }}
+      >
+        ✓
+      </span>
+      <span style={{ color: "var(--color-text-muted)" }}>
+        Every recent scene accounted for. <span style={{ color: "var(--color-text-faint)" }}>Nothing blocking.</span>
+      </span>
+      <span
+        aria-hidden="true"
+        style={{ marginLeft: "auto", width: 24, height: 2, background: color, opacity: 0.5, borderRadius: 1, flexShrink: 0 }}
+      />
     </div>
   )
 }
@@ -262,8 +351,8 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
 // React.memo prevents re-renders for unchanged scenes when filters or search
 // state change elsewhere in the grid.
 const SceneCard = memo(function SceneCard({
-  scene, onClick,
-}: { scene: Scene; onClick: () => void }) {
+  scene, selected, onClick,
+}: { scene: Scene; selected: boolean; onClick: () => void }) {
   const missing = missingAssets(scene)
   const pct = completionPct(scene)
   const pctColor = pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)"
@@ -272,18 +361,25 @@ const SceneCard = memo(function SceneCard({
     ? (scene.title.length > 44 ? scene.title.slice(0, 44) + "…" : scene.title)
     : "—"
 
+  const studioColor = STUDIO_COLOR[scene.studio] ?? "var(--color-text-muted)"
+
   // Unique view-transition-name tied to scene.id so the browser pairs
   // this card with the corresponding element in scene-detail.tsx when the
-  // user clicks in or hits "Back to grid". CSS-safe: scene IDs use [A-Z0-9-].
+  // user clicks in or opens the panel. CSS-safe: scene IDs use [A-Z0-9-].
   const frameName = `scene-frame-${scene.id}`
   const codeName  = `scene-code-${scene.id}`
 
   return (
     <button
       onClick={onClick}
+      aria-pressed={selected}
       style={{
-        background: "var(--color-surface)",
-        border: "1px solid var(--color-border)",
+        background: selected
+          ? `color-mix(in srgb, ${studioColor} 10%, var(--color-elevated))`
+          : "var(--color-surface)",
+        border: selected
+          ? `1px solid color-mix(in srgb, ${studioColor} 45%, transparent)`
+          : "1px solid var(--color-border)",
         borderRadius: 6,
         padding: "12px 14px",
         textAlign: "left",
@@ -291,8 +387,12 @@ const SceneCard = memo(function SceneCard({
         width: "100%",
         viewTransitionName: frameName,
       }}
-      onMouseEnter={e => (e.currentTarget.style.background = "var(--color-elevated)")}
-      onMouseLeave={e => (e.currentTarget.style.background = "var(--color-surface)")}
+      onMouseEnter={e => {
+        if (!selected) e.currentTarget.style.background = "var(--color-elevated)"
+      }}
+      onMouseLeave={e => {
+        if (!selected) e.currentTarget.style.background = "var(--color-surface)"
+      }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 700, color: "var(--color-text)", viewTransitionName: codeName }}>

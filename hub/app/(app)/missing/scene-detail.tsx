@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { ArrowLeft, Wand2, FolderPlus, ImageOff } from "lucide-react"
+import { useState, useEffect, useRef } from "react"
+import { X, Wand2, FolderPlus, ImageOff } from "lucide-react"
 import { api, thumbnailUrl, type Scene, type NamingIssue } from "@/lib/api"
 import { formatApiError } from "@/lib/errors"
 import { useIdToken } from "@/hooks/use-id-token"
@@ -19,16 +19,35 @@ const ASSET_COLS = [
 interface SceneDetailProps {
   scene: Scene
   idToken: string | undefined
-  onBack: () => void
+  onClose: () => void
   onSceneUpdate: (updated: Scene) => void
 }
 
-export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack, onSceneUpdate }: SceneDetailProps) {
+/**
+ * Side-panel scene detail. Renders inside a ~480px right-rail frame that the
+ * grid makes room for via flex layout (see scene-grid.tsx). Keeps the grid
+ * visible so editors can triage multiple scenes without full-page navigation.
+ *
+ * Dirty-state signal: each inline editable field tracks whether its local
+ * value diverges from the server snapshot. A muted "Unsaved" pill appears
+ * inline and `beforeunload` blocks navigation when any field is dirty.
+ */
+export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose, onSceneUpdate }: SceneDetailProps) {
   const idToken = useIdToken(serverToken)
   const client = api(idToken ?? null)
   const color = studioColor(initialScene.studio)
 
   const [scene, setScene] = useState(initialScene)
+  // Reset local state when the parent swaps scenes
+  useEffect(() => {
+    setScene(initialScene)
+    setEditingField(null)
+    setEditValue("")
+    setSaveMsg("")
+    setGenTitle("")
+    setFolderMsg("")
+    setThumbFailed(false)
+  }, [initialScene.id])
 
   // Editable fields
   const [editingField, setEditingField] = useState<"title" | "categories" | "tags" | null>(null)
@@ -48,12 +67,43 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
   const [folderCreating, setFolderCreating] = useState(false)
   const [folderMsg, setFolderMsg] = useState("")
 
-  // Thumbnail load state — server sync can claim has_thumbnail=true before the
-  // MEGA proxy actually has the file, so we treat image errors as "missing"
+  // Thumbnail load state — server sync can claim has_thumbnail=true before
+  // the MEGA proxy actually has the file
   const [thumbFailed, setThumbFailed] = useState(false)
 
-  // Load naming issues on mount
+  // Dirty state — any editing field with local != original
+  const isDirty = editingField !== null && editValue !== (scene[editingField] ?? "")
+
+  // Block accidental nav-away when dirty
   useEffect(() => {
+    if (!isDirty) return
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault()
+      e.returnValue = ""
+    }
+    window.addEventListener("beforeunload", onBeforeUnload)
+    return () => window.removeEventListener("beforeunload", onBeforeUnload)
+  }, [isDirty])
+
+  // Guard the close button: if dirty, confirm before discarding
+  function requestClose() {
+    if (isDirty && !confirm("You have unsaved changes. Discard them?")) return
+    onClose()
+  }
+
+  // Close on ESC
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") requestClose()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [isDirty])
+
+  // Load naming issues when scene changes
+  useEffect(() => {
+    setNamingIssues(null)
+    setNamingOk(null)
     client.scenes.namingIssues(scene.id).then((data) => {
       setNamingIssues(data.issues)
       setNamingOk(data.ok)
@@ -140,235 +190,403 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
   const pct = Math.round(
     (ASSET_COLS.filter((a) => scene[a.key]).length / ASSET_COLS.length) * 100,
   )
+  const pctColor = pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)"
 
   // View Transitions: name must match what scene-grid's SceneCard emits so
-  // the browser morphs the card frame → detail header. See scene-grid.tsx.
+  // the browser morphs the card frame → panel header.
   const frameName = `scene-frame-${scene.id}`
   const codeName  = `scene-code-${scene.id}`
 
   return (
     <div
-      style={{ viewTransitionName: frameName, contain: "layout" }}
+      role="complementary"
+      aria-label={`Scene ${scene.id} details`}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        maxHeight: "calc(100vh - var(--spacing-topbar) - 64px)",
+        background: "var(--color-surface)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 6,
+        overflow: "hidden",
+        viewTransitionName: frameName,
+        contain: "layout",
+      }}
     >
-      {/* Back button */}
-      <button
-        onClick={onBack}
-        className="flex items-center gap-1.5 mb-4 transition-colors hover:opacity-80"
-        style={{ fontSize: 12, color: "var(--color-text-muted)" }}
+      {/* ─── Header: thumb + identity + full-width progress ───────────────── */}
+      <div
+        style={{
+          padding: "14px",
+          borderBottom: "1px solid var(--color-border)",
+          background: `color-mix(in srgb, ${color} 6%, var(--color-surface))`,
+          flexShrink: 0,
+        }}
       >
-        <ArrowLeft size={13} />
-        Back to grid
-      </button>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+          <SceneThumbnail
+            sceneId={scene.id}
+            hasThumbnail={scene.has_thumbnail}
+            failed={thumbFailed}
+            onError={() => setThumbFailed(true)}
+            onRetry={() => setThumbFailed(false)}
+          />
 
-      {/* Header */}
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-start gap-4">
-        {/* Thumbnail — hero visual; endpoint is public per api/routers/scenes.py */}
-        <SceneThumbnail
-          sceneId={scene.id}
-          hasThumbnail={scene.has_thumbnail}
-          failed={thumbFailed}
-          onError={() => setThumbFailed(true)}
-          onRetry={() => setThumbFailed(false)}
-        />
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 mb-2 flex-wrap">
-            <span className="font-mono font-semibold" style={{ fontSize: 18, color, viewTransitionName: codeName }}>
-              {scene.id}
-            </span>
-            <StudioBadge studio={scene.studio} />
-            {scene.is_compilation && (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
               <span
-                className="rounded px-2 py-0.5"
-                style={{ fontSize: 10, background: "color-mix(in srgb, var(--color-warn) 15%, transparent)", color: "var(--color-warn)" }}
+                className="font-mono font-semibold"
+                style={{ fontSize: 15, color, viewTransitionName: codeName }}
               >
-                Compilation
+                {scene.id}
               </span>
-            )}
-          </div>
-          <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
-            {scene.performers || "No performers listed"}
-            {scene.release_date && <span> &middot; {scene.release_date}</span>}
+              <StudioBadge studio={scene.studio} />
+              {scene.is_compilation && (
+                <span
+                  className="rounded px-1.5 py-0.5"
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 600,
+                    letterSpacing: "0.05em",
+                    textTransform: "uppercase",
+                    background: "color-mix(in srgb, var(--color-warn) 15%, transparent)",
+                    color: "var(--color-warn)",
+                  }}
+                >
+                  Comp
+                </span>
+              )}
+              {isDirty && (
+                <span
+                  style={{
+                    fontSize: 9, fontWeight: 600, letterSpacing: "0.05em",
+                    textTransform: "uppercase",
+                    padding: "1px 6px", borderRadius: 3,
+                    background: "color-mix(in srgb, var(--color-warn) 15%, transparent)",
+                    color: "var(--color-warn)",
+                    border: "1px solid color-mix(in srgb, var(--color-warn) 30%, transparent)",
+                  }}
+                >
+                  Unsaved
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {scene.performers || "No performers listed"}
+              {scene.release_date && <span> · {scene.release_date}</span>}
+            </div>
           </div>
 
-          {/* Progress bar */}
-          <div className="flex items-center gap-2 mt-3">
-            <div className="rounded-full overflow-hidden" style={{ width: 120, height: 4, background: "var(--color-border)" }}>
-              <div
-                className="h-full rounded-full transition-all"
-                style={{
-                  width: `${pct}%`,
-                  background: pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)",
-                }}
-              />
-            </div>
-            <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>{pct}% complete</span>
+          <button
+            onClick={requestClose}
+            aria-label="Close panel"
+            className="transition-colors"
+            style={{
+              color: "var(--color-text-muted)",
+              background: "none",
+              border: "none",
+              padding: 4,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              borderRadius: 3,
+              flexShrink: 0,
+              marginTop: -2,
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Full-width progress bar + heavy % number */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+          <div
+            className="rounded-full overflow-hidden"
+            style={{ flex: 1, height: 3, background: "var(--color-border)" }}
+          >
+            <div
+              className="h-full rounded-full transition-all"
+              style={{ width: `${pct}%`, background: pctColor }}
+            />
           </div>
+          <span
+            style={{
+              fontSize: 14,
+              fontWeight: 700,
+              color: pctColor,
+              fontVariantNumeric: "tabular-nums",
+              flexShrink: 0,
+              minWidth: 40,
+              textAlign: "right",
+            }}
+          >
+            {pct}%
+          </span>
         </div>
       </div>
 
-      {/* Asset status */}
-      <div className="flex gap-3 mb-6 flex-wrap">
-        {ASSET_COLS.map((col) => (
-          <div
-            key={col.key}
-            className="rounded px-3 py-2"
-            style={{
-              background: "var(--color-surface)",
-              border: `1px solid ${scene[col.key] ? "color-mix(in srgb, var(--color-ok) 30%, transparent)" : "var(--color-border)"}`,
-              minWidth: 100,
-            }}
-          >
-            <div style={{ fontSize: 15, marginBottom: 2 }}>
-              {scene[col.key] ? (
-                <span style={{ color: "var(--color-ok)" }}>&#10003;</span>
-              ) : (
-                <span style={{ color: "var(--color-err)" }}>&#10007;</span>
-              )}
-            </div>
-            <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{col.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Editable fields */}
-      <div className="space-y-4">
-        {/* Title */}
-        <EditableField
-          label="Title"
-          value={scene.title}
-          editing={editingField === "title"}
-          editValue={editValue}
-          onEdit={() => startEdit("title")}
-          onCancel={() => setEditingField(null)}
-          onChange={setEditValue}
-          onSave={saveField}
-          saving={saving}
-          saveMsg={editingField === "title" ? saveMsg : ""}
-          extra={
-            <div className="flex items-center gap-2 mt-2">
-              <button
-                onClick={generateTitle}
-                disabled={generating}
-                className="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs transition-colors"
+      {/* ─── Scrollable body ──────────────────────────────────────────────── */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "14px" }}>
+        {/* Asset status tiles */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(68px, 1fr))", gap: 6, marginBottom: 18 }}>
+          {ASSET_COLS.map((col) => {
+            const present = scene[col.key]
+            return (
+              <div
+                key={col.key}
+                title={present ? `${col.label} present` : `${col.label} missing`}
                 style={{
-                  background: "color-mix(in srgb, var(--color-lime) 12%, transparent)",
-                  color: "var(--color-lime)",
-                  border: "1px solid color-mix(in srgb, var(--color-lime) 25%, transparent)",
-                  opacity: generating ? 0.5 : 1,
+                  padding: "8px 6px",
+                  borderRadius: 4,
+                  background: "var(--color-base)",
+                  border: `1px solid ${present ? "color-mix(in srgb, var(--color-ok) 30%, transparent)" : "var(--color-border)"}`,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 2,
                 }}
               >
-                <Wand2 size={11} />
-                {generating ? "Generating..." : "Generate Title"}
-              </button>
-              {genTitle && (
-                <>
-                  <span style={{ fontSize: 12, color: "var(--color-text)" }}>{genTitle}</span>
-                  <button
-                    onClick={applyGenTitle}
-                    className="rounded px-2 py-0.5 text-xs font-medium"
-                    style={{ background: "var(--color-lime)", color: "#000" }}
-                  >
-                    Apply
-                  </button>
-                </>
-              )}
-            </div>
-          }
-        />
+                <span style={{ fontSize: 14, color: present ? "var(--color-ok)" : "var(--color-err)", lineHeight: 1 }}>
+                  {present ? "✓" : "✕"}
+                </span>
+                <span style={{ fontSize: 9, fontWeight: 500, color: "var(--color-text-muted)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                  {col.label === "Description" ? "Desc" : col.label === "Storyboard" ? "Story" : col.label === "Thumbnail" ? "Thumb" : col.label}
+                </span>
+              </div>
+            )
+          })}
+        </div>
 
-        {/* Categories */}
-        <EditableField
-          label="Categories"
-          value={scene.categories}
-          editing={editingField === "categories"}
-          editValue={editValue}
-          onEdit={() => startEdit("categories")}
-          onCancel={() => setEditingField(null)}
-          onChange={setEditValue}
-          onSave={saveField}
-          saving={saving}
-          saveMsg={editingField === "categories" ? saveMsg : ""}
-          multiline
-        />
+        {/* ── Zone: Metadata ─────────────────────────────────────────── */}
+        <SectionLabel>Metadata</SectionLabel>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 18 }}>
+          <EditableField
+            label="Title"
+            value={scene.title}
+            editing={editingField === "title"}
+            editValue={editValue}
+            onEdit={() => startEdit("title")}
+            onCancel={() => setEditingField(null)}
+            onChange={setEditValue}
+            onSave={saveField}
+            saving={saving}
+            saveMsg={editingField === "title" ? saveMsg : ""}
+            extra={
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                <button
+                  onClick={generateTitle}
+                  disabled={generating}
+                  className="flex items-center gap-1.5 rounded transition-colors"
+                  style={{
+                    padding: "3px 8px",
+                    fontSize: 11,
+                    background: "color-mix(in srgb, var(--color-lime) 12%, transparent)",
+                    color: "var(--color-lime)",
+                    border: "1px solid color-mix(in srgb, var(--color-lime) 25%, transparent)",
+                    opacity: generating ? 0.5 : 1,
+                    cursor: generating ? "wait" : "pointer",
+                  }}
+                >
+                  <Wand2 size={10} />
+                  {generating ? "Generating…" : "Generate"}
+                </button>
+                {genTitle && (
+                  <>
+                    <span style={{ fontSize: 11, color: "var(--color-text)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {genTitle}
+                    </span>
+                    <button
+                      onClick={applyGenTitle}
+                      className="rounded font-medium"
+                      style={{ padding: "2px 8px", fontSize: 11, background: "var(--color-lime)", color: "#000" }}
+                    >
+                      Apply
+                    </button>
+                  </>
+                )}
+              </div>
+            }
+          />
+          <EditableField
+            label="Categories"
+            value={scene.categories}
+            editing={editingField === "categories"}
+            editValue={editValue}
+            onEdit={() => startEdit("categories")}
+            onCancel={() => setEditingField(null)}
+            onChange={setEditValue}
+            onSave={saveField}
+            saving={saving}
+            saveMsg={editingField === "categories" ? saveMsg : ""}
+            multiline
+          />
+          <EditableField
+            label="Tags"
+            value={scene.tags}
+            editing={editingField === "tags"}
+            editValue={editValue}
+            onEdit={() => startEdit("tags")}
+            onCancel={() => setEditingField(null)}
+            onChange={setEditValue}
+            onSave={saveField}
+            saving={saving}
+            saveMsg={editingField === "tags" ? saveMsg : ""}
+            multiline
+          />
 
-        {/* Tags */}
-        <EditableField
-          label="Tags"
-          value={scene.tags}
-          editing={editingField === "tags"}
-          editValue={editValue}
-          onEdit={() => startEdit("tags")}
-          onCancel={() => setEditingField(null)}
-          onChange={setEditValue}
-          onSave={saveField}
-          saving={saving}
-          saveMsg={editingField === "tags" ? saveMsg : ""}
-          multiline
-        />
-
-        {/* Plot (read-only) */}
-        {scene.plot && (
-          <div>
-            <div className="mb-1" style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Plot
-            </div>
-            <div
-              className="rounded px-3 py-2"
-              style={{ fontSize: 12, color: "var(--color-text-muted)", background: "var(--color-surface)", border: "1px solid var(--color-border)", lineHeight: 1.5 }}
-            >
-              {scene.plot}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Naming validation */}
-      {namingOk !== null && (
-        <div className="mt-6">
-          <div className="mb-1" style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Naming Validation
-          </div>
-          {namingOk ? (
-            <div className="rounded px-3 py-2" style={{ fontSize: 12, color: "var(--color-ok)", background: "color-mix(in srgb, var(--color-ok) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--color-ok) 20%, transparent)" }}>
-              All naming conventions OK
-            </div>
-          ) : (
-            <div className="rounded px-3 py-2 space-y-1" style={{ background: "color-mix(in srgb, var(--color-err) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--color-err) 20%, transparent)" }}>
-              {namingIssues?.map((issue, i) => (
-                <div key={i} style={{ fontSize: 12, color: "var(--color-err)" }}>
-                  <span className="font-mono" style={{ fontSize: 11 }}>{issue.file}</span> — {issue.issue}
-                </div>
-              ))}
+          {scene.plot && (
+            <div>
+              <FieldLabel>Plot</FieldLabel>
+              <div
+                className="rounded"
+                style={{
+                  padding: "7px 10px",
+                  fontSize: 11,
+                  color: "var(--color-text-muted)",
+                  background: "var(--color-base)",
+                  border: "1px solid var(--color-border)",
+                  lineHeight: 1.5,
+                }}
+              >
+                {scene.plot}
+              </div>
             </div>
           )}
         </div>
-      )}
 
-      {/* MEGA folder */}
-      {!scene.mega_path && (
-        <div className="mt-6">
-          <button
-            onClick={createFolder}
-            disabled={folderCreating}
-            className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs transition-colors"
-            style={{
-              background: "var(--color-surface)",
-              color: "var(--color-text-muted)",
-              border: "1px solid var(--color-border)",
-              opacity: folderCreating ? 0.5 : 1,
-            }}
-          >
-            <FolderPlus size={13} />
-            {folderCreating ? "Creating..." : "Create MEGA Folder"}
-          </button>
+        {/* ── Zone: Naming & Folder ──────────────────────────────────── */}
+        <SectionLabel>Naming &amp; Folder</SectionLabel>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
+          {namingOk === null ? (
+            <div style={{ fontSize: 11, color: "var(--color-text-faint)", padding: "6px 0" }}>
+              Checking naming…
+            </div>
+          ) : namingOk ? (
+            <div
+              className="rounded"
+              style={{
+                padding: "7px 10px",
+                fontSize: 11,
+                color: "var(--color-ok)",
+                background: "color-mix(in srgb, var(--color-ok) 8%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--color-ok) 20%, transparent)",
+              }}
+            >
+              ✓ All naming conventions OK
+            </div>
+          ) : (
+            <div
+              className="rounded space-y-1"
+              style={{
+                padding: "7px 10px",
+                background: "color-mix(in srgb, var(--color-err) 8%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--color-err) 20%, transparent)",
+              }}
+            >
+              {namingIssues?.map((issue, i) => {
+                const isNoFolder = issue.issue.toLowerCase().includes("no mega folder")
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "var(--color-err)" }}>
+                    <span className="font-mono" style={{ fontSize: 10, flex: 1 }}>
+                      {issue.file} <span style={{ color: "color-mix(in srgb, var(--color-err) 70%, var(--color-text-muted))" }}>— {issue.issue}</span>
+                    </span>
+                    {isNoFolder && (
+                      <button
+                        onClick={createFolder}
+                        disabled={folderCreating}
+                        className="rounded"
+                        style={{
+                          padding: "1px 6px",
+                          fontSize: 10,
+                          fontWeight: 600,
+                          background: "color-mix(in srgb, var(--color-err) 15%, transparent)",
+                          color: "var(--color-err)",
+                          border: "1px solid color-mix(in srgb, var(--color-err) 30%, transparent)",
+                          cursor: folderCreating ? "wait" : "pointer",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {folderCreating ? "…" : "Create"}
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Create Folder fallback when mega_path empty and not flagged above */}
+          {!scene.mega_path && namingOk && (
+            <button
+              onClick={createFolder}
+              disabled={folderCreating}
+              className="flex items-center gap-1.5 rounded transition-colors"
+              style={{
+                padding: "5px 10px",
+                fontSize: 11,
+                background: "var(--color-base)",
+                color: "var(--color-text-muted)",
+                border: "1px solid var(--color-border)",
+                opacity: folderCreating ? 0.5 : 1,
+                alignSelf: "flex-start",
+              }}
+            >
+              <FolderPlus size={11} />
+              {folderCreating ? "Creating…" : "Create MEGA Folder"}
+            </button>
+          )}
+
           {folderMsg && (
-            <span className="ml-2" style={{ fontSize: 11, color: folderMsg.includes("queued") ? "var(--color-ok)" : "var(--color-err)" }}>
+            <span
+              style={{
+                fontSize: 10,
+                color: folderMsg.includes("queued") ? "var(--color-ok)" : "var(--color-err)",
+              }}
+            >
               {folderMsg}
             </span>
           )}
         </div>
-      )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Section label sub-components
+// ---------------------------------------------------------------------------
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        color: "var(--color-text-faint)",
+        marginBottom: 8,
+        paddingBottom: 4,
+        borderBottom: "1px solid var(--color-border-subtle)",
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 10,
+        fontWeight: 600,
+        color: "var(--color-text-faint)",
+        textTransform: "uppercase",
+        letterSpacing: "0.05em",
+        marginBottom: 4,
+      }}
+    >
+      {children}
     </div>
   )
 }
@@ -377,7 +595,7 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
 // Scene thumbnail sub-component
 // ---------------------------------------------------------------------------
 
-const THUMB_WIDTH = 240
+const THUMB_WIDTH = 120
 
 function SceneThumbnail({
   sceneId,
@@ -395,9 +613,9 @@ function SceneThumbnail({
   const frameStyle: React.CSSProperties = {
     width: THUMB_WIDTH,
     aspectRatio: "16 / 9",
-    borderRadius: 4,
+    borderRadius: 3,
     border: "1px solid var(--color-border)",
-    background: "var(--color-surface)",
+    background: "var(--color-base)",
     flexShrink: 0,
     overflow: "hidden",
     display: "flex",
@@ -408,9 +626,9 @@ function SceneThumbnail({
   if (!hasThumbnail) {
     return (
       <div style={frameStyle} title="No thumbnail synced yet">
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: "var(--color-text-faint)" }}>
-          <ImageOff size={20} aria-hidden="true" />
-          <span style={{ fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase" }}>No thumbnail</span>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: "var(--color-text-faint)" }}>
+          <ImageOff size={16} aria-hidden="true" />
+          <span style={{ fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase" }}>None</span>
         </div>
       </div>
     )
@@ -418,14 +636,16 @@ function SceneThumbnail({
 
   if (failed) {
     return (
-      <div style={{ ...frameStyle, borderColor: "color-mix(in srgb, var(--color-warn) 30%, transparent)" }} title="Thumbnail exists but could not load — click to retry">
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, color: "var(--color-warn)" }}>
-          <ImageOff size={20} aria-hidden="true" />
-          <span style={{ fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase" }}>Unavailable</span>
+      <div
+        style={{ ...frameStyle, borderColor: "color-mix(in srgb, var(--color-warn) 30%, transparent)" }}
+        title="Thumbnail exists but could not load — click to retry"
+      >
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: "var(--color-warn)" }}>
+          <ImageOff size={14} aria-hidden="true" />
           <button
             onClick={onRetry}
             style={{
-              marginTop: 2, padding: "2px 8px", borderRadius: 3, fontSize: 10, cursor: "pointer",
+              padding: "1px 6px", borderRadius: 2, fontSize: 9, cursor: "pointer",
               background: "color-mix(in srgb, var(--color-warn) 12%, transparent)",
               color: "var(--color-warn)",
               border: "1px solid color-mix(in srgb, var(--color-warn) 30%, transparent)",
@@ -446,11 +666,7 @@ function SceneThumbnail({
       loading="lazy"
       decoding="async"
       onError={onError}
-      style={{
-        ...frameStyle,
-        objectFit: "cover",
-        display: "block",
-      }}
+      style={{ ...frameStyle, objectFit: "cover", display: "block" }}
     />
   )
 }
@@ -477,17 +693,42 @@ interface EditableFieldProps {
 function EditableField({
   label, value, editing, editValue, onEdit, onCancel, onChange, onSave, saving, saveMsg, multiline, extra,
 }: EditableFieldProps) {
+  const textareaRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null)
+  useEffect(() => {
+    if (editing) {
+      // Focus + caret at end
+      const t = setTimeout(() => {
+        const el = textareaRef.current
+        if (el) {
+          el.focus()
+          if ("setSelectionRange" in el) {
+            const len = el.value.length
+            el.setSelectionRange(len, len)
+          }
+        }
+      }, 40)
+      return () => clearTimeout(t)
+    }
+  }, [editing])
+
+  const dirty = editing && editValue !== value
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
-        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          {label}
-        </span>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <FieldLabel>{label}</FieldLabel>
+          {dirty && (
+            <span style={{ fontSize: 9, fontWeight: 600, color: "var(--color-warn)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              · Unsaved
+            </span>
+          )}
+        </div>
         {!editing && (
           <button
             onClick={onEdit}
-            className="text-xs transition-colors hover:opacity-80"
-            style={{ color: "var(--color-text-muted)" }}
+            className="transition-colors hover:opacity-80"
+            style={{ fontSize: 11, color: "var(--color-text-muted)", background: "none", border: "none", padding: 0, cursor: "pointer" }}
           >
             Edit
           </button>
@@ -497,49 +738,76 @@ function EditableField({
         <div>
           {multiline ? (
             <textarea
+              ref={textareaRef as React.RefObject<HTMLTextAreaElement>}
               value={editValue}
               onChange={(e) => onChange(e.target.value)}
               rows={3}
-              className="w-full rounded px-3 py-2 text-xs outline-none resize-y"
               style={{
+                width: "100%",
+                borderRadius: 3,
+                padding: "6px 8px",
+                fontSize: 11,
+                outline: "none",
+                resize: "vertical",
                 background: "var(--color-base)",
-                border: "1px solid var(--color-border)",
+                border: `1px solid ${dirty ? "color-mix(in srgb, var(--color-warn) 40%, transparent)" : "var(--color-border)"}`,
                 color: "var(--color-text)",
                 lineHeight: 1.5,
+                fontFamily: "var(--font-sans)",
               }}
             />
           ) : (
             <input
+              ref={textareaRef as React.RefObject<HTMLInputElement>}
               type="text"
               value={editValue}
               onChange={(e) => onChange(e.target.value)}
-              className="w-full rounded px-3 py-2 text-xs outline-none"
+              onKeyDown={(e) => { if (e.key === "Enter") onSave() }}
               style={{
+                width: "100%",
+                borderRadius: 3,
+                padding: "6px 8px",
+                fontSize: 11,
+                outline: "none",
                 background: "var(--color-base)",
-                border: "1px solid var(--color-border)",
+                border: `1px solid ${dirty ? "color-mix(in srgb, var(--color-warn) 40%, transparent)" : "var(--color-border)"}`,
                 color: "var(--color-text)",
               }}
-              autoFocus
             />
           )}
-          <div className="flex items-center gap-2 mt-1.5">
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
             <button
               onClick={onSave}
-              disabled={saving}
-              className="rounded px-3 py-1 text-xs font-medium"
-              style={{ background: "var(--color-lime)", color: "#000", opacity: saving ? 0.5 : 1 }}
+              disabled={saving || !dirty}
+              className="rounded font-medium"
+              style={{
+                padding: "3px 10px",
+                fontSize: 11,
+                background: "var(--color-lime)",
+                color: "#000",
+                border: "none",
+                cursor: (saving || !dirty) ? "not-allowed" : "pointer",
+                opacity: (saving || !dirty) ? 0.4 : 1,
+              }}
             >
-              {saving ? "Saving..." : "Save"}
+              {saving ? "Saving…" : "Save"}
             </button>
             <button
               onClick={onCancel}
-              className="rounded px-2 py-1 text-xs"
-              style={{ color: "var(--color-text-muted)" }}
+              className="rounded"
+              style={{
+                padding: "3px 8px",
+                fontSize: 11,
+                color: "var(--color-text-muted)",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+              }}
             >
               Cancel
             </button>
             {saveMsg && (
-              <span style={{ fontSize: 11, color: saveMsg === "Saved" ? "var(--color-ok)" : "var(--color-err)" }}>
+              <span style={{ fontSize: 10, color: saveMsg === "Saved" ? "var(--color-ok)" : "var(--color-err)" }}>
                 {saveMsg}
               </span>
             )}
@@ -547,13 +815,14 @@ function EditableField({
         </div>
       ) : (
         <div
-          className="rounded px-3 py-2"
+          className="rounded"
           style={{
-            fontSize: 12,
+            padding: "6px 10px",
+            fontSize: 11,
             color: value ? "var(--color-text)" : "var(--color-text-faint)",
-            background: "var(--color-surface)",
+            background: "var(--color-base)",
             border: "1px solid var(--color-border)",
-            minHeight: multiline ? 48 : undefined,
+            minHeight: multiline ? 40 : undefined,
             lineHeight: 1.5,
           }}
         >
