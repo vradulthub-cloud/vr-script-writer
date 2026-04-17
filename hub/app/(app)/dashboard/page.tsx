@@ -1,5 +1,5 @@
 import { auth } from "@/auth"
-import { api, cachedUsersMe, type SceneStats } from "@/lib/api"
+import { api, type SceneStats } from "@/lib/api"
 import { studioColor, studioAbbr } from "@/lib/studio-colors"
 import { NotificationFeed } from "./notification-feed"
 import { TriageFeed } from "./triage-feed"
@@ -19,7 +19,6 @@ export default async function DashboardPage() {
     scriptsRes,
     notificationsRes,
     healthRes,
-    userRes,
     ...missingResults
   ] = await Promise.allSettled([
     client.approvals.list("Pending"),
@@ -27,7 +26,6 @@ export default async function DashboardPage() {
     client.scripts.list({ needs_script: true }),
     client.notifications.list(12),
     client.health(),
-    cachedUsersMe(idToken),
     ...STUDIOS.map(s => client.scenes.list({ studio: s, limit: 3, missing_only: true })),
   ])
 
@@ -36,8 +34,6 @@ export default async function DashboardPage() {
   const scripts        = scriptsRes.status       === "fulfilled" ? scriptsRes.value       : []
   const notifications  = notificationsRes.status === "fulfilled" ? notificationsRes.value : []
   const health         = healthRes.status        === "fulfilled" ? healthRes.value        : null
-  // userRes fetched to warm the cache for downstream nav; not used on this page
-  void userRes
 
   const missingScenes = missingResults
     .flatMap(r => r.status === "fulfilled" ? r.value : [])

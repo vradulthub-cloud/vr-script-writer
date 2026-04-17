@@ -1,6 +1,7 @@
 import nextDynamic from "next/dynamic"
 import { auth } from "@/auth"
 import { api, type Scene, type SceneStats } from "@/lib/api"
+import { requireTab } from "@/lib/rbac"
 
 const SceneGrid = nextDynamic(() => import("./scene-grid").then(m => m.SceneGrid))
 
@@ -8,6 +9,8 @@ export const dynamic = "force-dynamic"
 
 export default async function MissingPage() {
   const session = await auth()
+  const idToken = (session as { idToken?: string } | null)?.idToken
+  await requireTab("Tickets", idToken)
   const client = api(session)
 
   let scenes: Scene[] = []
@@ -27,6 +30,6 @@ export default async function MissingPage() {
   }
 
   return (
-    <SceneGrid scenes={scenes} stats={stats} error={error} idToken={(session as { idToken?: string } | null)?.idToken} />
+    <SceneGrid scenes={scenes} stats={stats} error={error} idToken={idToken} />
   )
 }

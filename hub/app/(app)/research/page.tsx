@@ -1,6 +1,7 @@
 import nextDynamic from "next/dynamic"
 import { auth } from "@/auth"
 import { api, type Model } from "@/lib/api"
+import { requireTab } from "@/lib/rbac"
 
 const ModelSearch = nextDynamic(() => import("./model-search").then(m => m.ModelSearch))
 
@@ -8,8 +9,9 @@ export const dynamic = "force-dynamic"
 
 export default async function ResearchPage() {
   const session = await auth()
-  const client = api(session)
   const idToken = (session as { idToken?: string } | null)?.idToken
+  await requireTab("Model Research", idToken)
+  const client = api(session)
 
   let models: Model[] = []
   let error: string | null = null
