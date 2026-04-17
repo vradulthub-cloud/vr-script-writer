@@ -8,6 +8,7 @@ import { RetryError } from "@/components/ui/retry-error"
 import { useIdToken } from "@/hooks/use-id-token"
 import type { Scene, SceneStats } from "@/lib/api"
 import { API_BASE_URL } from "@/lib/api"
+import { studioColor } from "@/lib/studio-colors"
 import { SceneDetail } from "./scene-detail"
 
 /**
@@ -30,12 +31,9 @@ function morphTo(fn: () => void) {
 const STUDIOS = ["All", "FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
 const STUDIO_ORDER = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
 
-const STUDIO_COLOR: Record<string, string> = {
-  "FuckPassVR": "#3b82f6",
-  "VRHush":     "#8b5cf6",
-  "VRAllure":   "#ec4899",
-  "NaughtyJOI": "#f97316",
-}
+// Studio colors flow from `lib/studio-colors` — single source of truth. Do
+// NOT inline a local hex map here; any rebrand/a11y tweak should touch one
+// file, not four.
 
 const ASSET_COLS = [
   { key: "has_description" as const, label: "Desc" },
@@ -229,7 +227,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
             .filter(s => studio === "All" || s === studio)
             .map(studioName => {
               const studioScenes = byStudio[studioName] ?? []
-              const color = STUDIO_COLOR[studioName] ?? "var(--color-border)"
+              const color = studioColor(studioName)
               const isAllClear = studioScenes.length === 0
               return (
                 <div key={studioName} style={{ marginBottom: 32 }}>
@@ -244,13 +242,29 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
 
                   {isAllClear ? (
                     <AllClearCard color={color} />
+                  ) : selectedScene ? (
+                    // Panel-open mode: dense list rows. 3-4 cards in the narrow
+                    // remaining space show less information than N list rows, so
+                    // we swap to rows for triage throughput while the panel is
+                    // doing the detail work.
+                    <div style={{ display: "flex", flexDirection: "column", borderRadius: 6, border: "1px solid var(--color-border)", overflow: "hidden" }}>
+                      {studioScenes.map((scene, i) => (
+                        <SceneRow
+                          key={scene.id}
+                          scene={scene}
+                          selected={selectedScene.id === scene.id}
+                          isLast={i === studioScenes.length - 1}
+                          onClick={() => morphTo(() => setSelectedScene(scene))}
+                        />
+                      ))}
+                    </div>
                   ) : (
-                    <div style={{ display: "grid", gridTemplateColumns: selectedScene ? "repeat(auto-fill, minmax(180px, 1fr))" : "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
                       {studioScenes.map(scene => (
                         <SceneCard
                           key={scene.id}
                           scene={scene}
-                          selected={selectedScene?.id === scene.id}
+                          selected={false}
                           onClick={() => morphTo(() => setSelectedScene(scene))}
                         />
                       ))}
@@ -361,7 +375,7 @@ const SceneCard = memo(function SceneCard({
     ? (scene.title.length > 44 ? scene.title.slice(0, 44) + "…" : scene.title)
     : "—"
 
-  const studioColor = STUDIO_COLOR[scene.studio] ?? "var(--color-text-muted)"
+  const color = studioColor(scene.studio)
 
   // Unique view-transition-name tied to scene.id so the browser pairs
   // this card with the corresponding element in scene-detail.tsx when the
@@ -375,10 +389,10 @@ const SceneCard = memo(function SceneCard({
       aria-pressed={selected}
       style={{
         background: selected
-          ? `color-mix(in srgb, ${studioColor} 10%, var(--color-elevated))`
+          ? `color-mix(in srgb, ${color} 10%, var(--color-elevated))`
           : "var(--color-surface)",
         border: selected
-          ? `1px solid color-mix(in srgb, ${studioColor} 45%, transparent)`
+          ? `1px solid color-mix(in srgb, ${color} 45%, transparent)`
           : "1px solid var(--color-border)",
         borderRadius: 6,
         padding: "12px 14px",
@@ -430,6 +444,82 @@ const SceneCard = memo(function SceneCard({
             ))
         }
       </div>
+    </button>
+  )
+})
+
+// Dense single-row rendering used when the side panel is open. Shows
+// everything a card shows, horizontally, in ~36px of vertical space.
+const SceneRow = memo(function SceneRow({
+  scene, selected, isLast, onClick,
+}: { scene: Scene; selected: boolean; isLast: boolean; onClick: () => void }) {
+  const missing = missingAssets(scene)
+  const pct = completionPct(scene)
+  const pctColor = pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)"
+  const color = studioColor(scene.studio)
+
+  const frameName = `scene-frame-${scene.id}`
+  const codeName  = `scene-code-${scene.id}`
+
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={selected}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        width: "100%",
+        padding: "8px 12px",
+        background: selected
+          ? `color-mix(in srgb, ${color} 10%, var(--color-elevated))`
+          : "var(--color-surface)",
+        border: "none",
+        borderBottom: isLast ? undefined : "1px solid var(--color-border-subtle)",
+        cursor: "pointer",
+        textAlign: "left",
+        viewTransitionName: frameName,
+      }}
+      onMouseEnter={e => {
+        if (!selected) e.currentTarget.style.background = "var(--color-elevated)"
+      }}
+      onMouseLeave={e => {
+        if (!selected) e.currentTarget.style.background = "var(--color-surface)"
+      }}
+    >
+      <span
+        className="font-mono"
+        style={{ fontSize: 11, fontWeight: 700, color: "var(--color-text)", minWidth: 70, viewTransitionName: codeName }}
+      >
+        {scene.id}
+      </span>
+
+      <span style={{ fontSize: 11, color: "var(--color-text-muted)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {scene.performers || "TBD"}
+      </span>
+
+      <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+        {missing.length === 0
+          ? <span style={{ fontSize: 10, color: "var(--color-ok)", fontWeight: 600 }}>✓</span>
+          : missing.map(m => (
+              <span key={m} style={{
+                fontSize: 9, fontWeight: 600, padding: "0 4px", borderRadius: 2,
+                background: "color-mix(in srgb, var(--color-err) 12%, transparent)",
+                color: "var(--color-err)",
+              }}>
+                {m}
+              </span>
+            ))
+        }
+      </div>
+
+      <span style={{
+        fontSize: 10, fontWeight: 700, color: pctColor,
+        fontVariantNumeric: "tabular-nums",
+        minWidth: 32, textAlign: "right", flexShrink: 0,
+      }}>
+        {pct}%
+      </span>
     </button>
   )
 })

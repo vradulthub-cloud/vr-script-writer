@@ -70,7 +70,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* ── Body: Triage dominates (2/3), Notifications rail recedes ─── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-5 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start">
 
         <div className="flex flex-col gap-3.5">
           {sceneStats && Object.keys(sceneStats.by_studio).length > 0 && (

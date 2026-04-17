@@ -86,13 +86,16 @@ export function NotificationFeed({
           <h3 style={{ margin: 0 }}>Notifications</h3>
           {unreadCount > 0 && (
             <span
+              // Status indicator, not a commit — demoted from saturated lime
+              // fill to an outlined tint per the codified lime rule in CLAUDE.md.
               style={{
                 fontSize: 10,
-                fontWeight: 700,
-                background: "var(--color-lime)",
-                color: "oklch(15% 0.05 82)",
+                fontWeight: 600,
+                background: "color-mix(in srgb, var(--color-lime) 12%, transparent)",
+                color: "var(--color-lime)",
+                border: "1px solid color-mix(in srgb, var(--color-lime) 28%, transparent)",
                 borderRadius: 10,
-                padding: "1px 5px",
+                padding: "0 6px",
                 lineHeight: 1.5,
               }}
             >
