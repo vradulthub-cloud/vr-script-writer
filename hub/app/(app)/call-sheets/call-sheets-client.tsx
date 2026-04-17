@@ -304,7 +304,20 @@ export function CallSheetsClient() {
           {tabs.map(tab => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              disabled={batchRunning}
+              onClick={() => {
+                if (tab === activeTab) return
+                // Switching tabs triggers a new dates fetch that clears
+                // batchResults. If a batch is in progress, warn before
+                // clobbering partial output.
+                if (batchResults.length > 0 && !batchRunning) {
+                  const ok = window.confirm(
+                    `Switching tabs clears ${batchResults.length} batch result${batchResults.length === 1 ? "" : "s"}. Continue?`,
+                  )
+                  if (!ok) return
+                }
+                setActiveTab(tab)
+              }}
               className="px-3 py-1.5 rounded text-xs transition-colors"
               style={{
                 background: activeTab === tab ? "var(--color-elevated)" : "transparent",

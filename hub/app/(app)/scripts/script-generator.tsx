@@ -203,6 +203,12 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
 
   async function save() {
     if (!stream.output || !selectedRow) return
+    if (violations.length > 0) {
+      const ok = window.confirm(
+        `This script has ${violations.length} validation issue${violations.length === 1 ? "" : "s"}. Save anyway?`,
+      )
+      if (!ok) return
+    }
     setSaving(true)
     setSaveMsg(null)
     try {
@@ -226,6 +232,10 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
 
   async function submitForApproval() {
     if (!stream.output) return
+    if (violations.length > 0) {
+      setSaveMsg(`Can't submit — ${violations.length} validation issue${violations.length === 1 ? "" : "s"} must be resolved first.`)
+      return
+    }
     setSaving(true)
     setSaveMsg(null)
     try {
