@@ -43,8 +43,29 @@ const RANK_COLOR: Record<string, string> = {
 
 // ─── Photo component ──────────────────────────────────────────────────────────
 
-function Photo({ src, fallbackSrc, name, width, height, radius = 4, objectPos = "50% 15%" }: {
-  src: string; fallbackSrc?: string; name: string; width: number | string; height: number; radius?: number; objectPos?: string
+/**
+ * Photo defaults to decorative (alt=""). Pass `decorative={false}` on
+ * semantic headshots (ProfileView hero image) so screen readers announce
+ * who is shown — a name is non-decorative context there.
+ */
+function Photo({
+  src,
+  fallbackSrc,
+  name,
+  width,
+  height,
+  radius = 4,
+  objectPos = "50% 15%",
+  decorative = true,
+}: {
+  src: string
+  fallbackSrc?: string
+  name: string
+  width: number | string
+  height: number
+  radius?: number
+  objectPos?: string
+  decorative?: boolean
 }) {
   const [srcIdx, setSrcIdx] = useState(0)
   const ini = initials(name)
@@ -53,14 +74,18 @@ function Photo({ src, fallbackSrc, name, width, height, radius = 4, objectPos = 
 
   if (!activeSrc) {
     return (
-      <div style={{
-        width, height, borderRadius: radius,
-        background: "var(--color-elevated)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: typeof width === "number" ? Math.round(Number(width) * 0.28) : 28,
-        fontWeight: 700, color: "var(--color-text-faint)",
-        flexShrink: 0,
-      }}>
+      <div
+        role={decorative ? undefined : "img"}
+        aria-label={decorative ? undefined : name}
+        style={{
+          width, height, borderRadius: radius,
+          background: "var(--color-elevated)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: typeof width === "number" ? Math.round(Number(width) * 0.28) : 28,
+          fontWeight: 700, color: "var(--color-text-faint)",
+          flexShrink: 0,
+        }}
+      >
         {ini}
       </div>
     )
@@ -69,8 +94,8 @@ function Photo({ src, fallbackSrc, name, width, height, radius = 4, objectPos = 
   return (
     <img
       src={activeSrc}
-      alt=""
-      aria-hidden="true"
+      alt={decorative ? "" : name}
+      aria-hidden={decorative ? "true" : undefined}
       referrerPolicy="no-referrer"
       onError={() => setSrcIdx(i => i + 1)}
       style={{
@@ -400,6 +425,7 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
             height={190}
             radius={6}
             objectPos="50% 10%"
+            decorative={false}
           />
         </div>
 
@@ -766,7 +792,14 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
     setProfileLoading(true)
 
     try {
-      const data = await client.models.profile(name, refresh)
+      // Refetch the individual model alongside the profile so agency
+      // changes in the booking sheet land in-session without a reload.
+      // The cached list can be minutes or hours stale.
+      const [data, fresh] = await Promise.all([
+        client.models.profile(name, refresh),
+        client.models.get(name).catch(() => null),
+      ])
+      if (fresh) setCurrentModel(fresh)
       setProfile(data)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
