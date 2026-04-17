@@ -19,9 +19,10 @@ interface UsersPanelProps {
   users: UserProfile[]
   error: string | null
   idToken: string | undefined
+  currentEmail: string
 }
 
-export function UsersPanel({ users: initialUsers, error, idToken: serverToken }: UsersPanelProps) {
+export function UsersPanel({ users: initialUsers, error, idToken: serverToken, currentEmail }: UsersPanelProps) {
   const idToken = useIdToken(serverToken)
   const client = useMemo(() => api(idToken ?? null), [idToken])
 
@@ -58,6 +59,17 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken }:
 
   async function saveUser() {
     if (!editingEmail) return
+    // Self-lockout guard — block the only changes that would revoke the
+    // signed-in admin's own access. Another admin can still do it for them.
+    const isSelf = editingEmail.toLowerCase() === (currentEmail ?? "").toLowerCase()
+    if (isSelf && editRole !== "admin") {
+      setSaveMsg("You can't remove your own admin role. Ask another admin.")
+      return
+    }
+    if (isSelf && editTabs.size === 0) {
+      setSaveMsg("You can't clear your own tabs — you'd lock yourself out.")
+      return
+    }
     setSaving(true)
     setSaveMsg("")
     try {
@@ -104,6 +116,7 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken }:
         <tbody>
           {users.map((u) => {
             const isEditing = editingEmail === u.email
+            const isSelf = u.email.toLowerCase() === (currentEmail ?? "").toLowerCase()
             return (
               <tr
                 key={u.email}
@@ -123,8 +136,10 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken }:
                     <select
                       value={editRole}
                       onChange={(e) => setEditRole(e.target.value)}
+                      disabled={isSelf}
+                      title={isSelf ? "Another admin must change your role" : undefined}
                       className="px-2 py-1 rounded text-xs"
-                      style={{ background: "var(--color-elevated)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                      style={{ background: "var(--color-elevated)", color: "var(--color-text)", border: "1px solid var(--color-border)", opacity: isSelf ? 0.5 : 1, cursor: isSelf ? "not-allowed" : "pointer" }}
                     >
                       <option value="admin">admin</option>
                       <option value="editor">editor</option>

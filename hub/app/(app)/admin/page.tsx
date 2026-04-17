@@ -1,26 +1,15 @@
 import { auth } from "@/auth"
-import { api, cachedUsersMe, type UserProfile } from "@/lib/api"
-import { redirect } from "next/navigation"
+import { api, type UserProfile } from "@/lib/api"
+import { requireAdmin } from "@/lib/rbac"
 import { UsersPanel } from "./users-panel"
 
 export const dynamic = "force-dynamic"
 
 export default async function AdminPage() {
   const session = await auth()
-  const client = api(session)
   const idToken = (session as { idToken?: string } | null)?.idToken
-
-  // Verify admin access
-  let userProfile: UserProfile | null = null
-  try {
-    userProfile = await cachedUsersMe(idToken)
-  } catch {
-    redirect("/missing")
-  }
-
-  if (userProfile?.role !== "admin") {
-    redirect("/missing")
-  }
+  const me = await requireAdmin(idToken)
+  const client = api(session)
 
   let users: UserProfile[] = []
   let error: string | null = null
@@ -31,5 +20,5 @@ export default async function AdminPage() {
     error = e instanceof Error ? e.message : "Failed to load users"
   }
 
-  return <UsersPanel users={users} error={error} idToken={idToken} />
+  return <UsersPanel users={users} error={error} idToken={idToken} currentEmail={me.email} />
 }

@@ -1,5 +1,6 @@
 import { auth } from "@/auth"
 import { api, type Approval } from "@/lib/api"
+import { requireTab } from "@/lib/rbac"
 import { ApprovalList } from "./approval-list"
 import { ApprovalSubmit } from "./approval-submit"
 import { ApprovalsPageShell } from "./approvals-page-shell"
@@ -8,8 +9,9 @@ export const dynamic = "force-dynamic"
 
 export default async function ApprovalsPage() {
   const session = await auth()
-  const client = api(session)
   const idToken = (session as { idToken?: string } | null)?.idToken
+  await requireTab("Tickets", idToken)
+  const client = api(session)
 
   let approvals: Approval[] = []
   let error: string | null = null

@@ -1,13 +1,15 @@
 import { auth } from "@/auth"
 import { api, cachedUsersMe, type Ticket, type UserProfile } from "@/lib/api"
+import { requireTab } from "@/lib/rbac"
 import { TicketList } from "./ticket-list"
 
 export const dynamic = "force-dynamic"
 
 export default async function TicketsPage() {
   const session = await auth()
-  const client = api(session)
   const idToken = (session as { idToken?: string } | null)?.idToken
+  await requireTab("Tickets", idToken)
+  const client = api(session)
 
   let tickets: Ticket[] = []
   let error: string | null = null
