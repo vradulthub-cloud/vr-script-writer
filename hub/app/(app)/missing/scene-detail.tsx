@@ -1,8 +1,8 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ArrowLeft, Wand2, FolderPlus } from "lucide-react"
-import { api, type Scene, type NamingIssue } from "@/lib/api"
+import { ArrowLeft, Wand2, FolderPlus, ImageOff } from "lucide-react"
+import { api, API_BASE_URL, type Scene, type NamingIssue } from "@/lib/api"
 import { formatApiError } from "@/lib/errors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioBadge } from "@/components/ui/studio-badge"
@@ -47,6 +47,10 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
   // MEGA folder
   const [folderCreating, setFolderCreating] = useState(false)
   const [folderMsg, setFolderMsg] = useState("")
+
+  // Thumbnail load state — server sync can claim has_thumbnail=true before the
+  // MEGA proxy actually has the file, so we treat image errors as "missing"
+  const [thumbFailed, setThumbFailed] = useState(false)
 
   // Load naming issues on mount
   useEffect(() => {
@@ -150,38 +154,48 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
       </button>
 
       {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center gap-3 mb-2">
-          <span className="font-mono font-semibold" style={{ fontSize: 18, color }}>
-            {scene.id}
-          </span>
-          <StudioBadge studio={scene.studio} />
-          {scene.is_compilation && (
-            <span
-              className="rounded px-2 py-0.5"
-              style={{ fontSize: 10, background: "color-mix(in srgb, var(--color-warn) 15%, transparent)", color: "var(--color-warn)" }}
-            >
-              Compilation
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
-          {scene.performers || "No performers listed"}
-          {scene.release_date && <span> &middot; {scene.release_date}</span>}
-        </div>
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-start gap-4">
+        {/* Thumbnail — hero visual; endpoint is public per api/routers/scenes.py */}
+        <SceneThumbnail
+          sceneId={scene.id}
+          hasThumbnail={scene.has_thumbnail}
+          failed={thumbFailed}
+          onError={() => setThumbFailed(true)}
+        />
 
-        {/* Progress bar */}
-        <div className="flex items-center gap-2 mt-3">
-          <div className="rounded-full overflow-hidden" style={{ width: 120, height: 4, background: "var(--color-border)" }}>
-            <div
-              className="h-full rounded-full transition-all"
-              style={{
-                width: `${pct}%`,
-                background: pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)",
-              }}
-            />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-3 mb-2 flex-wrap">
+            <span className="font-mono font-semibold" style={{ fontSize: 18, color }}>
+              {scene.id}
+            </span>
+            <StudioBadge studio={scene.studio} />
+            {scene.is_compilation && (
+              <span
+                className="rounded px-2 py-0.5"
+                style={{ fontSize: 10, background: "color-mix(in srgb, var(--color-warn) 15%, transparent)", color: "var(--color-warn)" }}
+              >
+                Compilation
+              </span>
+            )}
           </div>
-          <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>{pct}% complete</span>
+          <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
+            {scene.performers || "No performers listed"}
+            {scene.release_date && <span> &middot; {scene.release_date}</span>}
+          </div>
+
+          {/* Progress bar */}
+          <div className="flex items-center gap-2 mt-3">
+            <div className="rounded-full overflow-hidden" style={{ width: 120, height: 4, background: "var(--color-border)" }}>
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${pct}%`,
+                  background: pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)",
+                }}
+              />
+            </div>
+            <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>{pct}% complete</span>
+          </div>
         </div>
       </div>
 
@@ -348,6 +362,76 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
         </div>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Scene thumbnail sub-component
+// ---------------------------------------------------------------------------
+
+const THUMB_WIDTH = 240
+
+function SceneThumbnail({
+  sceneId,
+  hasThumbnail,
+  failed,
+  onError,
+}: {
+  sceneId: string
+  hasThumbnail: boolean
+  failed: boolean
+  onError: () => void
+}) {
+  const frameStyle: React.CSSProperties = {
+    width: THUMB_WIDTH,
+    aspectRatio: "16 / 9",
+    borderRadius: 4,
+    border: "1px solid var(--color-border)",
+    background: "var(--color-surface)",
+    flexShrink: 0,
+    overflow: "hidden",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  }
+
+  if (!hasThumbnail || failed) {
+    return (
+      <div
+        style={frameStyle}
+        title={failed ? "Thumbnail could not be loaded" : "No thumbnail synced yet"}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 4,
+            color: "var(--color-text-faint)",
+          }}
+        >
+          <ImageOff size={20} aria-hidden="true" />
+          <span style={{ fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+            No thumbnail
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`${API_BASE_URL}/api/scenes/${encodeURIComponent(sceneId)}/thumbnail`}
+      alt={`${sceneId} thumbnail`}
+      loading="lazy"
+      onError={onError}
+      style={{
+        ...frameStyle,
+        objectFit: "cover",
+        display: "block",
+      }}
+    />
   )
 }
 
