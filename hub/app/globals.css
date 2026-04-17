@@ -312,4 +312,28 @@ button[style*="color-lime"]:hover:not(:disabled) {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+
+  /* Skip the scene-card → detail morph entirely when reduced motion is on.
+     The browser normally skips view transitions under reduced-motion, but
+     being explicit guards against future spec changes. */
+  ::view-transition-group(*) {
+    animation: none !important;
+  }
+}
+
+/* View Transitions: scene-card → scene-detail morph
+   Default UA cross-fade is ~400ms and swaps root opacity; we override so
+   ONLY the paired frame/code elements morph — the grid-background and
+   detail-background don't fade in/out, which would flash the whole viewport.
+   Scene card and detail share `view-transition-name: scene-frame-<id>` and
+   `scene-code-<id>` — see app/(app)/missing/scene-grid.tsx. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+::view-transition-group(scene-frame-*),
+::view-transition-group(scene-code-*) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }

@@ -141,8 +141,15 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
     (ASSET_COLS.filter((a) => scene[a.key]).length / ASSET_COLS.length) * 100,
   )
 
+  // View Transitions: name must match what scene-grid's SceneCard emits so
+  // the browser morphs the card frame → detail header. See scene-grid.tsx.
+  const frameName = `scene-frame-${scene.id}`
+  const codeName  = `scene-code-${scene.id}`
+
   return (
-    <div>
+    <div
+      style={{ viewTransitionName: frameName, contain: "layout" }}
+    >
       {/* Back button */}
       <button
         onClick={onBack}
@@ -165,7 +172,7 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 mb-2 flex-wrap">
-            <span className="font-mono font-semibold" style={{ fontSize: 18, color }}>
+            <span className="font-mono font-semibold" style={{ fontSize: 18, color, viewTransitionName: codeName }}>
               {scene.id}
             </span>
             <StudioBadge studio={scene.studio} />
