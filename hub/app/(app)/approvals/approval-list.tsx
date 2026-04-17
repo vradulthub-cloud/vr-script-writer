@@ -25,6 +25,54 @@ const CONTENT_TYPE_LABEL: Record<string, string> = {
 
 const UNDO_DURATION_MS = 7000
 
+/**
+ * Pending-commit persistence for approval decisions.
+ *
+ * If a user decides inside the 7s undo window and then closes the tab
+ * before the timer fires, the decision never reaches the backend and the
+ * optimistic UI update is lost on reload. Persisting to localStorage lets
+ * the next page load flush anything that didn't commit.
+ */
+const PENDING_KEY = "hub:approvals:pending"
+
+interface PersistedDecision {
+  approvalIds: string[]
+  decision: "Approved" | "Rejected"
+  notes?: string
+  queuedAt: number
+}
+
+function readPersistedDecisions(): PersistedDecision[] {
+  if (typeof window === "undefined") return []
+  try {
+    const raw = window.localStorage.getItem(PENDING_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function writePersistedDecisions(entries: PersistedDecision[]): void {
+  if (typeof window === "undefined") return
+  try {
+    if (entries.length === 0) window.localStorage.removeItem(PENDING_KEY)
+    else window.localStorage.setItem(PENDING_KEY, JSON.stringify(entries))
+  } catch {
+    // Quota / private mode — nothing we can do; in-memory ref still carries it.
+  }
+}
+
+function appendPersistedDecision(entry: PersistedDecision): void {
+  writePersistedDecisions([...readPersistedDecisions(), entry])
+}
+
+function clearPersistedDecisionsFor(ids: string[]): void {
+  const set = new Set(ids)
+  writePersistedDecisions(readPersistedDecisions().filter((e) => !e.approvalIds.some((id) => set.has(id))))
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 type ParsedContent =
@@ -506,6 +554,29 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
 
   const client = useMemo(() => api(idToken ?? null), [idToken])
 
+  // Flush any decisions that were queued in a previous session but never
+  // committed (user closed the tab during the 7s undo window). Runs once
+  // on mount — we don't wait for user interaction because the backend is
+  // still showing these items as Pending.
+  useEffect(() => {
+    if (!idToken) return
+    const persisted = readPersistedDecisions()
+    if (persisted.length === 0) return
+    writePersistedDecisions([])
+    persisted.forEach((entry) => {
+      entry.approvalIds.forEach((id) => {
+        void client.approvals.decide(id, { decision: entry.decision, notes: entry.notes })
+          .then((updated) =>
+            setApprovals((prev) => prev.map((a) => a.approval_id === updated.approval_id ? updated : a))
+          )
+          .catch(() => {
+            // Failed flushes drop silently — user will see the item as
+            // Pending on next load and can re-decide.
+          })
+      })
+    })
+  }, [idToken, client])
+
   const selectedApproval = approvals.find(a => a.approval_id === selectedId) ?? null
 
   const filtered = useMemo(() =>
@@ -593,6 +664,7 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
       const updated = await client.approvals.decide(approvalId, { decision, notes })
       setApprovals(prev => prev.map(a => a.approval_id === updated.approval_id ? updated : a))
       setRetryFn(null)
+      clearPersistedDecisionsFor([approvalId])
     } catch (e) {
       // Roll back optimistic update
       setApprovals(prev =>
@@ -655,6 +727,7 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
     if (selectedId === approval_id) setSelectedId(null)
 
     pendingCommitRef.current = { approvalIds: [approval_id], decision, notes }
+    appendPersistedDecision({ approvalIds: [approval_id], decision, notes, queuedAt: Date.now() })
     startProgressCountdown()
     setUndo({ approvalIds: [approval_id], previousStatuses: { [approval_id]: previousStatus }, decision })
 
@@ -680,6 +753,24 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
     )
     if (ids.length === 0) return
 
+    // Single-item rejection requires a 10-char reason. Bulk used to
+    // bypass that entirely, producing unauditable rejections. Collect a
+    // shared reason from the user and apply it to every id in the batch.
+    let bulkNotes: string | undefined
+    if (decision === "Rejected") {
+      const raw = window.prompt(
+        `Reject ${ids.length} item${ids.length === 1 ? "" : "s"} — reason (min 10 chars, required):`,
+        "",
+      )
+      if (raw === null) return
+      const trimmed = raw.trim()
+      if (trimmed.length < 10) {
+        setError("Reason must be at least 10 characters — bulk rejection cancelled.")
+        return
+      }
+      bulkNotes = trimmed
+    }
+
     // Flush any in-flight pending commit before starting a new one
     flushPending()
 
@@ -701,15 +792,16 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
     // Clear selection
     setBulkSelected(new Set())
 
-    pendingCommitRef.current = { approvalIds: ids, decision }
+    pendingCommitRef.current = { approvalIds: ids, decision, notes: bulkNotes }
+    appendPersistedDecision({ approvalIds: ids, decision, notes: bulkNotes, queuedAt: Date.now() })
 
     startProgressCountdown()
     setUndo({ approvalIds: ids, previousStatuses, decision })
 
     undoTimerRef.current = setTimeout(() => {
       if (pendingCommitRef.current) {
-        const { approvalIds, decision: d } = pendingCommitRef.current
-        Promise.allSettled(approvalIds.map(id => commitDecision(id, d)))
+        const { approvalIds, decision: d, notes: n } = pendingCommitRef.current
+        Promise.allSettled(approvalIds.map(id => commitDecision(id, d, n)))
         pendingCommitRef.current = null
       }
       setUndo(null)
@@ -729,7 +821,11 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
       progressIntervalRef.current = null
     }
 
-    // Cancel pending commit
+    // Cancel pending commit (both in-memory and any localStorage entry
+    // that might have been written — the user chose to undo)
+    if (pendingCommitRef.current) {
+      clearPersistedDecisionsFor(pendingCommitRef.current.approvalIds)
+    }
     pendingCommitRef.current = null
 
     // Revert all optimistic updates
