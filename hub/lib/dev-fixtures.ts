@@ -192,6 +192,17 @@ export const MOCK_SCENES: Scene[] = [
     has_thumbnail: true, has_photos: false, has_storyboard: false,
     mega_path: "/Grail/VRH/VRH-0987",
   }),
+  // Regression fixture: has_thumbnail flag is stale (sync set it true)
+  // but mega_path is empty. Retry UI would always fail here — should show
+  // "None" instead. Matches the real-world VRH0763 state.
+  scene({
+    id: "VRH-0986", studio: "VRHush", grail_tab: "VRH", site_code: "vrh",
+    title: "Blurred Lines of Desire", performers: "Serena Hill / Mike Mancini",
+    release_date: "2026-04-09",
+    has_description: true, has_videos: false, video_count: 0,
+    has_thumbnail: true, has_photos: false, has_storyboard: false,
+    mega_path: "",
+  }),
   scene({
     id: "VRA-0412", studio: "VRAllure", grail_tab: "VRA", site_code: "vra",
     title: "Private Collection", performers: "Nina Rivers",
