@@ -22,7 +22,9 @@ export default async function DescriptionsPage() {
 
   try {
     userProfile = await client.users.me()
-  } catch {}
+  } catch (err) {
+    console.error("[hub] /api/users/me failed in DescriptionsPage:", err)
+  }
 
   return (
     <DescGenerator

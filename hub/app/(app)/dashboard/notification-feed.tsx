@@ -5,6 +5,7 @@ import Link from "next/link"
 import { Bell, Check, Ticket, CheckSquare } from "lucide-react"
 import type { Notification } from "@/lib/api"
 import { API_BASE_URL } from "@/lib/api"
+import { showToast } from "@/components/ui/toast"
 
 const TYPE_ICON: Record<string, React.ComponentType<{ size?: number; style?: React.CSSProperties }>> = {
   ticket_created:     Ticket,
@@ -43,7 +44,7 @@ export function NotificationFeed({
     if (!idToken || unreadCount === 0 || marking) return
     setMarking(true)
     try {
-      await fetch(`${API_BASE_URL}/api/notifications/mark-read`, {
+      const res = await fetch(`${API_BASE_URL}/api/notifications/mark-read`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -51,10 +52,12 @@ export function NotificationFeed({
         },
         body: JSON.stringify({}),
       })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setNotifications((prev) => prev.map((n) => ({ ...n, read: 1 as const })))
       setUnreadCount(0)
-    } catch {
-      // Non-critical — silent failure
+    } catch (err) {
+      console.error("[hub] mark notifications read failed:", err)
+      showToast("Couldn't mark notifications as read — check your connection and try again", "error")
     } finally {
       setMarking(false)
     }
