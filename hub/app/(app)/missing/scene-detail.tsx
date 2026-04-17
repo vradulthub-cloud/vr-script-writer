@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { X, Wand2, FolderPlus, ImageOff } from "lucide-react"
 import { api, thumbnailUrl, type Scene, type NamingIssue } from "@/lib/api"
+import { completionPct } from "@/lib/scene-utils"
 import { formatApiError } from "@/lib/errors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioBadge } from "@/components/ui/studio-badge"
@@ -201,9 +202,7 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
     }
   }
 
-  const pct = Math.round(
-    (ASSET_COLS.filter((a) => scene[a.key]).length / ASSET_COLS.length) * 100,
-  )
+  const pct = completionPct(scene)
   const pctColor = pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)"
 
   // View Transitions: name must match what scene-grid's SceneCard emits so

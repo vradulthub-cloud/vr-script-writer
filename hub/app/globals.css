@@ -338,3 +338,18 @@ button[style*="color-lime"]:hover:not(:disabled) {
   animation-duration: 280ms;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+/* Asset tracker: stack the detail panel below the grid on narrow
+   viewports. The default is a 2-column grid (1fr 480px) with the panel
+   sticky to the right; below 900px that 480px panel crowds the grid off
+   screen. Below 480px the panel itself exceeds the viewport and clips. */
+@media (max-width: 900px) {
+  .asset-tracker-shell {
+    grid-template-columns: minmax(0, 1fr) !important;
+    column-gap: 0 !important;
+  }
+  .asset-tracker-panel {
+    position: static !important;
+    margin-top: 12px;
+  }
+}
