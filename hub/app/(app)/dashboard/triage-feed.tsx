@@ -6,6 +6,7 @@ import { X } from "lucide-react"
 import { api, type Approval, type Scene, type Script } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { STUDIO_COLOR, STUDIO_ABBR } from "@/lib/studio-colors"
+import { showToast } from "@/components/ui/toast"
 
 const CONTENT_TYPE_LABEL: Record<string, string> = {
   description: "Description",
@@ -70,9 +71,11 @@ export function TriageFeed({
     if (!idToken) return
     try {
       await api(idToken).approvals.decide(approval.approval_id, { decision, notes })
-    } catch {
-      // Rollback on failure
+    } catch (err) {
+      console.error("[hub] approval decision failed:", err)
+      // Rollback on failure + surface to user
       setApprovals(prev => [...prev, approval].sort((a, b) => a.submitted_at.localeCompare(b.submitted_at)))
+      showToast(`Couldn't ${decision.toLowerCase()} ${approval.scene_id} — the decision was rolled back`, "error")
     }
   }, [idToken])
 

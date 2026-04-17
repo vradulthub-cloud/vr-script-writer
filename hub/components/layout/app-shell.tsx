@@ -5,6 +5,7 @@ import { Sidebar } from "./sidebar"
 import { Topbar } from "./topbar"
 import { MobileNav } from "./mobile-nav"
 import { CommandPalette } from "@/components/ui/command-palette"
+import { Toaster } from "@/components/ui/toast"
 
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const session = await auth()
@@ -14,8 +15,10 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   let userProfile: UserProfile | null = null
   try {
     userProfile = await api(session).users.me()
-  } catch {
-    // If /api/me fails, allow through with no tab restrictions
+  } catch (err) {
+    // /api/me failed — allow through with no tab restrictions, but log so the
+    // error is findable in server logs
+    console.error("[hub] /api/users/me failed in AppShell:", err)
   }
 
   const idToken = (session as { idToken?: string } | null)?.idToken
@@ -39,6 +42,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       </main>
       <MobileNav />
       <CommandPalette />
+      <Toaster />
     </div>
   )
 }

@@ -22,7 +22,9 @@ export default async function ScriptsPage() {
 
   try {
     userProfile = await client.users.me()
-  } catch {}
+  } catch (err) {
+    console.error("[hub] /api/users/me failed in ScriptsPage:", err)
+  }
 
   return (
     <ScriptGenerator
