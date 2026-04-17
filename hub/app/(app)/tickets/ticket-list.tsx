@@ -33,6 +33,10 @@ const STAT_CONFIGS = [
 ] as const
 
 const TICKET_STATUSES = ["New", "Approved", "In Progress", "In Review", "Closed", "Rejected"]
+const ADMIN_ONLY_STATUSES = new Set(["Closed", "Rejected"])
+const DESCRIPTION_MAX = 4000
+const LINKED_ITEMS_MAX = 500
+const NOTE_MAX = 2000
 const PRIORITIES = ["Low", "Medium", "High", "Critical"]
 const PRIORITY_ORDER = ["Critical", "High", "Medium", "Low"]
 const STATUS_ORDER = ["New", "Approved", "In Progress", "In Review", "Closed", "Rejected"]
@@ -49,14 +53,25 @@ const COLUMNS: { key: string; label: string; sort?: SortKey }[] = [
   { key: "date", label: "Created", sort: "date" },
 ]
 
+const DATE_FMT = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" })
+
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—"
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10)
+  return DATE_FMT.format(d)
+}
+
 interface Props {
   tickets: Ticket[]
   users: UserProfile[]
   error: string | null
   idToken: string | undefined
+  userRole: string
 }
 
-export function TicketList({ tickets: initialTickets, users, error, idToken: serverIdToken }: Props) {
+export function TicketList({ tickets: initialTickets, users, error, idToken: serverIdToken, userRole }: Props) {
+  const isAdmin = userRole.toLowerCase() === "admin"
   const idToken = useIdToken(serverIdToken)
   const client = useMemo(() => api(idToken ?? null), [idToken])
 
@@ -239,7 +254,14 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
     const body: TicketUpdate = {}
     const ticket = tickets.find(t => t.ticket_id === ticketId)
     if (!ticket) { setSaving(false); return }
-    if (editStatus !== ticket.status) body.status = editStatus
+    if (editStatus !== ticket.status) {
+      if (!isAdmin && ADMIN_ONLY_STATUSES.has(editStatus)) {
+        setSaving(false)
+        setSaveMsg(`Only admins can set status to ${editStatus}.`)
+        return
+      }
+      body.status = editStatus
+    }
     if (editAssignee !== (ticket.assignee ?? "")) body.assignee = editAssignee
     if (editNote.trim()) body.note = editNote.trim()
     if (Object.keys(body).length === 0) { setSaving(false); setSaveMsg("No changes."); return }
@@ -441,7 +463,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                         <Badge label={ticket.status} color={STATUS_COLOR[ticket.status] ?? "var(--color-text-muted)"} />
                       </td>
                       <td className="px-3 py-2.5" style={{ fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
-                        {ticket.submitted_at ? ticket.submitted_at.slice(0, 10) : "—"}
+                        <time dateTime={ticket.submitted_at || undefined}>{formatDate(ticket.submitted_at)}</time>
                       </td>
                     </tr>
 
@@ -487,7 +509,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                                 )}
                                 {ticket.resolved_at && (
                                   <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                                    Resolved: <span style={{ color: "var(--color-text)" }}>{ticket.resolved_at.slice(0, 10)}</span>
+                                    Resolved: <span style={{ color: "var(--color-text)" }}><time dateTime={ticket.resolved_at}>{formatDate(ticket.resolved_at)}</time></span>
                                   </span>
                                 )}
                               </div>
@@ -513,7 +535,12 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                                     className="w-full px-2 py-1.5 rounded text-xs"
                                     style={{ background: "var(--color-elevated)", border: "1px solid var(--color-border)", color: STATUS_COLOR[editStatus] ?? "var(--color-text)" }}
                                   >
-                                    {TICKET_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                                    {TICKET_STATUSES.map(s => {
+                                      // Keep the current status selectable even for non-admins so they see
+                                      // the true state of the ticket; only block *transitioning into* admin-only states.
+                                      const isLocked = !isAdmin && ADMIN_ONLY_STATUSES.has(s) && s !== ticket.status
+                                      return <option key={s} value={s} disabled={isLocked}>{s}{isLocked ? " — admin only" : ""}</option>
+                                    })}
                                   </select>
                                 </div>
                                 <div>
@@ -548,6 +575,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                                     value={editNote}
                                     onChange={e => setEditNote(e.target.value)}
                                     rows={2}
+                                    maxLength={NOTE_MAX}
                                     placeholder="Optional update note…"
                                     className="w-full px-2 py-1.5 rounded text-xs resize-none"
                                     style={{ background: "var(--color-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
@@ -608,7 +636,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
               </div>
               <div>
                 <label htmlFor="create-description" style={{ fontSize: 11, color: "var(--color-text-muted)", display: "block", marginBottom: 4 }}>Description</label>
-                <textarea id="create-description" value={createForm.description} onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))} rows={3} placeholder="Steps to reproduce, expected behavior, context…" className="w-full px-2.5 py-1.5 rounded text-xs resize-none" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)" }} />
+                <textarea id="create-description" value={createForm.description} onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))} rows={3} maxLength={DESCRIPTION_MAX} placeholder="Steps to reproduce, expected behavior, context…" className="w-full px-2.5 py-1.5 rounded text-xs resize-none" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)" }} />
               </div>
               <div className="flex gap-3">
                 <div style={{ flex: 1 }}>
@@ -632,7 +660,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
               </div>
               <div>
                 <label htmlFor="create-linked" style={{ fontSize: 11, color: "var(--color-text-muted)", display: "block", marginBottom: 4 }}>Linked items <span style={{ color: "var(--color-text-faint)" }}>(scene IDs, ticket IDs)</span></label>
-                <input id="create-linked" type="text" value={createForm.linked_items} onChange={e => setCreateForm(f => ({ ...f, linked_items: e.target.value }))} placeholder="e.g. TKT-0012, SC-1234" className="w-full px-2.5 py-1.5 rounded text-xs" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)" }} />
+                <input id="create-linked" type="text" value={createForm.linked_items} onChange={e => setCreateForm(f => ({ ...f, linked_items: e.target.value }))} maxLength={LINKED_ITEMS_MAX} placeholder="e.g. TKT-0012, SC-1234" className="w-full px-2.5 py-1.5 rounded text-xs" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)" }} />
               </div>
             </div>
 

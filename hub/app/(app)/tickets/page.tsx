@@ -1,5 +1,5 @@
 import { auth } from "@/auth"
-import { api, type Ticket, type UserProfile } from "@/lib/api"
+import { api, cachedUsersMe, type Ticket, type UserProfile } from "@/lib/api"
 import { TicketList } from "./ticket-list"
 
 export const dynamic = "force-dynamic"
@@ -12,10 +12,12 @@ export default async function TicketsPage() {
   let tickets: Ticket[] = []
   let error: string | null = null
   let users: UserProfile[] = []
+  let userRole = "editor"
 
-  const [ticketsRes, usersRes] = await Promise.allSettled([
+  const [ticketsRes, usersRes, meRes] = await Promise.allSettled([
     client.tickets.list(),
     client.users.list(),
+    cachedUsersMe(idToken),
   ])
 
   if (ticketsRes.status === "fulfilled") {
@@ -28,5 +30,9 @@ export default async function TicketsPage() {
     users = usersRes.value
   }
 
-  return <TicketList tickets={tickets} users={users} error={error} idToken={idToken} />
+  if (meRes.status === "fulfilled" && meRes.value) {
+    userRole = (meRes.value.role ?? "editor").toLowerCase()
+  }
+
+  return <TicketList tickets={tickets} users={users} error={error} idToken={idToken} userRole={userRole} />
 }
