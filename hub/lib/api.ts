@@ -362,9 +362,9 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         return get<Ticket[]>(`/tickets/${qs ? `?${qs}` : ""}`)
       },
       stats: () => get<TicketStats>("/tickets/stats"),
-      get: (id: string) => get<Ticket>(`/tickets/${id}`),
+      get: (id: string) => get<Ticket>(`/tickets/${encodeURIComponent(id)}`),
       create: (body: TicketCreate) => post<Ticket>("/tickets/", body),
-      update: (id: string, body: TicketUpdate) => patch<Ticket>(`/tickets/${id}`, body),
+      update: (id: string, body: TicketUpdate) => patch<Ticket>(`/tickets/${encodeURIComponent(id)}`, body),
     },
 
     scenes: {
