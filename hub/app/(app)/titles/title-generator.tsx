@@ -212,7 +212,21 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
           {(["cloud", "local"] as const).map(e => (
             <button
               key={e}
-              onClick={() => setEngine(e)}
+              onClick={() => {
+                if (e === engine) return
+                setEngine(e)
+                // Clear the opposite engine's results/errors so a stale
+                // response from the other engine isn't presented as current.
+                if (e === "cloud") {
+                  setLocalResults([])
+                  setLocalError(null)
+                  setLocalLoading(false)
+                } else {
+                  setResults([])
+                  setError(null)
+                  setLoading(false)
+                }
+              }}
               className="px-3 py-1.5 rounded text-xs transition-colors capitalize"
               style={{
                 background: engine === e ? "var(--color-elevated)" : "transparent",

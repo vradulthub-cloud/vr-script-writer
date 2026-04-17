@@ -6,9 +6,10 @@ import { useSearchParams } from "next/navigation"
 import { FilterTabs } from "@/components/ui/filter-tabs"
 import { RetryError } from "@/components/ui/retry-error"
 import { useIdToken } from "@/hooks/use-id-token"
-import type { Scene, SceneStats } from "@/lib/api"
+import { api, type Scene, type SceneStats } from "@/lib/api"
 import { API_BASE_URL } from "@/lib/api"
 import { studioColor } from "@/lib/studio-colors"
+import { completionPct } from "@/lib/scene-utils"
 import { SceneDetail } from "./scene-detail"
 
 /**
@@ -47,10 +48,8 @@ function missingAssets(scene: Scene): string[] {
   return ASSET_COLS.filter(a => !scene[a.key]).map(a => a.label)
 }
 
-function completionPct(scene: Scene): number {
-  const present = ASSET_COLS.filter(a => scene[a.key]).length
-  return Math.round((present / ASSET_COLS.length) * 100)
-}
+// completionPct lives in lib/scene-utils so scene-detail uses the
+// same calculation. See ASSET_KEYS there for the canonical field list.
 
 interface Props {
   scenes: Scene[]
@@ -70,18 +69,33 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null)
   const [error, setError] = useState(initialError)
 
-  // Deep-link support: /missing?scene=VRH0762 opens the panel on that scene
+  // Deep-link support: /missing?scene=VRH0762 opens the panel on that scene.
+  // If the id isn't in the initial (paged) list, fetch it directly so a
+  // bookmarked link doesn't silently open an empty page.
   const searchParams = useSearchParams()
+  const [deepLinkError, setDeepLinkError] = useState<string | null>(null)
   useEffect(() => {
     const sceneId = searchParams?.get("scene")
     if (!sceneId) return
     const match = scenes.find(s => s.id === sceneId)
-    if (match && (!selectedScene || selectedScene.id !== sceneId)) {
-      setSelectedScene(match)
+    if (match) {
+      if (!selectedScene || selectedScene.id !== sceneId) setSelectedScene(match)
+      return
     }
-    // scenes is stable across renders (loaded once from server); we intentionally
-    // only re-run when the URL param changes so typing in search doesn't reselect.
-  }, [searchParams])
+    // Not in the initial page — fetch it directly.
+    let cancelled = false
+    setDeepLinkError(null)
+    api(idToken ?? null).scenes.get(sceneId).then((scene) => {
+      if (cancelled) return
+      setScenes(prev => prev.some(s => s.id === scene.id) ? prev : [scene, ...prev])
+      setSelectedScene(scene)
+    }).catch(() => {
+      if (!cancelled) setDeepLinkError(sceneId)
+    })
+    return () => { cancelled = true }
+    // scenes is intentionally omitted — only the URL param should drive this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, idToken])
 
   const handleSceneUpdate = useCallback((updated: Scene) => {
     setScenes(prev => prev.map(s => s.id === updated.id ? updated : s))
@@ -144,6 +158,21 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
 
   return (
     <div style={{ position: "relative" }}>
+      {deepLinkError && (
+        <div
+          role="alert"
+          className="rounded mb-3"
+          style={{
+            padding: "8px 12px",
+            fontSize: 12,
+            color: "var(--color-warn)",
+            background: "color-mix(in srgb, var(--color-warn) 8%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--color-warn) 20%, transparent)",
+          }}
+        >
+          Scene <span style={{ fontFamily: "var(--font-mono)" }}>{deepLinkError}</span> wasn&apos;t found in the current list and couldn&apos;t be fetched directly. It may have been renamed or removed.
+        </div>
+      )}
       {/* Filter bar */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24, flexWrap: "wrap" }}>
         <FilterTabs
@@ -213,6 +242,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
           coordinate both tracks in one layout pass rather than re-flowing
           per frame on a width transition. */}
       <div
+        className="asset-tracker-shell"
         style={{
           display: "grid",
           gridTemplateColumns: selectedScene ? "minmax(0, 1fr) 480px" : "minmax(0, 1fr) 0px",
@@ -287,6 +317,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
 
         {/* Side panel wrapper — GPU-accelerated transform+opacity only */}
         <div
+          className="asset-tracker-panel"
           style={{
             minWidth: 0,
             position: "sticky",

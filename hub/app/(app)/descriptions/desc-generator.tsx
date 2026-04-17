@@ -413,7 +413,20 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
           {/* Studio */}
           <div>
             <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Studio</label>
-            <StudioSelector value={studio} onChange={(s) => { setStudio(s); setSelectedCats([]) }} />
+            <StudioSelector
+              value={studio}
+              onChange={(s) => {
+                setStudio(s)
+                setSelectedCats([])
+                // Changing studio invalidates any selected scene + paragraph
+                // edits from the previous studio; leaving them in state lets
+                // a user save edits against the wrong studio's scene.
+                setSelectedSceneId("")
+                setEditedParagraphs({})
+                setMetaTitle("")
+                setMetaDesc("")
+              }}
+            />
           </div>
 
           {/* Is compilation */}

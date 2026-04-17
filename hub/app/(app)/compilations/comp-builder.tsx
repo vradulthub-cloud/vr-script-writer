@@ -98,6 +98,13 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
   )
 
   function toggleScene(id: string) {
+    // Guard against a cross-studio add: a compilation is scoped to one
+    // studio, so we refuse any scene whose studio doesn't match.
+    const scene = allScenes.find(s => s.id === id)
+    if (scene && scene.studio !== studio) {
+      setSaveMsg(`Scene ${id} belongs to ${scene.studio}, not ${studio}.`)
+      return
+    }
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   }
 

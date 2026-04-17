@@ -214,7 +214,15 @@ export function CallSheetsClient() {
         })
         if (!res.ok) {
           const txt = await res.text().catch(() => "")
-          results.push({ date: d.date_display, error: txt || `HTTP ${res.status}` })
+          // Prefer FastAPI's `{ detail: "..." }` over the raw body so the
+          // user sees "Invalid date" instead of stringified JSON.
+          let msg = txt
+          try {
+            const parsed = JSON.parse(txt)
+            if (typeof parsed?.detail === "string") msg = parsed.detail
+            else if (Array.isArray(parsed?.detail)) msg = parsed.detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join("; ")
+          } catch { /* not JSON; keep raw text */ }
+          results.push({ date: d.date_display, error: msg || `HTTP ${res.status}` })
         } else {
           const data = await res.json()
           results.push({ date: d.date_display, url: data.doc_url })
@@ -304,7 +312,20 @@ export function CallSheetsClient() {
           {tabs.map(tab => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              disabled={batchRunning}
+              onClick={() => {
+                if (tab === activeTab) return
+                // Switching tabs triggers a new dates fetch that clears
+                // batchResults. If a batch is in progress, warn before
+                // clobbering partial output.
+                if (batchResults.length > 0 && !batchRunning) {
+                  const ok = window.confirm(
+                    `Switching tabs clears ${batchResults.length} batch result${batchResults.length === 1 ? "" : "s"}. Continue?`,
+                  )
+                  if (!ok) return
+                }
+                setActiveTab(tab)
+              }}
               className="px-3 py-1.5 rounded text-xs transition-colors"
               style={{
                 background: activeTab === tab ? "var(--color-elevated)" : "transparent",
