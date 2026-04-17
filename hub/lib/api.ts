@@ -44,34 +44,72 @@ const DEV_MOCK =
   (process.env.NEXT_PUBLIC_DEV_AUTH_MOCK === "1" ||
     process.env.DEV_AUTH_MOCK === "1")
 
+interface FetchOptions extends RequestInit {
+  /**
+   * Set to true when the caller expects a 204 No Content response.
+   * If false (the default) and the server returns 204, apiFetch throws
+   * rather than silently returning `undefined as T` — that silent cast
+   * causes callers that destructure the result to crash far from the
+   * source of the bug.
+   */
+  expectEmpty?: boolean
+}
+
+const DEFAULT_TIMEOUT_MS = 30_000
+
 async function apiFetch<T>(
   path: string,
   idToken: string | undefined,
-  options: RequestInit = {},
+  options: FetchOptions = {},
 ): Promise<T> {
+  const { expectEmpty, signal: callerSignal, ...rest } = options
+
   if (DEV_MOCK) {
     const { mockApi } = await import("./dev-mock-api")
-    return mockApi<T>(path, options)
+    return mockApi<T>(path, rest)
   }
 
   const url = `${API_BASE}/api${path}`
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...(options.headers as Record<string, string>),
+    ...(rest.headers as Record<string, string>),
   }
   if (idToken) {
     headers["Authorization"] = `Bearer ${idToken}`
   }
 
-  const res = await fetch(url, { ...options, headers })
+  // 30s timeout unless caller already wired an AbortSignal. A hung
+  // backend used to freeze the UI indefinitely.
+  const controller = callerSignal ? undefined : new AbortController()
+  const timeoutId = controller
+    ? setTimeout(() => controller.abort(new DOMException("Timeout", "TimeoutError")), DEFAULT_TIMEOUT_MS)
+    : undefined
+  const signal = callerSignal ?? controller?.signal
+
+  let res: Response
+  try {
+    res = await fetch(url, { ...rest, headers, signal })
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      throw new ApiError(0, `Request timed out after ${DEFAULT_TIMEOUT_MS / 1000}s: ${path}`)
+    }
+    throw new ApiError(0, err instanceof Error ? err.message : "Network error")
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId)
+  }
 
   if (!res.ok) {
     const body = await res.text().catch(() => "")
     throw new ApiError(res.status, body)
   }
 
-  // 204 No Content
-  if (res.status === 204) return undefined as T
+  if (res.status === 204) {
+    if (expectEmpty) return undefined as T
+    throw new ApiError(
+      204,
+      `Unexpected 204 from ${path} — caller expected a response body. Use postVoid/patchVoid for endpoints that return No Content.`,
+    )
+  }
 
   return res.json() as Promise<T>
 }
@@ -337,6 +375,9 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
     apiFetch<T>(path, token, { method: "POST", body: JSON.stringify(body) })
   const patch = <T>(path: string, body: unknown) =>
     apiFetch<T>(path, token, { method: "PATCH", body: JSON.stringify(body) })
+  // For endpoints that legitimately return 204 No Content.
+  const postVoid = (path: string, body: unknown) =>
+    apiFetch<void>(path, token, { method: "POST", body: JSON.stringify(body), expectEmpty: true })
 
   return {
     health: () => get<{ status: string; version: string; syncs: Record<string, unknown> }>("/health"),
