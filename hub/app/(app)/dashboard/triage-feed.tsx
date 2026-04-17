@@ -80,6 +80,13 @@ export function TriageFeed({
   }, [idToken])
 
   const handleDecision = useCallback((approval: Approval, decision: "Approved" | "Rejected", notes = "") => {
+    // If a previous undo entry is still pending, flush its commit before
+    // we overwrite it — otherwise decision #1 is silently dropped when
+    // decision #2 arrives inside the 7s undo window (TKT-0074).
+    setUndoEntry(prev => {
+      if (prev) void commitDecision(prev.approval, prev.decision, "")
+      return prev
+    })
     clearUndoTimers()
 
     setApprovals(prev => prev.filter(a => a.approval_id !== approval.approval_id))

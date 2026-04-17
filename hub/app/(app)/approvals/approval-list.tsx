@@ -623,7 +623,9 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
     }
     if (pendingCommitRef.current) {
       const { approvalIds, decision: d, notes } = pendingCommitRef.current
-      Promise.all(approvalIds.map(id => commitDecision(id, d, notes)))
+      // allSettled so one failed id doesn't cancel the rest; commitDecision
+      // already handles its own rollback/retry per id.
+      Promise.allSettled(approvalIds.map(id => commitDecision(id, d, notes)))
       pendingCommitRef.current = null
     }
   }
@@ -637,6 +639,13 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
     notes?: string,
   ) => {
     const { approval_id, status: previousStatus } = approval
+
+    // Guard: an approval is immutable once decided server-side.
+    // Stale list state would let a user flip Approved → Rejected.
+    if (previousStatus !== "Pending") {
+      setError(`${approval_id} is already ${previousStatus.toLowerCase()}.`)
+      return
+    }
 
     flushPending()
 
@@ -652,7 +661,7 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
     undoTimerRef.current = setTimeout(() => {
       if (pendingCommitRef.current) {
         const { approvalIds, decision: d, notes: n } = pendingCommitRef.current
-        Promise.all(approvalIds.map(id => commitDecision(id, d, n)))
+        Promise.allSettled(approvalIds.map(id => commitDecision(id, d, n)))
         pendingCommitRef.current = null
       }
       setUndo(null)
@@ -700,7 +709,7 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
     undoTimerRef.current = setTimeout(() => {
       if (pendingCommitRef.current) {
         const { approvalIds, decision: d } = pendingCommitRef.current
-        Promise.all(approvalIds.map(id => commitDecision(id, d)))
+        Promise.allSettled(approvalIds.map(id => commitDecision(id, d)))
         pendingCommitRef.current = null
       }
       setUndo(null)
