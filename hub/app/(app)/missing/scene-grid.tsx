@@ -258,7 +258,7 @@ function SceneCard({ scene, onClick }: { scene: Scene; onClick: () => void }) {
       onMouseLeave={e => (e.currentTarget.style.background = "var(--color-surface)")}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-        <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "var(--color-text)" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 700, color: "var(--color-text)" }}>
           {scene.id}
         </span>
         {dateStr && <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>{dateStr}</span>}

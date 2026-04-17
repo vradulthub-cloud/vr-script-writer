@@ -79,16 +79,6 @@ h1 { font-size: var(--text-xl); letter-spacing: -0.03em; }
 h2 { font-size: var(--text-lg); }
 h3 { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
 
-/* Page subtitle — the muted line under headings */
-h1 + [data-subtitle] {
-  font-size: var(--text-sm);
-  color: var(--color-text-faint);
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  font-weight: 500;
-  margin-top: 4px;
-}
-
 /* ─── Scrollbar ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -230,24 +220,8 @@ button[style*="color-lime"]:hover:not(:disabled) {
   100% { transform: scale(1); }
 }
 
-/* Shimmer loading effect */
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-[data-loading] {
-  background: linear-gradient(
-    90deg,
-    var(--color-surface) 25%,
-    var(--color-elevated) 50%,
-    var(--color-surface) 75%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
 }
 
 /* ─── Responsive ─────────────────────────────────────────────────────────── */
@@ -295,11 +269,6 @@ button[style*="color-lime"]:hover:not(:disabled) {
   /* Scale down headings */
   h1 {
     font-size: 1.375rem !important; /* 22px instead of 28px */
-  }
-
-  /* Subtitle wrapping */
-  h1 + [data-subtitle] {
-    font-size: 0.625rem; /* 10px */
   }
 
   /* Tables: scroll container on parent, prevent column squishing */
