@@ -62,6 +62,34 @@ export function Topbar({ session, idToken, userRole }: TopbarProps) {
 
       {/* Right-side controls — ml-auto pushes to far right */}
       <div className="ml-auto flex items-center gap-3">
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent("hub:open-palette"))}
+          title="Open command palette (⌘K)"
+          aria-label="Open command palette"
+          className="hidden sm:flex items-center gap-1.5 rounded transition-colors hover:bg-[--color-elevated]"
+          style={{
+            padding: "3px 8px",
+            border: "1px solid var(--color-border)",
+            background: "transparent",
+            color: "var(--color-text-faint)",
+            cursor: "pointer",
+          }}
+        >
+          <span style={{ fontSize: 11 }}>Jump to…</span>
+          <kbd
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              color: "var(--color-text-faint)",
+              background: "var(--color-elevated)",
+              padding: "1px 4px",
+              borderRadius: 3,
+            }}
+          >
+            ⌘K
+          </kbd>
+        </button>
+
         <NotificationBell idToken={idToken} />
 
         <div className="flex items-center gap-2">

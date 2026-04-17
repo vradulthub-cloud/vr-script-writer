@@ -133,6 +133,9 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
           role="switch"
           aria-checked={missingOnly}
           onClick={() => setMissingOnly(v => !v)}
+          title={missingOnly
+            ? "Showing only scenes missing at least one asset — click to show all"
+            : "Showing all scenes — click to filter to only those missing assets"}
           style={{
             padding: "4px 10px", borderRadius: 4, fontSize: 11, cursor: "pointer",
             background: missingOnly ? "color-mix(in srgb, var(--color-warn) 15%, transparent)" : "transparent",
@@ -166,6 +169,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
           <button
             onClick={triggerMegaRefresh}
             disabled={megaRefreshing}
+            title="Scan MEGA for new files — results will sync in ~5 minutes"
             style={{
               padding: "4px 10px", borderRadius: 4, fontSize: 11, cursor: megaRefreshing ? "wait" : "pointer",
               background: "transparent", border: "1px solid var(--color-border)",

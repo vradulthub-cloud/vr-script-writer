@@ -36,12 +36,19 @@ export function CommandPalette() {
   const router = useRouter()
   const pathname = usePathname()
 
-  // Open on Cmd+K
+  // Open on Cmd+K (or ?) + Cmd+1-9 for direct nav + custom event for mouse trigger
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault()
         setOpen(v => !v)
+        setQuery("")
+        setSelectedIdx(0)
+      }
+      // ? opens the palette (palette footer lists all shortcuts)
+      if (e.key === "?" && !isInputFocused(e) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        setOpen(true)
         setQuery("")
         setSelectedIdx(0)
       }
@@ -54,8 +61,17 @@ export function CommandPalette() {
         }
       }
     }
+    function onOpenEvent() {
+      setOpen(true)
+      setQuery("")
+      setSelectedIdx(0)
+    }
     window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
+    window.addEventListener("hub:open-palette", onOpenEvent as EventListener)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("hub:open-palette", onOpenEvent as EventListener)
+    }
   }, [router])
 
   // Focus input when opened
@@ -186,11 +202,12 @@ export function CommandPalette() {
                     fontSize: 10,
                     color: "var(--color-text-faint)",
                     fontFamily: "var(--font-mono)",
-                    minWidth: 20,
-                    textAlign: "center",
+                    background: "var(--color-elevated)",
+                    padding: "2px 5px",
+                    borderRadius: 4,
                   }}
                 >
-                  {cmd.shortcut}
+                  ⌘{cmd.shortcut}
                 </kbd>
               </button>
             )
@@ -204,7 +221,8 @@ export function CommandPalette() {
         >
           <span><kbd style={{ fontFamily: "var(--font-mono)" }}>↑↓</kbd> navigate</span>
           <span><kbd style={{ fontFamily: "var(--font-mono)" }}>↵</kbd> open</span>
-          <span><kbd style={{ fontFamily: "var(--font-mono)" }}>⌘1-9</kbd> direct</span>
+          <span><kbd style={{ fontFamily: "var(--font-mono)" }}>⌘1–9</kbd> jump</span>
+          <span style={{ marginLeft: "auto" }}><kbd style={{ fontFamily: "var(--font-mono)" }}>?</kbd> shortcuts</span>
         </div>
       </div>
     </>
