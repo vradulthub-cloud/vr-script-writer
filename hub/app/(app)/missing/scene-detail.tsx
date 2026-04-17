@@ -242,6 +242,7 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
           <SceneThumbnail
             sceneId={scene.id}
             hasThumbnail={scene.has_thumbnail}
+            hasFolder={Boolean(scene.mega_path)}
             failed={thumbFailed}
             onError={() => setThumbFailed(true)}
             onRetry={() => setThumbFailed(false)}
@@ -649,12 +650,20 @@ const THUMB_WIDTH = 120
 function SceneThumbnail({
   sceneId,
   hasThumbnail,
+  hasFolder,
   failed,
   onError,
   onRetry,
 }: {
   sceneId: string
   hasThumbnail: boolean
+  /**
+   * True when the scene has a resolved MEGA folder. Even if
+   * has_thumbnail is flagged true, a missing folder means the thumbnail
+   * endpoint has nothing to serve — retry will always fail. Treat as
+   * "none yet" instead of showing a Retry button that can't recover.
+   */
+  hasFolder: boolean
   failed: boolean
   onError: () => void
   onRetry: () => void
@@ -672,9 +681,15 @@ function SceneThumbnail({
     justifyContent: "center",
   }
 
-  if (!hasThumbnail) {
+  // No thumbnail flagged, OR the flag is stale and there's no MEGA
+  // folder yet — either way there's nothing to load, so don't bait a
+  // retry click that can't succeed.
+  if (!hasThumbnail || !hasFolder) {
+    const title = !hasFolder
+      ? "No MEGA folder yet — create the folder first, then scan"
+      : "No thumbnail synced yet"
     return (
-      <div style={frameStyle} title="No thumbnail synced yet">
+      <div style={frameStyle} title={title}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: "var(--color-text-faint)" }}>
           <ImageOff size={16} aria-hidden="true" />
           <span style={{ fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase" }}>None</span>
