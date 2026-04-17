@@ -1,5 +1,5 @@
 import { auth } from "@/auth"
-import { api, type UserProfile } from "@/lib/api"
+import { api, cachedUsersMe, type UserProfile } from "@/lib/api"
 import { redirect } from "next/navigation"
 import { UsersPanel } from "./users-panel"
 
@@ -13,7 +13,7 @@ export default async function AdminPage() {
   // Verify admin access
   let userProfile: UserProfile | null = null
   try {
-    userProfile = await client.users.me()
+    userProfile = await cachedUsersMe(idToken)
   } catch {
     redirect("/missing")
   }

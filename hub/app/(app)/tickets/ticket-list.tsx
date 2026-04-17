@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useMemo, useEffect, useRef } from "react"
+import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from "react"
 import { X, ChevronRight, ChevronDown, Search } from "lucide-react"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { api, type Ticket, type TicketCreate, type TicketUpdate, type UserProfile } from "@/lib/api"
@@ -105,14 +105,17 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
 
   const activeCount = useMemo(() => tickets.filter(t => t.status !== "Closed" && t.status !== "Rejected").length, [tickets])
 
+  // Defer heavy filter work behind the input — keeps typing snappy
+  const deferredSearch = useDeferredValue(searchQuery)
+
   const displayTickets = useMemo(() => {
     let result = statusFilter === "All"
       ? tickets
       : statusFilter === "Active"
         ? tickets.filter(t => t.status !== "Closed" && t.status !== "Rejected")
         : tickets.filter(t => t.status === statusFilter)
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
+    if (deferredSearch.trim()) {
+      const q = deferredSearch.toLowerCase()
       result = result.filter(t =>
         t.title.toLowerCase().includes(q) ||
         t.ticket_id.toLowerCase().includes(q) ||
@@ -134,7 +137,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
       }
       return sortDir === "asc" ? cmp : -cmp
     })
-  }, [tickets, statusFilter, searchQuery, sortKey, sortDir])
+  }, [tickets, statusFilter, deferredSearch, sortKey, sortDir])
 
   // ── Keyboard: Escape ─────────────────────────────────────────────
 

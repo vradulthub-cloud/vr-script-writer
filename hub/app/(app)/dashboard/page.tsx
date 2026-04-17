@@ -1,5 +1,5 @@
 import { auth } from "@/auth"
-import { api, type SceneStats } from "@/lib/api"
+import { api, cachedUsersMe, type SceneStats } from "@/lib/api"
 import { studioColor, studioAbbr } from "@/lib/studio-colors"
 import { NotificationFeed } from "./notification-feed"
 import { TriageFeed } from "./triage-feed"
@@ -27,7 +27,7 @@ export default async function DashboardPage() {
     client.scripts.list({ needs_script: true }),
     client.notifications.list(12),
     client.health(),
-    client.users.me(),
+    cachedUsersMe(idToken),
     ...STUDIOS.map(s => client.scenes.list({ studio: s, limit: 3, missing_only: true })),
   ])
 

@@ -314,6 +314,18 @@ export interface LocalTitleResult {
 
 // ─── API client factory ──────────────────────────────────────────────────────
 
+/**
+ * React cache() dedupes identical calls within a single server render tree.
+ * Wrap idempotent GETs that multiple pages or layouts might issue in parallel
+ * (e.g. users.me() is fetched by AppShell AND several page components).
+ */
+import { cache } from "react"
+
+export const cachedUsersMe = cache(
+  async (idToken: string | undefined): Promise<UserProfile> =>
+    apiFetch<UserProfile>("/users/me", idToken),
+)
+
 export function api(idTokenOrSession: string | { idToken?: string } | null) {
   const token =
     typeof idTokenOrSession === "string"
