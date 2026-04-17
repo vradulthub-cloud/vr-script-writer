@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { ArrowLeft, Wand2, FolderPlus, ImageOff } from "lucide-react"
-import { api, API_BASE_URL, type Scene, type NamingIssue } from "@/lib/api"
+import { api, thumbnailUrl, type Scene, type NamingIssue } from "@/lib/api"
 import { formatApiError } from "@/lib/errors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioBadge } from "@/components/ui/studio-badge"
@@ -422,7 +422,7 @@ function SceneThumbnail({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={`${API_BASE_URL}/api/scenes/${encodeURIComponent(sceneId)}/thumbnail`}
+      src={thumbnailUrl(sceneId)}
       alt={`${sceneId} thumbnail`}
       loading="lazy"
       onError={onError}

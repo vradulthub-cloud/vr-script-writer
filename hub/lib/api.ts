@@ -20,13 +20,40 @@ const API_BASE =
 
 export const API_BASE_URL = API_BASE
 
+/**
+ * Build a thumbnail URL for a scene. In dev-mock mode the endpoint doesn't
+ * exist, so we point at picsum.photos with a seed for deterministic but varied
+ * placeholder images. Production path goes straight to the MEGA proxy.
+ */
+export function thumbnailUrl(sceneId: string): string {
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_DEV_AUTH_MOCK === "1"
+  ) {
+    return `https://picsum.photos/seed/${encodeURIComponent(sceneId)}/320/180`
+  }
+  return `${API_BASE}/api/scenes/${encodeURIComponent(sceneId)}/thumbnail`
+}
+
 // ─── Low-level fetch ────────────────────────────────────────────────────────
+
+// Dev-only guard: dead-code-eliminated in production because Next.js inlines
+// NODE_ENV. See lib/dev-fixtures.ts for the mock payloads.
+const DEV_MOCK =
+  process.env.NODE_ENV !== "production" &&
+  (process.env.NEXT_PUBLIC_DEV_AUTH_MOCK === "1" ||
+    process.env.DEV_AUTH_MOCK === "1")
 
 async function apiFetch<T>(
   path: string,
   idToken: string | undefined,
   options: RequestInit = {},
 ): Promise<T> {
+  if (DEV_MOCK) {
+    const { mockApi } = await import("./dev-mock-api")
+    return mockApi<T>(path, options)
+  }
+
   const url = `${API_BASE}/api${path}`
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
