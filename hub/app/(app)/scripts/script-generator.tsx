@@ -14,11 +14,15 @@ const SCENE_TYPES = ["BG", "BGCP"]
 
 // Parse structured sections from generated output
 function parseSections(text: string): Record<string, string> {
-  const SECTION_KEYS = ["THEME", "PLOT", "SHOOT LOCATION", "WARDROBE (F)", "WARDROBE (M)", "DIRECTOR'S NOTE"]
+  // Strip markdown bold from section headers so **THEME**: → THEME:
+  const clean = text.replace(/\*\*([^*\n]+)\*\*/g, "$1")
+  const SECTION_KEYS = ["THEME", "PLOT", "SHOOT LOCATION", "SET DESIGN", "PROPS", "WARDROBE - FEMALE", "WARDROBE - MALE"]
   const result: Record<string, string> = {}
+  const lookahead = SECTION_KEYS.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ":").join("|")
   for (const key of SECTION_KEYS) {
-    const re = new RegExp(`${key}:([\\s\\S]*?)(?=${SECTION_KEYS.map(k => k + ":").join("|")}|$)`, "i")
-    const m = text.match(re)
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const re = new RegExp(`${escaped}:([\\s\\S]*?)(?=${lookahead}|$)`, "i")
+    const m = clean.match(re)
     if (m) result[key] = m[1].trim()
   }
   return result

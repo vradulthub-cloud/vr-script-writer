@@ -363,7 +363,7 @@ def build_script_prompt(
         "",
         f"First, research {female} online to understand her appearance, body type, tattoos, typical on-screen persona, and the roles she commonly plays. Use this research to inform the plot, wardrobe, and set design.",
         "",
-        "Then produce the full script with all required sections: One-Sentence Summary, Plot (three paragraphs), Shoot Location, Set Design, Prop Recommendations, and Wardrobe.",
+        "Then produce the full script using EXACTLY these section headers in this order: THEME, PLOT, SHOOT LOCATION, SET DESIGN, PROPS, WARDROBE - FEMALE, WARDROBE - MALE. Do not rename, reorder, or add markdown bold to the section headers.",
     ]
 
     if director_note:
