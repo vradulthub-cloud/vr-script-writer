@@ -48,12 +48,14 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
   const pathname = usePathname()
 
   const visibleItems = useMemo(() => {
-    // Admins see everything
-    if (userRole === "admin" || allowedTabs === "ALL" || !allowedTabs) {
+    // Admins always see everything. Everyone else is gated by allowed_tabs.
+    // Empty allowed_tabs === no access: showing all would silently grant
+    // access to a user whose permissions haven't been set up.
+    if (userRole === "admin" || allowedTabs === "ALL") {
       return NAV_ITEMS
     }
     const allowed = new Set(
-      allowedTabs.split(",").map((t) => t.trim())
+      allowedTabs.split(",").map((t) => t.trim()).filter(Boolean),
     )
     return NAV_ITEMS.filter((item) => allowed.has(item.tabKey))
   }, [allowedTabs, userRole])

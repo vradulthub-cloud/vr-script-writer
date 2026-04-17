@@ -359,9 +359,24 @@ export interface LocalTitleResult {
  */
 import { cache } from "react"
 
+/**
+ * Normalize role/allowed_tabs at the boundary so downstream comparisons
+ * (role === "admin", allowedTabs.split(",")) behave predictably even if
+ * the Google Sheet has "Admin" or leading/trailing whitespace.
+ */
+function normalizeProfile(p: UserProfile): UserProfile {
+  return {
+    ...p,
+    role: (p.role ?? "").trim().toLowerCase(),
+    allowed_tabs: (p.allowed_tabs ?? "").trim(),
+  }
+}
+
 export const cachedUsersMe = cache(
-  async (idToken: string | undefined): Promise<UserProfile> =>
-    apiFetch<UserProfile>("/users/me", idToken),
+  async (idToken: string | undefined): Promise<UserProfile> => {
+    const raw = await apiFetch<UserProfile>("/users/me", idToken)
+    return normalizeProfile(raw)
+  },
 )
 
 export function api(idTokenOrSession: string | { idToken?: string } | null) {
@@ -528,10 +543,10 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
     },
 
     users: {
-      me: () => get<UserProfile>("/users/me"),
-      list: () => get<UserProfile[]>("/users/"),
-      update: (email: string, body: UserUpdate) =>
-        patch<UserProfile>(`/users/${encodeURIComponent(email)}`, body),
+      me: async () => normalizeProfile(await get<UserProfile>("/users/me")),
+      list: async () => (await get<UserProfile[]>("/users/")).map(normalizeProfile),
+      update: async (email: string, body: UserUpdate) =>
+        normalizeProfile(await patch<UserProfile>(`/users/${encodeURIComponent(email)}`, body)),
     },
 
     notifications: {
