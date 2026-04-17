@@ -64,6 +64,10 @@ export default function NotFound() {
           type="text"
           placeholder="Scene ID (e.g. VRH0762)"
           required
+          // Browser-level validation: scene IDs are alphanumeric + optional
+          // hyphen. Stops 'foo bar' silently landing on /missing?scene=foo%20bar.
+          pattern="[A-Za-z0-9\-]+"
+          title="Use letters, digits, and hyphens only (e.g. VRH0762)"
           autoCapitalize="characters"
           autoComplete="off"
           style={{

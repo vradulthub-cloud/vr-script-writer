@@ -834,14 +834,24 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
                       )}
                     </th>
                     {/* Status column dropped — Pending is implied by tab filter,
-                        resolved statuses live on the panel chip */}
-                    {["Scene", "Studio", "Type", "Submitted by", "Date", ""].map((h, i) => (
+                        resolved statuses live on the panel chip. Last column
+                        is an action cell; it gets an explicit aria-label so
+                        screen readers don't announce "blank column". */}
+                    {[
+                      { label: "Scene",        srOnly: false },
+                      { label: "Studio",       srOnly: false },
+                      { label: "Type",         srOnly: false },
+                      { label: "Submitted by", srOnly: false },
+                      { label: "Date",         srOnly: false },
+                      { label: "Actions",      srOnly: true  },
+                    ].map((h, i) => (
                       <th
                         key={i}
                         className="text-left px-3 py-2 font-medium"
                         style={{ fontSize: 11, color: "var(--color-text-muted)" }}
+                        {...(h.srOnly ? { "aria-label": h.label } : {})}
                       >
-                        {h}
+                        {h.srOnly ? "" : h.label}
                       </th>
                     ))}
                   </tr>
@@ -850,20 +860,30 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
                   {filtered.map((approval, i) => {
                     const isSelected = approval.approval_id === selectedId
                     const rowColor = STUDIO_COLOR[approval.studio] ?? "var(--color-text-muted)"
+                    const isPending = approval.status === "Pending"
+                    // Row click opens the detail panel ONLY for resolved rows
+                    // (read-only audit view). Pending rows expose explicit
+                    // Approve / Reject… / View buttons in the actions cell —
+                    // clicking the row body is inert there, which eliminates
+                    // the "is this a preview or an action?" mental collision.
+                    const rowClickable = !isPending
                     return (
                       <tr
                         key={approval.approval_id}
-                        onClick={() => selectRow(approval.approval_id)}
-                        onKeyDown={(e) => {
+                        onClick={rowClickable ? () => selectRow(approval.approval_id) : undefined}
+                        onKeyDown={rowClickable ? (e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault()
                             selectRow(approval.approval_id)
                           }
-                        }}
+                        } : undefined}
                         role="row"
                         aria-selected={isSelected}
-                        tabIndex={0}
-                        aria-label={`Review ${CONTENT_TYPE_LABEL[approval.content_type] ?? approval.content_type} for scene ${approval.scene_id}`}
+                        tabIndex={rowClickable ? 0 : -1}
+                        aria-label={rowClickable
+                          ? `View ${CONTENT_TYPE_LABEL[approval.content_type] ?? approval.content_type} for scene ${approval.scene_id}`
+                          : undefined
+                        }
                         style={{
                           borderBottom: i < filtered.length - 1
                             ? "1px solid var(--color-border-subtle)"
@@ -871,11 +891,11 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
                           background: isSelected
                             ? `color-mix(in srgb, ${rowColor} 8%, var(--color-elevated))`
                             : undefined,
-                          cursor: "pointer",
+                          cursor: rowClickable ? "pointer" : "default",
                           outline: "none",
                           transition: "background 120ms",
                         }}
-                        className={!isSelected ? "hover:bg-[--color-elevated]" : ""}
+                        className={rowClickable && !isSelected ? "hover:bg-[--color-elevated]" : ""}
                       >
                         <td
                           className="px-3 py-2.5"
@@ -914,12 +934,12 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
                           style={{ textAlign: "right", whiteSpace: "nowrap" }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {approval.status === "Pending" ? (
+                          {isPending ? (
                             <div style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
                               <button
                                 onClick={() => decideApproval(approval, "Approved")}
                                 aria-label={`Approve ${approval.scene_id}`}
-                                title="Approve (without opening panel)"
+                                title="Approve without opening preview"
                                 style={{
                                   padding: "3px 8px",
                                   borderRadius: 3,
@@ -936,7 +956,7 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
                               <button
                                 onClick={() => selectRow(approval.approval_id)}
                                 aria-label={`Review ${approval.scene_id} before rejecting`}
-                                title="Review & reject"
+                                title="Opens the preview panel — you need to write a reason to reject"
                                 style={{
                                   padding: "3px 8px",
                                   borderRadius: 3,
@@ -948,6 +968,24 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
                                 }}
                               >
                                 Reject…
+                              </button>
+                              <button
+                                onClick={() => selectRow(approval.approval_id)}
+                                aria-label={`Preview ${approval.scene_id}`}
+                                title="Open preview"
+                                style={{
+                                  padding: 3,
+                                  borderRadius: 3,
+                                  cursor: "pointer",
+                                  background: "transparent",
+                                  color: "var(--color-text-faint)",
+                                  border: "1px solid transparent",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                }}
+                                className="hover:text-[--color-text-muted] hover:border-[--color-border]"
+                              >
+                                <ChevronRight size={12} aria-hidden="true" />
                               </button>
                             </div>
                           ) : (

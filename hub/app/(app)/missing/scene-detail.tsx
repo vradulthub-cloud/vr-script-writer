@@ -38,7 +38,13 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
   const color = studioColor(initialScene.studio)
 
   const [scene, setScene] = useState(initialScene)
-  // Reset local state when the parent swaps scenes
+  // Reset local state when the parent swaps scenes. We intentionally key this
+  // effect on initialScene.id only: we want to reset when the user clicks a
+  // *different* scene card, not when the parent patches fields on the current
+  // scene (e.g. after onSceneUpdate → a title save comes back from the server).
+  // The `initialScene` reference changes on every re-render; only its id is
+  // the stable scene-swap signal.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     setScene(initialScene)
     setEditingField(null)
@@ -204,7 +210,10 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
       style={{
         display: "flex",
         flexDirection: "column",
-        maxHeight: "calc(100vh - var(--spacing-topbar) - 64px)",
+        // Constrain to viewport minus the fixed topbar and the panel's sticky
+        // top offset (12px) plus a small breathing gap at the bottom. The
+        // rest flows through the inner scrollable body.
+        maxHeight: "calc(100vh - var(--spacing-topbar) - 2 * var(--spacing-panel-gap))",
         background: "var(--color-surface)",
         border: "1px solid var(--color-border)",
         borderRadius: 6,
@@ -232,29 +241,15 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
           />
 
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+            {/* Row 1: identity only — stays on one line even at 13" laptop widths */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, minWidth: 0 }}>
               <span
                 className="font-mono font-semibold"
-                style={{ fontSize: 15, color, viewTransitionName: codeName }}
+                style={{ fontSize: 15, color, viewTransitionName: codeName, flexShrink: 0 }}
               >
                 {scene.id}
               </span>
               <StudioBadge studio={scene.studio} />
-              {scene.is_compilation && (
-                <span
-                  className="rounded px-1.5 py-0.5"
-                  style={{
-                    fontSize: 9,
-                    fontWeight: 600,
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                    background: "color-mix(in srgb, var(--color-warn) 15%, transparent)",
-                    color: "var(--color-warn)",
-                  }}
-                >
-                  Comp
-                </span>
-              )}
               {isDirty && (
                 <span
                   style={{
@@ -264,16 +259,43 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
                     background: "color-mix(in srgb, var(--color-warn) 15%, transparent)",
                     color: "var(--color-warn)",
                     border: "1px solid color-mix(in srgb, var(--color-warn) 30%, transparent)",
+                    flexShrink: 0,
                   }}
                 >
                   Unsaved
                 </span>
               )}
             </div>
-            <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {/* Row 2: performers — own line, full width, ellipsis safe */}
+            <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {scene.performers || "No performers listed"}
-              {scene.release_date && <span> · {scene.release_date}</span>}
             </div>
+            {/* Row 3: metadata (date + Comp pill) — demoted to caption-level */}
+            {(scene.release_date || scene.is_compilation) && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                {scene.release_date && (
+                  <span style={{ fontSize: 10, color: "var(--color-text-faint)", fontVariantNumeric: "tabular-nums" }}>
+                    {scene.release_date}
+                  </span>
+                )}
+                {scene.is_compilation && (
+                  <span
+                    className="rounded"
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 600,
+                      letterSpacing: "0.05em",
+                      textTransform: "uppercase",
+                      padding: "1px 5px",
+                      background: "color-mix(in srgb, var(--color-warn) 15%, transparent)",
+                      color: "var(--color-warn)",
+                    }}
+                  >
+                    Compilation
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           <button

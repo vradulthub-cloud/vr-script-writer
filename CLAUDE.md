@@ -109,7 +109,7 @@ The tool lives behind the scenes of a production operation. It should feel like 
 
 ### Design Principles
 1. **Information density first.** This is a pro tool used all day. Prioritize fitting more on screen over breathing room. Tight line-height, compact spacing, minimal chrome.
-2. **Studio color owns its context.** When working in FPVR, blue is the dominant accent. When in VRH, purple leads. Lime green recedes to action-only use (submit, save, CTA).
-3. **Lime green is sacred.** Use it only for primary actions and active/selected states. One occurrence per screen is ideal. Never decorative.
+2. **Studio color owns its context.** When working in FPVR, blue is the dominant accent. When in VRH, purple leads. Lime green recedes to action-only use (submit, save, approve, CTA).
+3. **Lime green means "this commits something."** Any button or chip tinted lime must perform a write on click — Save, Apply, Approve, Start, Submit, Find, Undo, Generate. Active-nav fill also uses lime at ≤12% mix because "you are here" is itself navigational state. Non-committing affordances (Edit, Cancel, filter toggles, Refresh, Preview) must be neutral outlined buttons. If you want lime for emphasis, don't — use font weight instead.
 4. **Weight and size carry hierarchy — not color.** Use font weight (400→700) and size steps aggressively. Reserve color for status and identity, not emphasis.
 5. **Nothing decorates.** Every visual element must communicate something: status, identity, hierarchy, or interactivity. Purely decorative elements (dividers, background patterns, ambient glow) are banned unless they orient the user.

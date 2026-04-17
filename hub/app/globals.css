@@ -43,8 +43,9 @@
   /* --text-2xl removed: contradicts density-first principle */
 
   /* Spacing */
-  --spacing-sidebar: 220px;
-  --spacing-topbar:  48px;
+  --spacing-sidebar:   220px;
+  --spacing-topbar:    48px;
+  --spacing-panel-gap: 32px;   /* breathing gap above/below sticky side panels */
 }
 
 /* ─── Base ────────────────────────────────────────────────────────────────── */
