@@ -180,10 +180,12 @@ export function NotificationFeed({
                       style={{
                         fontSize: 10,
                         color: "var(--color-text-faint)",
-                        whiteSpace: "nowrap",
+                        lineHeight: 1.35,
+                        marginTop: 2,
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
                         overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        marginTop: 1,
                       }}
                     >
                       {n.message}
