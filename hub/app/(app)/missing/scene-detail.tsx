@@ -168,6 +168,7 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onBack,
           hasThumbnail={scene.has_thumbnail}
           failed={thumbFailed}
           onError={() => setThumbFailed(true)}
+          onRetry={() => setThumbFailed(false)}
         />
 
         <div className="flex-1 min-w-0">
@@ -383,11 +384,13 @@ function SceneThumbnail({
   hasThumbnail,
   failed,
   onError,
+  onRetry,
 }: {
   sceneId: string
   hasThumbnail: boolean
   failed: boolean
   onError: () => void
+  onRetry: () => void
 }) {
   const frameStyle: React.CSSProperties = {
     width: THUMB_WIDTH,
@@ -402,25 +405,34 @@ function SceneThumbnail({
     justifyContent: "center",
   }
 
-  if (!hasThumbnail || failed) {
+  if (!hasThumbnail) {
     return (
-      <div
-        style={frameStyle}
-        title={failed ? "Thumbnail could not be loaded" : "No thumbnail synced yet"}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 4,
-            color: "var(--color-text-faint)",
-          }}
-        >
+      <div style={frameStyle} title="No thumbnail synced yet">
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: "var(--color-text-faint)" }}>
           <ImageOff size={20} aria-hidden="true" />
-          <span style={{ fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-            No thumbnail
-          </span>
+          <span style={{ fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase" }}>No thumbnail</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (failed) {
+    return (
+      <div style={{ ...frameStyle, borderColor: "color-mix(in srgb, var(--color-warn) 30%, transparent)" }} title="Thumbnail exists but could not load — click to retry">
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, color: "var(--color-warn)" }}>
+          <ImageOff size={20} aria-hidden="true" />
+          <span style={{ fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase" }}>Unavailable</span>
+          <button
+            onClick={onRetry}
+            style={{
+              marginTop: 2, padding: "2px 8px", borderRadius: 3, fontSize: 10, cursor: "pointer",
+              background: "color-mix(in srgb, var(--color-warn) 12%, transparent)",
+              color: "var(--color-warn)",
+              border: "1px solid color-mix(in srgb, var(--color-warn) 30%, transparent)",
+            }}
+          >
+            Retry
+          </button>
         </div>
       </div>
     )
