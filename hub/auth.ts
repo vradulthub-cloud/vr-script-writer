@@ -1,6 +1,21 @@
 import NextAuth from "next-auth"
 import Google from "next-auth/providers/google"
 
+// Dev-only bypass: NODE_ENV check is inlined by Next.js, so production bundles
+// dead-code-eliminate this branch entirely. Opt-in via DEV_AUTH_MOCK=1.
+const DEV_MOCK =
+  process.env.NODE_ENV !== "production" && process.env.DEV_AUTH_MOCK === "1"
+
+const MOCK_SESSION = {
+  user: {
+    name: "Dev Admin",
+    email: "dev@eclatech.test",
+    image: null,
+  },
+  idToken: "DEV_MOCK_TOKEN",
+  expires: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+} as unknown as import("next-auth").Session
+
 async function refreshIdToken(refreshToken: string): Promise<{
   idToken: string
   accessToken: string
@@ -31,7 +46,7 @@ async function refreshIdToken(refreshToken: string): Promise<{
   }
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+const nextAuth = NextAuth({
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID!,
@@ -78,3 +93,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
 })
+
+export const handlers = nextAuth.handlers
+export const signIn   = nextAuth.signIn
+export const signOut  = nextAuth.signOut
+
+// Real NextAuth middleware handler — used by proxy.ts unconditionally so the
+// exported middleware always returns a Response-shape.
+export const authMiddleware = nextAuth.auth
+
+// Server-component helper. In dev-mock mode this returns a hardcoded admin
+// session; in prod it delegates to NextAuth.
+export const auth: typeof nextAuth.auth = DEV_MOCK
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ? ((async () => MOCK_SESSION) as any)
+  : nextAuth.auth

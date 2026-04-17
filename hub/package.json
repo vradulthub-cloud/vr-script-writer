@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:mock": "DEV_AUTH_MOCK=1 NEXT_PUBLIC_DEV_AUTH_MOCK=1 next dev",
     "build": "next build",
     "start": "next start"
   },

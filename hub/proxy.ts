@@ -1,4 +1,13 @@
-export { auth as proxy } from "@/auth"
+import { authMiddleware } from "@/auth"
+import { NextResponse } from "next/server"
+
+// Dev-only bypass: NODE_ENV + DEV_AUTH_MOCK guard. Production strips this.
+const DEV_MOCK =
+  process.env.NODE_ENV !== "production" && process.env.DEV_AUTH_MOCK === "1"
+
+export const proxy = DEV_MOCK
+  ? () => NextResponse.next()
+  : authMiddleware
 
 export const config = {
   // Protect all routes except static assets, login, and next-auth API
