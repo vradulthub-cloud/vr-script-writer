@@ -1,6 +1,6 @@
 import nextDynamic from "next/dynamic"
 import { auth } from "@/auth"
-import { api, type Scene, type UserProfile } from "@/lib/api"
+import { api, cachedUsersMe, type Scene, type UserProfile } from "@/lib/api"
 
 const DescGenerator = nextDynamic(() => import("./desc-generator").then(m => m.DescGenerator))
 
@@ -20,8 +20,9 @@ export default async function DescriptionsPage() {
     error = e instanceof Error ? e.message : "Failed to load scenes"
   }
 
+  const idToken = (session as { idToken?: string } | null)?.idToken
   try {
-    userProfile = await client.users.me()
+    userProfile = await cachedUsersMe(idToken)
   } catch (err) {
     console.error("[hub] /api/users/me failed in DescriptionsPage:", err)
   }
@@ -30,7 +31,7 @@ export default async function DescriptionsPage() {
     <DescGenerator
       scenes={scenes}
       scenesError={error}
-      idToken={(session as { idToken?: string } | null)?.idToken}
+      idToken={idToken}
       userRole={userProfile?.role}
     />
   )

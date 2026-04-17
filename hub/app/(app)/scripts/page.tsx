@@ -1,6 +1,6 @@
 import nextDynamic from "next/dynamic"
 import { auth } from "@/auth"
-import { api, type UserProfile } from "@/lib/api"
+import { api, cachedUsersMe, type UserProfile } from "@/lib/api"
 
 const ScriptGenerator = nextDynamic(() => import("./script-generator").then(m => m.ScriptGenerator))
 
@@ -20,8 +20,9 @@ export default async function ScriptsPage() {
     error = e instanceof Error ? e.message : "Failed to load script tabs"
   }
 
+  const idToken = (session as { idToken?: string } | null)?.idToken
   try {
-    userProfile = await client.users.me()
+    userProfile = await cachedUsersMe(idToken)
   } catch (err) {
     console.error("[hub] /api/users/me failed in ScriptsPage:", err)
   }
@@ -30,7 +31,7 @@ export default async function ScriptsPage() {
     <ScriptGenerator
       tabs={tabs}
       tabsError={error}
-      idToken={(session as { idToken?: string } | null)?.idToken}
+      idToken={idToken}
       userRole={userProfile?.role}
     />
   )

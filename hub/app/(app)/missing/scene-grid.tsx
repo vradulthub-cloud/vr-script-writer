@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useDeferredValue, memo } from "react"
 import { FilterTabs } from "@/components/ui/filter-tabs"
 import { RetryError } from "@/components/ui/retry-error"
 import { useIdToken } from "@/hooks/use-id-token"
@@ -66,13 +66,17 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
     return counts
   }, [scenes])
 
+  // Deferred search lets the input stay snappy — typing updates the text
+  // field immediately, but filtering/re-rendering runs at a lower priority.
+  const deferredSearch = useDeferredValue(search)
+
   const byStudio = useMemo(() => {
+    const q = deferredSearch ? deferredSearch.toLowerCase() : ""
     const groups: Record<string, Scene[]> = {}
     for (const scene of scenes) {
       if (studio !== "All" && scene.studio !== studio) continue
       if (missingOnly && ASSET_COLS.every(a => scene[a.key])) continue
-      if (search) {
-        const q = search.toLowerCase()
+      if (q) {
         if (
           !scene.title.toLowerCase().includes(q) &&
           !scene.performers.toLowerCase().includes(q) &&
@@ -83,7 +87,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
       groups[scene.studio].push(scene)
     }
     return groups
-  }, [scenes, studio, missingOnly, search])
+  }, [scenes, studio, missingOnly, deferredSearch])
 
   const totalVisible = Object.values(byStudio).reduce((n, arr) => n + arr.length, 0)
 
@@ -233,7 +237,11 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
   )
 }
 
-function SceneCard({ scene, onClick }: { scene: Scene; onClick: () => void }) {
+// React.memo prevents re-renders for unchanged scenes when filters or search
+// state change elsewhere in the grid.
+const SceneCard = memo(function SceneCard({
+  scene, onClick,
+}: { scene: Scene; onClick: () => void }) {
   const missing = missingAssets(scene)
   const pct = completionPct(scene)
   const pctColor = pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)"
@@ -295,4 +303,4 @@ function SceneCard({ scene, onClick }: { scene: Scene; onClick: () => void }) {
       </div>
     </button>
   )
-}
+})

@@ -13,6 +13,14 @@ const nextConfig: NextConfig = {
 
   // Compress responses — ~60-70% smaller HTML/JSON payloads
   compress: true,
+
+  // Tell Next to aggressively tree-shake these packages during build. Works
+  // with Turbopack; no effect on modern lucide-react (already ESM + per-icon
+  // exports) but harmless. Anthropic/Claude sessions trying `modularizeImports`
+  // on lucide-react 1.x will hit default-export errors — use this instead.
+  experimental: {
+    optimizePackageImports: ["lucide-react"],
+  },
 }
 
 export default nextConfig

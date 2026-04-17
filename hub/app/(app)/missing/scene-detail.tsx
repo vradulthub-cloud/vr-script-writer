@@ -425,6 +425,7 @@ function SceneThumbnail({
       src={thumbnailUrl(sceneId)}
       alt={`${sceneId} thumbnail`}
       loading="lazy"
+      decoding="async"
       onError={onError}
       style={{
         ...frameStyle,
