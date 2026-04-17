@@ -628,25 +628,24 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
     }
   }
 
-  const decide = useCallback((decision: "Approved" | "Rejected", notes?: string) => {
-    if (!selectedApproval) return
-    const { approval_id, status: previousStatus } = selectedApproval
+  // Decide on a specific approval (panel OR inline row). Shared so the panel's
+  // undo+commit lifecycle is identical whether you went through the detail view
+  // or approved straight from the row.
+  const decideApproval = useCallback((
+    approval: Approval,
+    decision: "Approved" | "Rejected",
+    notes?: string,
+  ) => {
+    const { approval_id, status: previousStatus } = approval
 
-    // Flush any in-flight pending commit before starting a new one
     flushPending()
 
-    // Optimistic update
     setApprovals(prev =>
       prev.map(a => a.approval_id === approval_id ? { ...a, status: decision } : a)
     )
+    if (selectedId === approval_id) setSelectedId(null)
 
-    // Close panel
-    setSelectedId(null)
-
-    // Store pending commit in ref (survives toast dismissal)
     pendingCommitRef.current = { approvalIds: [approval_id], decision, notes }
-
-    // Start undo window
     startProgressCountdown()
     setUndo({ approvalIds: [approval_id], previousStatuses: { [approval_id]: previousStatus }, decision })
 
@@ -659,7 +658,12 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
       setUndo(null)
       undoTimerRef.current = null
     }, UNDO_DURATION_MS)
-  }, [selectedApproval, commitDecision])
+  }, [selectedId, commitDecision])
+
+  const decide = useCallback((decision: "Approved" | "Rejected", notes?: string) => {
+    if (!selectedApproval) return
+    decideApproval(selectedApproval, decision, notes)
+  }, [selectedApproval, decideApproval])
 
   const decideBulk = useCallback((decision: "Approved" | "Rejected") => {
     const ids = [...bulkSelected].filter(id =>
@@ -829,7 +833,9 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
                         />
                       )}
                     </th>
-                    {["Scene", "Studio", "Type", "Submitted by", "Date", "Status", ""].map((h, i) => (
+                    {/* Status column dropped — Pending is implied by tab filter,
+                        resolved statuses live on the panel chip */}
+                    {["Scene", "Studio", "Type", "Submitted by", "Date", ""].map((h, i) => (
                       <th
                         key={i}
                         className="text-left px-3 py-2 font-medium"
@@ -903,29 +909,72 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
                         <td className="px-3 py-2.5 font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
                           {approval.submitted_at ? approval.submitted_at.slice(0, 10) : "—"}
                         </td>
-                        <td className="px-3 py-2.5 whitespace-nowrap">
-                          <span
-                            className="inline-flex items-center px-1.5 py-0.5 rounded-sm"
-                            style={{
-                              fontSize: 10,
-                              fontWeight: 500,
-                              background: `color-mix(in srgb, ${STATUS_COLOR[approval.status] ?? "var(--color-text-muted)"} 15%, transparent)`,
-                              color: STATUS_COLOR[approval.status] ?? "var(--color-text-muted)",
-                              border: `1px solid color-mix(in srgb, ${STATUS_COLOR[approval.status] ?? "var(--color-text-muted)"} 25%, transparent)`,
-                            }}
-                          >
-                            {approval.status}
-                          </span>
-                        </td>
-                        <td className="px-2 py-2.5" style={{ width: 28, textAlign: "right" }}>
-                          <ChevronRight
-                            size={12}
-                            aria-hidden="true"
-                            style={{
-                              color: isSelected ? rowColor : "var(--color-border)",
-                              transition: "color 150ms",
-                            }}
-                          />
+                        <td
+                          className="px-2 py-2"
+                          style={{ textAlign: "right", whiteSpace: "nowrap" }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {approval.status === "Pending" ? (
+                            <div style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                              <button
+                                onClick={() => decideApproval(approval, "Approved")}
+                                aria-label={`Approve ${approval.scene_id}`}
+                                title="Approve (without opening panel)"
+                                style={{
+                                  padding: "3px 8px",
+                                  borderRadius: 3,
+                                  fontSize: 11,
+                                  fontWeight: 500,
+                                  cursor: "pointer",
+                                  background: "color-mix(in srgb, var(--color-lime) 10%, transparent)",
+                                  color: "var(--color-lime)",
+                                  border: "1px solid color-mix(in srgb, var(--color-lime) 25%, transparent)",
+                                }}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => selectRow(approval.approval_id)}
+                                aria-label={`Review ${approval.scene_id} before rejecting`}
+                                title="Review & reject"
+                                style={{
+                                  padding: "3px 8px",
+                                  borderRadius: 3,
+                                  fontSize: 11,
+                                  cursor: "pointer",
+                                  background: "transparent",
+                                  color: "var(--color-text-muted)",
+                                  border: "1px solid var(--color-border)",
+                                }}
+                              >
+                                Reject…
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 500,
+                                  padding: "1px 6px",
+                                  borderRadius: 3,
+                                  background: `color-mix(in srgb, ${STATUS_COLOR[approval.status] ?? "var(--color-text-muted)"} 14%, transparent)`,
+                                  color: STATUS_COLOR[approval.status] ?? "var(--color-text-muted)",
+                                  border: `1px solid color-mix(in srgb, ${STATUS_COLOR[approval.status] ?? "var(--color-text-muted)"} 25%, transparent)`,
+                                }}
+                              >
+                                {approval.status}
+                              </span>
+                              <ChevronRight
+                                size={12}
+                                aria-hidden="true"
+                                style={{
+                                  color: isSelected ? rowColor : "var(--color-border)",
+                                  transition: "color 150ms",
+                                }}
+                              />
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )

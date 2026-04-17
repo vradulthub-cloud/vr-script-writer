@@ -36,7 +36,8 @@ export default async function DashboardPage() {
   const scripts        = scriptsRes.status       === "fulfilled" ? scriptsRes.value       : []
   const notifications  = notificationsRes.status === "fulfilled" ? notificationsRes.value : []
   const health         = healthRes.status        === "fulfilled" ? healthRes.value        : null
-  const userProfile    = userRes.status          === "fulfilled" ? userRes.value          : null
+  // userRes fetched to warm the cache for downstream nav; not used on this page
+  void userRes
 
   const missingScenes = missingResults
     .flatMap(r => r.status === "fulfilled" ? r.value : [])
@@ -45,20 +46,15 @@ export default async function DashboardPage() {
   const hour      = new Date().getHours()
   const greeting  = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
   const firstName = session?.user?.name?.split(" ")[0] ?? "there"
-  const today     = new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-  const role      = userProfile?.role ?? "editor"
   const unreadCount = notifications.filter((n) => n.read === 0).length
   const systemOk    = health !== null
 
   return (
-    <div style={{ maxWidth: 1080 }}>
+    <div style={{ maxWidth: 1200 }}>
       {/* ── Condensed header ─────────────────────────────────────────────── */}
       <div className="page-header" style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
         <h1 style={{ margin: 0 }}>
           {greeting}, {firstName}
-          <span style={{ fontSize: 12, fontWeight: 400, color: "var(--color-text-faint)", letterSpacing: "0.03em", marginLeft: 10, fontFamily: "var(--font-sans)", textTransform: "none" }}>
-            {role.toUpperCase()} · {today}
-          </span>
         </h1>
         <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--color-text-faint)" }}>
           <span
@@ -73,8 +69,8 @@ export default async function DashboardPage() {
         </span>
       </div>
 
-      {/* ── Body: left rail (triage) + right rail (notifications/sync) ─── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4 items-start">
+      {/* ── Body: Triage dominates (2/3), Notifications rail recedes ─── */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-5 items-start">
 
         <div className="flex flex-col gap-3.5">
           {sceneStats && Object.keys(sceneStats.by_studio).length > 0 && (

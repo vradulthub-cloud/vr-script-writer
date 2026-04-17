@@ -122,7 +122,7 @@ export function NotificationFeed({
         )}
       </div>
 
-      {/* List */}
+      {/* List — condensed to 4 on dashboard rail; full list at /notifications */}
       {notifications.length === 0 ? (
         <div
           style={{
@@ -132,11 +132,11 @@ export function NotificationFeed({
             fontSize: 12,
           }}
         >
-          No notifications
+          All caught up
         </div>
       ) : (
         <div>
-          {notifications.map((n) => {
+          {notifications.slice(0, 4).map((n) => {
             const Icon   = TYPE_ICON[n.type] ?? Bell
             const unread = n.read === 0
             return (
@@ -182,10 +182,9 @@ export function NotificationFeed({
                         color: "var(--color-text-faint)",
                         lineHeight: 1.35,
                         marginTop: 2,
-                        display: "-webkit-box",
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: "vertical",
+                        whiteSpace: "nowrap",
                         overflow: "hidden",
+                        textOverflow: "ellipsis",
                       }}
                     >
                       {n.message}
@@ -207,6 +206,23 @@ export function NotificationFeed({
               </Link>
             )
           })}
+          {notifications.length > 4 && (
+            <Link
+              href="/notifications"
+              style={{
+                display: "block",
+                padding: "7px 14px",
+                fontSize: 11,
+                color: "var(--color-text-muted)",
+                textDecoration: "none",
+                textAlign: "center",
+                borderTop: "1px solid var(--color-border-subtle)",
+              }}
+              className="hover:bg-[--color-elevated]"
+            >
+              See all {notifications.length} →
+            </Link>
+          )}
         </div>
       )}
     </div>
