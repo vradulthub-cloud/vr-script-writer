@@ -266,7 +266,7 @@ async def create_ticket(body: TicketCreate, user: CurrentUser):
                 TYPE_TICKET_CREATED,
                 f"New ticket: {ticket_id}",
                 f'{user["name"]} submitted "{body.title}"',
-                "Tickets",
+                "/tickets",
             )
     except Exception as exc:
         _log.warning("Failed to send ticket notification: %s", exc)
@@ -350,7 +350,7 @@ async def update_ticket(ticket_id: str, body: TicketUpdate, user: CurrentUser):
                     TYPE_TICKET_STATUS,
                     f"{ticket_id} → {body.status}",
                     f'{user["name"]} changed status to {body.status}',
-                    "Tickets",
+                    "/tickets",
                 )
         if "assignee" in sheet_updates and body.assignee and body.assignee != user["name"]:
             create_notification(
@@ -358,7 +358,7 @@ async def update_ticket(ticket_id: str, body: TicketUpdate, user: CurrentUser):
                 TYPE_TICKET_ASSIGNED,
                 f"Assigned: {ticket_id}",
                 f'{user["name"]} assigned "{ticket["title"]}" to you',
-                "Tickets",
+                "/tickets",
             )
     except Exception as exc:
         _log.warning("Failed to send ticket notification: %s", exc)

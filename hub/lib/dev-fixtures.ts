@@ -412,3 +412,181 @@ export function filterScenes(filters?: {
   if (filters?.limit) out = out.slice(0, filters.limit)
   return out
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Shoot Board fixtures — covers yesterday-complete, stuck, upcoming
+// ═══════════════════════════════════════════════════════════════════════
+import type { Shoot, SceneAssetState, AssetType } from "./api"
+
+const SHOOT_ASSET_TYPES: AssetType[] = [
+  "script_done", "call_sheet_sent", "legal_run", "grail_run",
+  "bg_edit_uploaded", "solo_uploaded", "title_done",
+  "encoded_uploaded", "photoset_uploaded",
+  "storyboard_uploaded", "legal_docs_uploaded",
+]
+
+function mockAssets(overrides: Partial<Record<AssetType, SceneAssetState["status"]>> = {}): SceneAssetState[] {
+  return SHOOT_ASSET_TYPES.map(at => ({
+    asset_type: at,
+    status: overrides[at] ?? "not_present",
+    first_seen_at: overrides[at] && overrides[at] !== "not_present" ? "2026-04-15T03:00:00+00:00" : "",
+    validated_at: overrides[at] === "validated" ? "2026-04-15T03:00:00+00:00" : "",
+    last_checked_at: "2026-04-17T19:00:00+00:00",
+    validity: [],
+  }))
+}
+
+export const MOCK_SHOOTS: Shoot[] = [
+  // 1) Upcoming shoot — pristine, all not_present
+  {
+    shoot_id: "2026-04-20-sophia-locke",
+    shoot_date: "2026-04-20",
+    female_talent: "Sophia Locke",
+    female_agency: "OC Models",
+    male_talent: "",
+    male_agency: "",
+    destination: "",
+    location: "",
+    home_owner: "David",
+    source_tab: "April 2026",
+    status: "active",
+    aging_hours: 0,
+    scenes: [
+      {
+        scene_id: "",
+        studio: "FuckPassVR",
+        scene_type: "BGCP",
+        grail_tab: "FPVR",
+        position: 1,
+        title: "",
+        performers: "Sophia Locke",
+        has_thumbnail: false,
+        mega_path: "",
+        assets: mockAssets(),
+      },
+      {
+        scene_id: "",
+        studio: "NaughtyJOI",
+        scene_type: "JOI",
+        grail_tab: "NNJOI",
+        position: 2,
+        title: "",
+        performers: "Sophia Locke",
+        has_thumbnail: false,
+        mega_path: "",
+        assets: mockAssets(),
+      },
+    ],
+  },
+  // 2) Yesterday — BG validated, Solo still in flight
+  {
+    shoot_id: "2026-04-16-harley-love",
+    shoot_date: "2026-04-16",
+    female_talent: "Harley Love",
+    female_agency: "Invision Models",
+    male_talent: "Mike Mancini",
+    male_agency: "Independent",
+    destination: "",
+    location: "Studio B",
+    home_owner: "David",
+    source_tab: "April 2026",
+    status: "active",
+    aging_hours: 26,
+    scenes: [
+      {
+        scene_id: "VRH0764",
+        studio: "VRHush",
+        scene_type: "BGCP",
+        grail_tab: "VRH",
+        position: 1,
+        title: "Harley Unbound",
+        performers: "Harley Love / Mike Mancini",
+        has_thumbnail: true,
+        mega_path: "/Grail/VRH/VRH0764",
+        assets: mockAssets({
+          script_done: "validated",
+          call_sheet_sent: "validated",
+          legal_run: "validated",
+          grail_run: "validated",
+          bg_edit_uploaded: "validated",
+          title_done: "validated",
+          encoded_uploaded: "validated",
+          photoset_uploaded: "available",
+        }),
+      },
+      {
+        scene_id: "VRA0522",
+        studio: "VRAllure",
+        scene_type: "Solo",
+        grail_tab: "VRA",
+        position: 2,
+        title: "",
+        performers: "Harley Love",
+        has_thumbnail: true,
+        mega_path: "/Grail/VRA/VRA0522",
+        assets: mockAssets({
+          script_done: "validated",
+          grail_run: "validated",
+          photoset_uploaded: "validated",
+          storyboard_uploaded: "validated",
+        }),
+      },
+    ],
+  },
+  // 3) Stuck — shoot from 4 days ago, photoset never went up → red
+  {
+    shoot_id: "2026-04-13-agatha-vega",
+    shoot_date: "2026-04-13",
+    female_talent: "Agatha Vega",
+    female_agency: "The Bakery Talent",
+    male_talent: "Mike Mancini",
+    male_agency: "Independent",
+    destination: "",
+    location: "",
+    home_owner: "David",
+    source_tab: "April 2026",
+    status: "active",
+    aging_hours: 98,
+    scenes: [
+      {
+        scene_id: "VRH0762",
+        studio: "VRHush",
+        scene_type: "BG",
+        grail_tab: "VRH",
+        position: 1,
+        title: "Blurred Lines",
+        performers: "Agatha Vega / Mike Mancini",
+        has_thumbnail: true,
+        mega_path: "/Grail/VRH/VRH0762",
+        assets: mockAssets({
+          script_done: "validated",
+          call_sheet_sent: "validated",
+          legal_run: "validated",
+          grail_run: "validated",
+          bg_edit_uploaded: "validated",
+          title_done: "validated",
+          encoded_uploaded: "validated",
+          photoset_uploaded: "stuck",
+          storyboard_uploaded: "validated",
+        }).map(a =>
+          a.asset_type === "photoset_uploaded"
+            ? { ...a, validity: [{ check: "count", status: "fail", message: "Expected ≥1 files, found 0" }] }
+            : a,
+        ),
+      },
+      {
+        scene_id: "",
+        studio: "NaughtyJOI",
+        scene_type: "JOI",
+        grail_tab: "NNJOI",
+        position: 2,
+        title: "",
+        performers: "Agatha Vega",
+        has_thumbnail: false,
+        mega_path: "",
+        assets: mockAssets(),
+      },
+    ],
+  },
+]
+

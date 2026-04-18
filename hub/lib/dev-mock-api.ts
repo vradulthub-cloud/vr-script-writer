@@ -21,6 +21,7 @@ import {
   MOCK_SHOOT_DATES,
   MOCK_SCRIPT_TABS,
   MOCK_SCENES,
+  MOCK_SHOOTS,
   filterScenes,
 } from "./dev-fixtures"
 
@@ -108,6 +109,38 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
   // ── Compilations ──────────────────────────────────────────────────────
   if (base === "/compilations/scenes") return wait(MOCK_SCENES as unknown as T)
   if (base === "/compilations/existing") return wait([] as unknown as T)
+
+  // ── Shoots ────────────────────────────────────────────────────────────
+  if (base === "/shoots/") {
+    const studio = params.get("studio")
+    const includeCancelled = params.get("include_cancelled") === "true"
+    let list = MOCK_SHOOTS
+    if (!includeCancelled) list = list.filter(s => s.status !== "cancelled")
+    if (studio) list = list.filter(s => s.scenes.some(sc => sc.studio === studio))
+    return wait(list as unknown as T)
+  }
+  const shootGet = base.match(/^\/shoots\/([^/]+)$/)
+  if (shootGet) {
+    const s = MOCK_SHOOTS.find(x => x.shoot_id === shootGet[1]) ?? MOCK_SHOOTS[0]
+    return wait(s as unknown as T)
+  }
+  const revalidateMatch = base.match(/^\/shoots\/([^/]+)\/scenes\/(\d+)\/assets\/([^/]+)\/revalidate$/)
+  if (revalidateMatch) {
+    const [, shootId, posStr, assetType] = revalidateMatch
+    const pos = parseInt(posStr)
+    const shoot = MOCK_SHOOTS.find(s => s.shoot_id === shootId)
+    const scene = shoot?.scenes.find(sc => sc.position === pos)
+    const asset = scene?.assets.find(a => a.asset_type === assetType)
+    if (asset) {
+      const refreshed = {
+        ...asset,
+        last_checked_at: new Date().toISOString(),
+        validity: asset.validity.filter(v => v.status !== "fail"),
+      }
+      return wait(refreshed as unknown as T)
+    }
+    return wait(null as unknown as T)
+  }
 
   // ── Sync ──────────────────────────────────────────────────────────────
   if (base === "/sync/status") return wait([] as unknown as T)

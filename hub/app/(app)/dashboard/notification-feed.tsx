@@ -14,6 +14,25 @@ const TYPE_ICON: Record<string, React.ComponentType<{ size?: number; style?: Rea
   approval_decided:   CheckSquare,
 }
 
+// Legacy rows wrote bare tab names ("Tickets", "Approvals"); map to real routes.
+function normalizeNotifLink(link: string | null | undefined): string {
+  if (!link) return "#"
+  if (link.startsWith("/")) return link
+  const map: Record<string, string> = {
+    Tickets: "/tickets",
+    Approvals: "/approvals",
+    Scripts: "/scripts",
+    Missing: "/missing",
+    "Model Research": "/research",
+    "Call Sheets": "/call-sheets",
+    Titles: "/titles",
+    Descriptions: "/descriptions",
+    Compilations: "/compilations",
+    Shoots: "/shoots",
+  }
+  return map[link] ?? "#"
+}
+
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
   const m = Math.floor(diff / 60_000)
@@ -145,7 +164,7 @@ export function NotificationFeed({
             return (
               <Link
                 key={n.notif_id}
-                href={n.link || "#"}
+                href={normalizeNotifLink(n.link)}
                 style={{
                   display: "flex",
                   gap: 9,
@@ -210,21 +229,17 @@ export function NotificationFeed({
             )
           })}
           {notifications.length > 4 && (
-            <Link
-              href="/notifications"
+            <div
               style={{
-                display: "block",
                 padding: "7px 14px",
-                fontSize: 11,
-                color: "var(--color-text-muted)",
-                textDecoration: "none",
+                fontSize: 10,
+                color: "var(--color-text-faint)",
                 textAlign: "center",
                 borderTop: "1px solid var(--color-border-subtle)",
               }}
-              className="hover:bg-[--color-elevated]"
             >
-              See all {notifications.length} →
-            </Link>
+              {notifications.length - 4} more — open the bell for the full list
+            </div>
           )}
         </div>
       )}

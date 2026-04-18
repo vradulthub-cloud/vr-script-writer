@@ -334,6 +334,87 @@ export interface UserUpdate {
   allowed_tabs?: string
 }
 
+// ── Shoot Board types ──────────────────────────────────────────────────
+export interface ValidityCheck {
+  check: string           // "naming" | "count" | "format"
+  status: "pass" | "fail" | "warn"
+  message: string
+}
+
+export type AssetType =
+  | "script_done" | "call_sheet_sent" | "legal_run" | "grail_run"
+  | "bg_edit_uploaded" | "solo_uploaded"
+  | "title_done" | "encoded_uploaded"
+  | "photoset_uploaded" | "storyboard_uploaded" | "legal_docs_uploaded"
+
+export type AssetStatus = "not_present" | "available" | "validated" | "stuck"
+
+export interface SceneAssetState {
+  asset_type: AssetType
+  status: AssetStatus
+  first_seen_at: string
+  validated_at: string
+  last_checked_at: string
+  validity: ValidityCheck[]
+}
+
+export interface BoardShootScene {
+  scene_id: string
+  studio: string
+  scene_type: "BG" | "BGCP" | "Solo" | "JOI" | string
+  grail_tab: string
+  position: 1 | 2
+  title: string
+  performers: string
+  has_thumbnail: boolean
+  mega_path: string
+  assets: SceneAssetState[]
+}
+
+export interface Shoot {
+  shoot_id: string
+  shoot_date: string
+  female_talent: string
+  female_agency: string
+  male_talent: string
+  male_agency: string
+  destination: string
+  location: string
+  home_owner: string
+  source_tab: string
+  status: "active" | "cancelled" | string
+  scenes: BoardShootScene[]
+  aging_hours: number
+}
+
+export const SHOOT_ASSET_ORDER: readonly AssetType[] = [
+  "script_done",
+  "call_sheet_sent",
+  "legal_run",
+  "grail_run",
+  "bg_edit_uploaded",
+  "solo_uploaded",
+  "title_done",
+  "encoded_uploaded",
+  "photoset_uploaded",
+  "storyboard_uploaded",
+  "legal_docs_uploaded",
+] as const
+
+export const SHOOT_ASSET_LABELS: Record<AssetType, string> = {
+  script_done:          "Script",
+  call_sheet_sent:      "Call sheet",
+  legal_run:            "Legal run",
+  grail_run:            "Grail run",
+  bg_edit_uploaded:     "BG edit",
+  solo_uploaded:        "Solo → Flo",
+  title_done:           "Title",
+  encoded_uploaded:     "Encoded",
+  photoset_uploaded:    "Photoset",
+  storyboard_uploaded:  "Storyboard",
+  legal_docs_uploaded:  "Legal docs",
+}
+
 export interface Notification {
   notif_id: string
   timestamp: string
@@ -559,6 +640,29 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       list: (limit = 50) => get<Notification[]>(`/notifications/?limit=${limit}`),
       unreadCount: () => get<{ count: number }>("/notifications/unread-count"),
       markRead: () => post<{ updated: number }>("/notifications/mark-read", {}),
+    },
+
+    shoots: {
+      list: (filters?: {
+        from_date?: string
+        to_date?: string
+        studio?: string
+        include_cancelled?: boolean
+      }) => {
+        const params = new URLSearchParams()
+        if (filters?.from_date) params.set("from_date", filters.from_date)
+        if (filters?.to_date) params.set("to_date", filters.to_date)
+        if (filters?.studio) params.set("studio", filters.studio)
+        if (filters?.include_cancelled) params.set("include_cancelled", "true")
+        const qs = params.toString()
+        return get<Shoot[]>(`/shoots/${qs ? `?${qs}` : ""}`)
+      },
+      get: (id: string) => get<Shoot>(`/shoots/${encodeURIComponent(id)}`),
+      revalidate: (shootId: string, position: number, assetType: AssetType) =>
+        post<SceneAssetState>(
+          `/shoots/${encodeURIComponent(shootId)}/scenes/${position}/assets/${encodeURIComponent(assetType)}/revalidate`,
+          {},
+        ),
     },
   }
 }
