@@ -8,7 +8,8 @@ import { NotificationBell } from "./notification-bell"
 
 const PAGE_NAMES: Record<string, string> = {
   "/dashboard":    "Dashboard",
-  "/missing":      "Asset Tracker",
+  "/shoots":       "Shoot Tracker",
+  "/missing":      "Studio Catalog",
   "/research":     "Model Research",
   "/scripts":      "Scripts",
   "/call-sheets":  "Call Sheets",

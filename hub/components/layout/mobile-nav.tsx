@@ -19,12 +19,13 @@ import {
 
 const PRIMARY_ITEMS = [
   { href: "/dashboard",    label: "Home",      icon: Home },
-  { href: "/missing",      label: "Assets",    icon: LayoutGrid },
+  { href: "/shoots",       label: "Shoots",    icon: LayoutGrid },
+  { href: "/missing",      label: "Scenes",    icon: LayoutGrid },
   { href: "/scripts",      label: "Scripts",   icon: FileText },
-  { href: "/titles",       label: "Titles",    icon: Image },
 ]
 
 const OVERFLOW_ITEMS = [
+  { href: "/titles",       label: "Titles",       icon: Image },
   { href: "/descriptions", label: "Descriptions", icon: AlignLeft },
   { href: "/research",     label: "Research",     icon: Users },
   { href: "/call-sheets",  label: "Call Sheets",  icon: Phone },
