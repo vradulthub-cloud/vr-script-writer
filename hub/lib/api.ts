@@ -149,6 +149,12 @@ export interface TicketCreate {
   type?: string
   priority?: string
   linked_items?: string
+  /** Optional initial status — defaults server-side to "New". */
+  status?: string
+  /** Optional assignee name at create time. */
+  assignee?: string
+  /** Additional names to notify beyond the admin list. */
+  notify?: string[]
 }
 
 export interface TicketUpdate {
