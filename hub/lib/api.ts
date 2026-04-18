@@ -567,7 +567,7 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
 
     titles: {
       treatments: () => get<Treatment[]>("/titles/treatments"),
-      local: (body: { text: string; treatments?: string[]; n?: number; seed?: number }) =>
+      local: (body: { text: string; treatments?: string[]; n?: number; seed?: number; auto_match?: boolean }) =>
         post<LocalTitleResult[]>("/titles/local", body),
       refine: (body: { text: string; treatment_name: string; refine_prompt: string; seed?: number }) =>
         post<LocalTitleResult>("/titles/refine", body),
