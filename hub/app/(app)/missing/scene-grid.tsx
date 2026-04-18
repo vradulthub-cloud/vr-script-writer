@@ -58,6 +58,9 @@ interface Props {
   idToken?: string | undefined
 }
 
+const PER_STUDIO_OPTIONS = [5, 10, 25, 50, 100] as const
+type PerStudio = (typeof PER_STUDIO_OPTIONS)[number]
+
 export function SceneGrid({ scenes: initialScenes, stats, error: initialError, idToken: serverIdToken }: Props) {
   const idToken = useIdToken(serverIdToken)
   const [scenes, setScenes] = useState(initialScenes)
@@ -68,6 +71,8 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
   const [megaMsg, setMegaMsg] = useState<string | null>(null)
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null)
   const [error, setError] = useState(initialError)
+  const [perStudio, setPerStudio] = useState<PerStudio>(5)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   // Deep-link support: /missing?scene=VRH0762 opens the panel on that scene.
   // If the id isn't in the initial (paged) list, fetch it directly so a
@@ -134,6 +139,25 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
   }, [scenes, studio, missingOnly, deferredSearch])
 
   const totalVisible = Object.values(byStudio).reduce((n, arr) => n + arr.length, 0)
+
+  async function reloadWithLimit(next: PerStudio) {
+    setPerStudio(next)
+    setLoadingMore(true)
+    try {
+      const client = api(idToken ?? null)
+      const results = await Promise.all(
+        STUDIO_ORDER.map(s =>
+          client.scenes.list({ studio: s, limit: next, missing_only: missingOnly }),
+        ),
+      )
+      setScenes(results.flat())
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load more scenes")
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   async function triggerMegaRefresh() {
     setMegaRefreshing(true)
@@ -212,6 +236,38 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
           <span style={{ fontVariantNumeric: "tabular-nums" }}>{stats.missing_any}</span> missing of{" "}
           <span style={{ fontVariantNumeric: "tabular-nums" }}>{stats.total}</span>
         </span>
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 11,
+            color: "var(--color-text-muted)",
+          }}
+          title="Max scenes fetched per studio. Apply filters locally after."
+        >
+          Per studio
+          <select
+            value={perStudio}
+            onChange={e => { void reloadWithLimit(Number(e.target.value) as PerStudio) }}
+            disabled={loadingMore}
+            style={{
+              padding: "3px 6px",
+              borderRadius: 4,
+              fontSize: 11,
+              background: "var(--color-surface)",
+              border: "1px solid var(--color-border)",
+              color: "var(--color-text)",
+              cursor: loadingMore ? "wait" : "pointer",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {PER_STUDIO_OPTIONS.map(n => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+          {loadingMore && <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>loading…</span>}
+        </label>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           {megaMsg && (
             <span style={{ fontSize: 11, color: megaMsg.includes("Scan") ? "var(--color-ok)" : "var(--color-err)" }}>
