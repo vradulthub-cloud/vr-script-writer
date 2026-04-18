@@ -446,11 +446,14 @@ async def get_model(name: str, user: CurrentUser):
 def _get_booking_history(name: str) -> BookingHistory:
     """Derive booking history from the scripts table."""
     try:
+        # Escape LIKE wildcards in user-provided name so a performer whose
+        # name happens to contain % or _ can't broaden the match.
+        safe = name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         with get_db() as conn:
             rows = conn.execute(
                 """SELECT studio, shoot_date FROM scripts
-                   WHERE female LIKE ? ORDER BY shoot_date DESC""",
-                (f"%{name}%",),
+                   WHERE female LIKE ? ESCAPE '\\' ORDER BY shoot_date DESC""",
+                (f"%{safe}%",),
             ).fetchall()
 
         if not rows:
