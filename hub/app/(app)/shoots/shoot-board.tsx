@@ -37,6 +37,17 @@ const STATUS_LABEL: Record<AssetStatus, string> = {
   stuck:       "stuck",
 }
 
+// ── Phase grouping ────────────────────────────────────────────────────
+// The 11 asset cells split into three pipeline phases. We render an extra
+// gap between phases so users can tell at a glance which cell is which.
+const PHASES: { name: string; assets: AssetType[] }[] = [
+  { name: "Plan",  assets: ["script_done", "call_sheet_sent", "legal_run", "grail_run"] },
+  { name: "Shoot", assets: ["bg_edit_uploaded", "solo_uploaded"] },
+  { name: "Post",  assets: ["title_done", "encoded_uploaded", "photoset_uploaded", "storyboard_uploaded", "legal_docs_uploaded"] },
+]
+const PHASE_GAP = 10  // px between phase clusters
+const CELL_GAP  = 2   // px between cells inside a phase
+
 function statusIcon(status: AssetStatus, hasValidityWarning: boolean) {
   if (status === "stuck")     return <AlertTriangle size={10} aria-hidden="true" />
   if (status === "validated") return hasValidityWarning ? <AlertTriangle size={10} aria-hidden="true" /> : <CheckCircle2 size={10} aria-hidden="true" />
@@ -95,11 +106,13 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
   const [studioFilter, setStudioFilter] = useState<string>("All")
   const [selectedShootId, setSelectedShootId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [refreshFailures, setRefreshFailures] = useState(0)
   const [popoverCell, setPopoverCell] = useState<{
     shootId: string
     position: number
     assetType: AssetType
   } | null>(null)
+  const inFlightRef = useRef<Set<string>>(new Set())
 
   const selected = useMemo(
     () => shoots.find(s => s.shoot_id === selectedShootId) ?? null,
@@ -113,12 +126,18 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
       const next = await client.shoots.list()
       setShoots(next)
       setError(null)
+      setRefreshFailures(0)
     } catch (e) {
-      setError(formatApiError(e, "Refresh"))
+      setRefreshFailures(n => n + 1)
+      // Only surface the error banner after 2 consecutive failures so a
+      // transient blip doesn't nag the user.
+      if (refreshFailures >= 1) {
+        setError(formatApiError(e, "Refresh"))
+      }
     } finally {
       setRefreshing(false)
     }
-  }, [client, idToken])
+  }, [client, idToken, refreshFailures])
 
   // Auto-refresh every 30s
   useEffect(() => {
@@ -206,6 +225,7 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
           }}
         >
           <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+            <AssetLegend />
             {filtered.map(shoot => (
               <ShootRow
                 key={shoot.shoot_id}
@@ -239,6 +259,9 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
                   onClose={() => setSelectedShootId(null)}
                   onRevalidate={async (position, assetType) => {
                     if (!idToken) return
+                    const key = `${selected.shoot_id}|${position}|${assetType}`
+                    if (inFlightRef.current.has(key)) return
+                    inFlightRef.current.add(key)
                     try {
                       const newState = await client.shoots.revalidate(selected.shoot_id, position, assetType)
                       setShoots(prev => prev.map(s => {
@@ -253,6 +276,8 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
                       }))
                     } catch (e) {
                       setError(formatApiError(e, "Revalidate"))
+                    } finally {
+                      inFlightRef.current.delete(key)
                     }
                   }}
                 />
@@ -270,6 +295,9 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
           onClose={() => setPopoverCell(null)}
           onRevalidate={async () => {
             if (!idToken) return
+            const key = `${popoverCell.shootId}|${popoverCell.position}|${popoverCell.assetType}`
+            if (inFlightRef.current.has(key)) return
+            inFlightRef.current.add(key)
             try {
               const newState = await client.shoots.revalidate(popoverCell.shootId, popoverCell.position, popoverCell.assetType)
               setShoots(prev => prev.map(s => {
@@ -284,6 +312,8 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
               }))
             } catch (e) {
               setError(formatApiError(e, "Revalidate"))
+            } finally {
+              inFlightRef.current.delete(key)
             }
           }}
         />
@@ -370,7 +400,53 @@ function ShootRow({ shoot, selected, onSelect, onCellClick }: ShootRowProps) {
   )
 }
 
-// ── Asset strip (13 cells) ────────────────────────────────────────────
+// ── Asset legend (rendered once above the list) ──────────────────────
+function AssetLegend() {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "4px 12px",
+        color: "var(--color-text-faint)",
+        fontSize: 9,
+        fontWeight: 600,
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+      }}
+    >
+      {/* spacer for the shoot-metadata column (date/name) */}
+      <span style={{ width: 150 + 12, flexShrink: 0 }} />
+      {/* spacer for the grail_tab / scene_type chip (64px + 8px gap) */}
+      <span style={{ width: 64 + 8, flexShrink: 0 }} />
+      {PHASES.map((phase, pi) => (
+        <div
+          key={phase.name}
+          style={{
+            display: "flex",
+            gap: CELL_GAP,
+            marginRight: pi < PHASES.length - 1 ? PHASE_GAP : 0,
+            alignItems: "center",
+          }}
+        >
+          <span
+            style={{
+              width: phase.assets.length * (16 + CELL_GAP) - CELL_GAP,
+              color: "var(--color-text-muted)",
+              textAlign: "center",
+            }}
+          >
+            {phase.name}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Asset strip (11 cells in 3 phase clusters) ────────────────────────
 interface AssetStripProps {
   scene: BoardShootScene
   onCellClick: (assetType: AssetType) => void
@@ -395,43 +471,54 @@ function AssetStrip({ scene, onCellClick }: AssetStripProps) {
       >
         {scene.grail_tab || scene.studio.slice(0, 4).toUpperCase()} · {scene.scene_type}
       </div>
-      <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-        {SHOOT_ASSET_ORDER.map(at => {
-          const a = assetsByType.get(at)
-          const status: AssetStatus = a?.status ?? "not_present"
-          const hasWarn = !!a && a.validity.some(v => v.status === "warn")
-          const color = statusColor(status, hasWarn)
-          return (
-            <span
-              key={at}
-              role="button"
-              tabIndex={0}
-              onClick={(e) => { e.stopPropagation(); onCellClick(at) }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.stopPropagation()
-                  onCellClick(at)
-                }
-              }}
-              title={`${SHOOT_ASSET_LABELS[at]}: ${STATUS_LABEL[status]}${hasWarn ? " (warnings)" : ""}`}
-              style={{
-                width: 16,
-                height: 16,
-                borderRadius: 3,
-                border: `1px solid ${color}`,
-                background: status === "not_present" ? "transparent" : `color-mix(in srgb, ${color} 24%, transparent)`,
-                color,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                flexShrink: 0,
-              }}
-            >
-              {statusIcon(status, hasWarn)}
-            </span>
-          )
-        })}
+      <div style={{ display: "flex", alignItems: "center" }}>
+        {PHASES.map((phase, pi) => (
+          <div
+            key={phase.name}
+            style={{
+              display: "flex",
+              gap: CELL_GAP,
+              marginRight: pi < PHASES.length - 1 ? PHASE_GAP : 0,
+            }}
+          >
+            {phase.assets.map(at => {
+              const a = assetsByType.get(at)
+              const status: AssetStatus = a?.status ?? "not_present"
+              const hasWarn = !!a && a.validity.some(v => v.status === "warn")
+              const color = statusColor(status, hasWarn)
+              return (
+                <span
+                  key={at}
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); onCellClick(at) }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.stopPropagation()
+                      onCellClick(at)
+                    }
+                  }}
+                  title={`${phase.name} — ${SHOOT_ASSET_LABELS[at]}: ${STATUS_LABEL[status]}${hasWarn ? " (warnings)" : ""}`}
+                  style={{
+                    width: 16,
+                    height: 16,
+                    borderRadius: 3,
+                    border: `1px solid ${color}`,
+                    background: status === "not_present" ? "transparent" : `color-mix(in srgb, ${color} 24%, transparent)`,
+                    color,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    flexShrink: 0,
+                  }}
+                >
+                  {statusIcon(status, hasWarn)}
+                </span>
+              )
+            })}
+          </div>
+        ))}
       </div>
       {scene.scene_id ? (
         <span style={{ fontSize: 10, color: "var(--color-text-faint)", fontFamily: "var(--font-mono)", marginLeft: "auto" }}>
