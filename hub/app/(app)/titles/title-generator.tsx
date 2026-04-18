@@ -137,13 +137,21 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
     setLocalError(null)
     setLocalResults([])
     try {
-      const body: { text: string; treatments?: string[]; n: number; seed: number } = {
+      const body: {
+        text: string
+        treatments?: string[]
+        n: number
+        seed: number
+        auto_match?: boolean
+      } = {
         text: titleText,
         n: localN,
         seed: localSeed,
       }
       if (localMode === "pick" && selectedTreatment) {
         body.treatments = Array(localN).fill(selectedTreatment)
+      } else if (localMode === "auto") {
+        body.auto_match = true
       }
       const data = await client.titles.local(body)
       setLocalResults(data)

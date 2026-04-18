@@ -119,6 +119,7 @@ class LocalTitleRequest(BaseModel):
     treatments: list[str] | None = None   # specific treatment names; None = random
     n: int = 6                             # number of variations (1–12)
     seed: int = 0                          # 0 = random
+    auto_match: bool = False               # pick treatment via cta.detect_treatment()
 
 
 class LocalTitleResponse(BaseModel):
@@ -161,7 +162,20 @@ async def generate_local_title(body: LocalTitleRequest, user: CurrentUser):
         treatments = cta.TREATMENTS
 
         # Pick which treatments to use
-        if body.treatments:
+        if body.auto_match:
+            # Keyword-score the title; render N variations of the best match
+            try:
+                best = cta.detect_treatment(body.text) if hasattr(cta, "detect_treatment") else None
+            except Exception:  # pragma: no cover
+                best = None
+            if best and best in treatments:
+                names = [best] * n
+            else:
+                # Fall back to random if detect_treatment isn't available
+                all_names = list(treatments.keys())
+                rng = random.Random(seed)
+                names = rng.sample(all_names, min(n, len(all_names)))
+        elif body.treatments:
             names = [t for t in body.treatments if t in treatments][:n]
         else:
             all_names = list(treatments.keys())
