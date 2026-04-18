@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.database import init_db
 from api.sync_engine import start_sync_loop, stop_sync_loop
-from api.routers import tickets, scenes, scripts, descriptions, models, approvals, compilations, titles, call_sheets, users, notifications
+from api.routers import tickets, scenes, scripts, descriptions, models, approvals, compilations, titles, call_sheets, users, notifications, shoots
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -88,6 +88,7 @@ app.include_router(titles.router)
 app.include_router(call_sheets.router)
 app.include_router(users.router)
 app.include_router(notifications.router)
+app.include_router(shoots.router)
 
 
 # ---------------------------------------------------------------------------

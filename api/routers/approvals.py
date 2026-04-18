@@ -176,7 +176,7 @@ async def create_approval(body: ApprovalCreate, user: CurrentUser):
                 TYPE_APPROVAL_SUBMITTED,
                 f"New {body.content_type}: {body.scene_id}",
                 f'{user["name"]} submitted {body.content_type} for review',
-                "Approvals",
+                "/approvals",
             )
     except Exception as exc:
         _log.warning("Failed to send approval notification: %s", exc)
@@ -264,7 +264,7 @@ async def decide_approval(
                 TYPE_APPROVAL_DECIDED,
                 f"{approval.get('content_type', 'Content')} {status_word}",
                 f'{user["name"]} {status_word} your {approval.get("content_type", "")} for {approval.get("scene_id", "")}',
-                "Approvals",
+                "/approvals",
             )
     except Exception as exc:
         _log.warning("Failed to send approval decision notification: %s", exc)
