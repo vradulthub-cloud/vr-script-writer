@@ -16,9 +16,10 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.auth import require_admin as _require_admin_dep
 from api.database import init_db
 from api.sync_engine import start_sync_loop, stop_sync_loop
 from api.routers import tickets, scenes, scripts, descriptions, models, approvals, compilations, titles, call_sheets, users, notifications, shoots
@@ -129,9 +130,7 @@ async def sync_status():
 
 
 @app.post("/api/sync/trigger")
-async def trigger_sync():
-    """Manually trigger a full sync from Google Sheets."""
+async def trigger_sync(_admin: dict = Depends(_require_admin_dep)):
+    """Manually trigger a full sync from Google Sheets. Admin only."""
     from api.sync_engine import run_full_sync
-
-    results = run_full_sync()
-    return {"status": "completed", "results": results}
+    return {"status": "completed", "results": run_full_sync()}

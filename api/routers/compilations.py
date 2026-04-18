@@ -18,11 +18,11 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import anthropic
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from api.auth import CurrentUser
+from api.auth import CurrentUser, require_grail_writer
 from api.config import get_settings
 from api.database import get_db
 from api.prompts import DESC_COMPILATION_SYSTEMS, STUDIO_KEY_MAP
@@ -338,11 +338,8 @@ async def list_existing_comps(
 
 
 @router.post("/grail-write")
-async def write_comp_to_grail(body: CompSaveBody, user: CurrentUser):
+async def write_comp_to_grail(body: CompSaveBody, _writer: dict = Depends(require_grail_writer)):
     """Write compilation scenes to the Grail sheet. Requires grail-writer permission."""
-    if user["name"] not in {"Drew", "David", "Duc"}:
-        raise HTTPException(status_code=403, detail="Grail write access required")
-
     # Mark scenes as compilation in SQLite
     with get_db() as conn:
         for scene_id in body.scene_ids:

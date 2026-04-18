@@ -290,6 +290,16 @@ async def update_ticket(ticket_id: str, body: TicketUpdate, user: CurrentUser):
         ticket = dict(row)
         sheet_updates: dict = {}
 
+        # Permission: only submitter, assignee, or admin can mutate a ticket.
+        is_admin = (user.get("role") or "").lower() == "admin"
+        is_submitter = (ticket.get("submitted_by") or "") == user["name"]
+        is_assignee  = (ticket.get("assignee") or "") == user["name"]
+        if not (is_admin or is_submitter or is_assignee):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the submitter, assignee, or an admin can update this ticket",
+            )
+
         if body.status and body.status != ticket["status"]:
             ticket["status"] = body.status
             sheet_updates["status"] = body.status
