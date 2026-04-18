@@ -33,6 +33,9 @@ const STAT_CONFIGS = [
 ] as const
 
 const TICKET_STATUSES = ["New", "Approved", "In Progress", "In Review", "Closed", "Rejected"]
+// Projects whose tickets are mostly AI-talking-about-AI work (engineering
+// on the hub itself, user permission audits). Hidden when Content Only is on.
+const ENGINEERING_PROJECTS = new Set(["Hub", "Eclatech Hub", "Script Writer"])
 const ADMIN_ONLY_STATUSES = new Set(["Closed", "Rejected"])
 const DESCRIPTION_MAX = 4000
 const LINKED_ITEMS_MAX = 500
@@ -91,6 +94,19 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const [flashId, setFlashId] = useState<string | null>(null)
 
+  // "Content only" filter — hides engineering/audit tickets that are
+  // mostly AI chatter about the hub itself. Default on. Persisted so a
+  // user's choice survives refresh.
+  const [contentOnly, setContentOnly] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true
+    const raw = window.localStorage.getItem("hub:tickets:contentOnly")
+    return raw === null ? true : raw === "1"
+  })
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem("hub:tickets:contentOnly", contentOnly ? "1" : "0")
+  }, [contentOnly])
+
   // Create form state
   const [createForm, setCreateForm] = useState<TicketCreate>({
     title: "",
@@ -99,6 +115,9 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
     type: "",
     priority: "Medium",
     linked_items: "",
+    status: "New",
+    assignee: "",
+    notify: [],
   })
   const [creating, setCreating] = useState(false)
   const [createErr, setCreateErr] = useState<string | null>(null)
@@ -129,6 +148,11 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
       : statusFilter === "Active"
         ? tickets.filter(t => t.status !== "Closed" && t.status !== "Rejected")
         : tickets.filter(t => t.status === statusFilter)
+    if (contentOnly) {
+      // "Content only" hides engineering/audit tickets so the list isn't
+      // dominated by AI-generated work about the hub's own code.
+      result = result.filter(t => !ENGINEERING_PROJECTS.has(t.project) && t.type !== "Audit")
+    }
     if (deferredSearch.trim()) {
       const q = deferredSearch.toLowerCase()
       result = result.filter(t =>
@@ -152,7 +176,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
       }
       return sortDir === "asc" ? cmp : -cmp
     })
-  }, [tickets, statusFilter, deferredSearch, sortKey, sortDir])
+  }, [tickets, statusFilter, contentOnly, deferredSearch, sortKey, sortDir])
 
   // ── Keyboard: Escape ─────────────────────────────────────────────
 
@@ -289,7 +313,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
       })
       setTickets(prev => [created, ...prev])
       setShowCreate(false)
-      setCreateForm({ title: "", description: "", project: "", type: "", priority: "Medium", linked_items: "" })
+      setCreateForm({ title: "", description: "", project: "", type: "", priority: "Medium", linked_items: "", status: "New", assignee: "", notify: [] })
       setNewTicketId(created.ticket_id)
     } catch (e) {
       setCreateErr(formatApiError(e, "Create ticket"))
@@ -334,13 +358,34 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
               )
             })}
           </div>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-            style={{ background: "var(--color-lime)", color: "var(--color-base)" }}
-          >
-            + New Ticket
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setContentOnly(v => !v)}
+              role="switch"
+              aria-checked={contentOnly}
+              title={contentOnly
+                ? "Hiding Hub/engineering + audit tickets — click to show everything"
+                : "Showing all tickets — click to hide Hub/engineering + audit"}
+              className="rounded transition-colors"
+              style={{
+                padding: "4px 10px",
+                fontSize: 11,
+                cursor: "pointer",
+                background: contentOnly ? "color-mix(in srgb, var(--color-lime) 12%, transparent)" : "transparent",
+                color: contentOnly ? "var(--color-lime)" : "var(--color-text-muted)",
+                border: `1px solid ${contentOnly ? "color-mix(in srgb, var(--color-lime) 30%, transparent)" : "var(--color-border)"}`,
+              }}
+            >
+              Content only
+            </button>
+            <button
+              onClick={() => setShowCreate(true)}
+              className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+              style={{ background: "var(--color-lime)", color: "var(--color-base)" }}
+            >
+              + New Ticket
+            </button>
+          </div>
         </div>
       )}
 
@@ -658,9 +703,74 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                   </select>
                 </div>
               </div>
+              <div className="flex gap-3">
+                <div style={{ flex: 1 }}>
+                  <label htmlFor="create-status" style={{ fontSize: 11, color: "var(--color-text-muted)", display: "block", marginBottom: 4 }}>Status</label>
+                  <select
+                    id="create-status"
+                    value={createForm.status ?? "New"}
+                    onChange={e => setCreateForm(f => ({ ...f, status: e.target.value }))}
+                    className="w-full px-2.5 py-1.5 rounded text-xs"
+                    style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
+                  >
+                    {TICKET_STATUSES.filter(s => isAdmin || !ADMIN_ONLY_STATUSES.has(s)).map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ flex: 2 }}>
+                  <label htmlFor="create-assignee" style={{ fontSize: 11, color: "var(--color-text-muted)", display: "block", marginBottom: 4 }}>Assignee</label>
+                  <select
+                    id="create-assignee"
+                    value={createForm.assignee ?? ""}
+                    onChange={e => setCreateForm(f => ({ ...f, assignee: e.target.value }))}
+                    className="w-full px-2.5 py-1.5 rounded text-xs"
+                    style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: createForm.assignee ? "var(--color-text)" : "var(--color-text-muted)" }}
+                  >
+                    <option value="">Unassigned</option>
+                    {users.map(u => (
+                      <option key={u.email} value={u.name}>{u.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
               <div>
                 <label htmlFor="create-linked" style={{ fontSize: 11, color: "var(--color-text-muted)", display: "block", marginBottom: 4 }}>Linked items <span style={{ color: "var(--color-text-faint)" }}>(scene IDs, ticket IDs)</span></label>
                 <input id="create-linked" type="text" value={createForm.linked_items} onChange={e => setCreateForm(f => ({ ...f, linked_items: e.target.value }))} maxLength={LINKED_ITEMS_MAX} placeholder="e.g. TKT-0012, SC-1234" className="w-full px-2.5 py-1.5 rounded text-xs" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: "var(--color-text-muted)", display: "block", marginBottom: 4 }}>
+                  Notify <span style={{ color: "var(--color-text-faint)" }}>(pings these people, in addition to admins)</span>
+                </label>
+                <div
+                  className="rounded"
+                  style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "6px 8px", maxHeight: 110, overflowY: "auto" }}
+                >
+                  {users.length === 0 ? (
+                    <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>No teammates available.</span>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "4px 12px" }}>
+                      {users.map(u => {
+                        const checked = (createForm.notify ?? []).includes(u.name)
+                        return (
+                          <label key={u.email} style={{ fontSize: 11, color: "var(--color-text)", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={e => setCreateForm(f => {
+                                const next = new Set(f.notify ?? [])
+                                if (e.target.checked) next.add(u.name)
+                                else next.delete(u.name)
+                                return { ...f, notify: Array.from(next) }
+                              })}
+                            />
+                            <span>{u.name}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
