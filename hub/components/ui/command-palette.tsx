@@ -16,15 +16,16 @@ import {
 } from "lucide-react"
 
 const COMMANDS = [
-  { id: "missing",      label: "Asset Tracker",    href: "/missing",      icon: LayoutGrid,  shortcut: "1" },
-  { id: "research",     label: "Model Research",    href: "/research",     icon: Users,        shortcut: "2" },
-  { id: "scripts",      label: "Scripts",           href: "/scripts",      icon: FileText,     shortcut: "3" },
-  { id: "call-sheets",  label: "Call Sheets",       href: "/call-sheets",  icon: Phone,        shortcut: "4" },
-  { id: "titles",       label: "Titles",            href: "/titles",       icon: Image,        shortcut: "5" },
-  { id: "descriptions", label: "Descriptions",      href: "/descriptions", icon: AlignLeft,    shortcut: "6" },
-  { id: "compilations", label: "Compilations",      href: "/compilations", icon: Layers,       shortcut: "7" },
-  { id: "approvals",    label: "Approvals",         href: "/approvals",    icon: CheckSquare,  shortcut: "8" },
-  { id: "tickets",      label: "Tickets",           href: "/tickets",      icon: Ticket,       shortcut: "9" },
+  { id: "shoots",       label: "Shoot Tracker",     href: "/shoots",       icon: LayoutGrid,  shortcut: "1" },
+  { id: "missing",      label: "Studio Catalog",     href: "/missing",      icon: LayoutGrid,  shortcut: "2" },
+  { id: "research",     label: "Model Research",    href: "/research",     icon: Users,        shortcut: "3" },
+  { id: "scripts",      label: "Scripts",           href: "/scripts",      icon: FileText,     shortcut: "4" },
+  { id: "call-sheets",  label: "Call Sheets",       href: "/call-sheets",  icon: Phone,        shortcut: "5" },
+  { id: "titles",       label: "Titles",            href: "/titles",       icon: Image,        shortcut: "6" },
+  { id: "descriptions", label: "Descriptions",      href: "/descriptions", icon: AlignLeft,    shortcut: "7" },
+  { id: "compilations", label: "Compilations",      href: "/compilations", icon: Layers,       shortcut: "8" },
+  { id: "approvals",    label: "Approvals",         href: "/approvals",    icon: CheckSquare,  shortcut: "9" },
+  { id: "tickets",      label: "Tickets",           href: "/tickets",      icon: Ticket,       shortcut: "" },
   { id: "admin",        label: "Admin",             href: "/admin",        icon: Users,        shortcut: "0" },
 ]
 

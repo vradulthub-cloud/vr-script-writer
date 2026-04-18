@@ -121,7 +121,7 @@ export default function NotFound() {
           style={{ fontSize: 12, color: "var(--color-text-muted)", textDecoration: "none" }}
           className="hover:text-[--color-text]"
         >
-          Asset Tracker
+          Studio Catalog
         </Link>
         <Link
           href="/approvals"
