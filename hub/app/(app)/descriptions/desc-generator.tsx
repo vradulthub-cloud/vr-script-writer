@@ -210,10 +210,26 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
 
   function autoPopulateFromScene(scene: Scene) {
     setSelectedSceneId(scene.id)
+    // Pre-fill every form field the Scene shape can inform. Leaves untouched
+    // fields alone so a user can autopopulate, then tweak.
     if (scene.performers) setPerformers(scene.performers)
     if (scene.categories) {
       const cats = scene.categories.split(",").map(c => c.trim()).filter(Boolean)
       setSelectedCats(cats.filter(c => availableCategories.includes(c)))
+    }
+    if (scene.tags) {
+      // Tags sit naturally in the keywords field — they're the SEO hints
+      // already curated on the Grail row.
+      setKeywords(scene.tags)
+    }
+    if (scene.theme) {
+      // Theme maps to model/scene notes — it's prose-y context for the
+      // description prompt, not a structured field.
+      setModelNotes(scene.theme)
+    }
+    if (scene.title && !metaTitle) {
+      // Pre-seed the SEO meta title with the scene title (user can override)
+      setMetaTitle(scene.title)
     }
   }
 
@@ -811,7 +827,10 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                   </span>
                 )}
                 {saveMsg && (
-                  <span style={{ fontSize: 11, color: saveMsg === "Saved." ? "var(--color-ok)" : "var(--color-err)" }}>
+                  <span style={{
+                    fontSize: 11,
+                    color: /^Saved\b/.test(saveMsg) ? "var(--color-ok)" : "var(--color-err)",
+                  }}>
                     {saveMsg}
                   </span>
                 )}
