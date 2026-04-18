@@ -28,6 +28,19 @@ SCAN_FILE = Path.home() / "Library" / "CloudStorage" / "Dropbox" / "mega_scan.js
 WIN_SCAN = "C:/Users/andre/eclatech-hub/mega_scan.json"
 LOCAL_TEMP = Path("/tmp/mega_staging_sync")
 
+# MEGA blocks IPs on fast-paced requests. See rclone.org/mega/.
+# --tpslimit paces API calls within a call; --retries recovers from rate-limit
+# errors; time.sleep() between scenes spaces separate rclone invocations
+# ~3s apart as the docs recommend.
+_RETRY_FLAGS = [
+    "--retries", "10",
+    "--retries-sleep", "30s",
+    "--low-level-retries", "10",
+    "--tpslimit", "3",
+    "--tpslimit-burst", "1",
+]
+_INTER_CALL_SLEEP = 3.0
+
 STUDIO_MAP = {
     "VRH": "VRH",
     "FPVR": "FPVR",
@@ -119,25 +132,25 @@ def sync_once():
 
             # Create full folder structure if scene folder doesn't exist yet
             check = subprocess.run(
-                ["rclone", "lsd", f"{RCLONE_REMOTE}:{mega_scene_root}", "--timeout", "30s"],
-                capture_output=True, text=True, timeout=60
+                ["rclone", "lsd", f"{RCLONE_REMOTE}:{mega_scene_root}", "--timeout", "30s", *_RETRY_FLAGS],
+                capture_output=True, text=True, timeout=120
             )
             if check.returncode != 0 or not check.stdout.strip():
                 print(f"  Creating folder structure for {scene_id}...")
                 for subfolder in ["Description", "Legal", "Photos", "Storyboard", "Video Thumbnail", "Videos"]:
-                    # rclone mkdir creates the folder
                     subprocess.run(
                         ["rclone", "mkdir", f"{RCLONE_REMOTE}:{mega_scene_root}/{subfolder}",
-                         "--timeout", "30s"],
-                        capture_output=True, text=True, timeout=60
+                         "--timeout", "30s", *_RETRY_FLAGS],
+                        capture_output=True, text=True, timeout=120
                     )
+                    time.sleep(_INTER_CALL_SLEEP)
 
             print(f"  Uploading {scene_id} → {RCLONE_REMOTE}:{mega_path}")
 
             result = subprocess.run(
                 ["rclone", "copy", str(desc_dir), f"{RCLONE_REMOTE}:{mega_path}",
-                 "--timeout", "60s"],
-                capture_output=True, text=True, timeout=120
+                 "--timeout", "120s", *_RETRY_FLAGS],
+                capture_output=True, text=True, timeout=300
             )
 
             if result.returncode == 0:
@@ -145,6 +158,8 @@ def sync_once():
                 print(f"    ✓ {scene_id}")
             else:
                 print(f"    ✗ {scene_id}: {result.stderr.strip()}")
+
+            time.sleep(_INTER_CALL_SLEEP)
 
     # 4. Update mega_scan.json
     if uploaded and SCAN_FILE.exists():
