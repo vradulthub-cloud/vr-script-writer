@@ -1,5 +1,7 @@
+import Link from "next/link"
+import { AlertTriangle } from "lucide-react"
 import { auth } from "@/auth"
-import { api, type SceneStats } from "@/lib/api"
+import { api, type SceneStats, type Shoot } from "@/lib/api"
 import { studioColor, studioAbbr } from "@/lib/studio-colors"
 import { NotificationFeed } from "./notification-feed"
 import { TriageFeed } from "./triage-feed"
@@ -19,6 +21,7 @@ export default async function DashboardPage() {
     scriptsRes,
     notificationsRes,
     healthRes,
+    shootsRes,
     ...missingResults
   ] = await Promise.allSettled([
     client.approvals.list("Pending"),
@@ -26,6 +29,7 @@ export default async function DashboardPage() {
     client.scripts.list({ needs_script: true }),
     client.notifications.list(12),
     client.health(),
+    client.shoots.list(),
     ...STUDIOS.map(s => client.scenes.list({ studio: s, limit: 3, missing_only: true })),
   ])
 
@@ -34,6 +38,7 @@ export default async function DashboardPage() {
   const scripts        = scriptsRes.status       === "fulfilled" ? scriptsRes.value       : []
   const notifications  = notificationsRes.status === "fulfilled" ? notificationsRes.value : []
   const health         = healthRes.status        === "fulfilled" ? healthRes.value        : null
+  const shoots         = shootsRes.status        === "fulfilled" ? shootsRes.value        : []
 
   const missingScenes = missingResults
     .flatMap(r => r.status === "fulfilled" ? r.value : [])
@@ -83,6 +88,8 @@ export default async function DashboardPage() {
         </div>
 
         <div className="flex flex-col gap-3.5">
+          <AgingShootsPanel shoots={shoots} />
+
           <NotificationFeed
             initialNotifications={notifications}
             idToken={idToken}
@@ -134,6 +141,126 @@ function ProductionScopeStrip({ stats }: { stats: SceneStats }) {
       <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--color-text-faint)" }}>
         {stats.total.toLocaleString()} scenes · {stats.missing_any} missing
       </span>
+    </div>
+  )
+}
+
+// Shoots past their completion window that still have gaps. Threshold is
+// generous (72h) so an in-progress-today shoot doesn't clutter the list.
+const AGING_THRESHOLD_HOURS = 72
+
+function AgingShootsPanel({ shoots }: { shoots: Shoot[] }) {
+  const aging = shoots
+    .filter(s => {
+      if (s.aging_hours < AGING_THRESHOLD_HOURS) return false
+      // Count cells — if validated === total, the shoot is done
+      let validated = 0
+      let total = 0
+      for (const sc of s.scenes) {
+        for (const a of sc.assets) {
+          total += 1
+          if (a.status === "validated") validated += 1
+        }
+      }
+      return total > 0 && validated < total
+    })
+    .sort((a, b) => b.aging_hours - a.aging_hours)
+    .slice(0, 5)
+
+  return (
+    <div
+      style={{
+        background: "var(--color-surface)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 6,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          padding: "9px 14px",
+          borderBottom: "1px solid var(--color-border)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <h3 style={{ margin: 0 }}>Aging Shoots</h3>
+          {aging.length > 0 && (
+            <span
+              aria-label={`${aging.length} shoots need attention`}
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: "var(--color-err)",
+                border: "1px solid color-mix(in srgb, var(--color-err) 28%, transparent)",
+                background: "color-mix(in srgb, var(--color-err) 10%, transparent)",
+                borderRadius: 10,
+                padding: "0 6px",
+                lineHeight: 1.5,
+              }}
+            >
+              {aging.length}
+            </span>
+          )}
+        </div>
+        <Link href="/shoots" style={{ fontSize: 10, color: "var(--color-text-faint)", textDecoration: "none" }}>
+          All shoots →
+        </Link>
+      </div>
+
+      {aging.length === 0 ? (
+        <div style={{ padding: "16px 14px", textAlign: "center", color: "var(--color-text-faint)", fontSize: 12 }}>
+          Nothing stuck past 72h ✓
+        </div>
+      ) : (
+        <div>
+          {aging.map((s, i) => {
+            let validated = 0, total = 0
+            for (const sc of s.scenes) {
+              for (const a of sc.assets) {
+                total += 1
+                if (a.status === "validated") validated += 1
+              }
+            }
+            const days = Math.floor(s.aging_hours / 24)
+            const primaryStudio = s.scenes[0]?.studio ?? ""
+            const accent = primaryStudio ? studioColor(primaryStudio) : "var(--color-text-muted)"
+            return (
+              <Link
+                key={s.shoot_id}
+                href="/shoots"
+                className="hover:bg-[--color-elevated]"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 14px",
+                  borderBottom: i < aging.length - 1 ? "1px solid var(--color-border-subtle, var(--color-border))" : undefined,
+                  textDecoration: "none",
+                  color: "inherit",
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{ width: 2, height: 22, background: accent, borderRadius: 1, flexShrink: 0 }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {s.female_talent}
+                    {s.male_talent && <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}> / {s.male_talent}</span>}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 2 }}>
+                    {days}d old · {validated}/{total} done
+                  </div>
+                </div>
+                <AlertTriangle size={12} style={{ color: "var(--color-err)", flexShrink: 0 }} aria-hidden="true" />
+              </Link>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
