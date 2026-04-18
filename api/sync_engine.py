@@ -124,7 +124,15 @@ def sync_tickets() -> int:
 
 
 def sync_notifications() -> int:
-    """Sync Notifications tab → notifications table."""
+    """
+    Sync Notifications tab → notifications table.
+
+    Preserves local `read=1` flags when Sheets hasn't caught up yet.
+    A user marks-read locally → SQLite updates immediately → the Sheets
+    write is fire-and-forget on a thread. If the sync loop runs between
+    the SQLite update and the Sheets write, we'd regress read→0 without
+    this protection.
+    """
     sh = open_tickets()
     ws = get_or_create_worksheet(
         sh,
@@ -137,17 +145,27 @@ def sync_notifications() -> int:
     rows = fetch_all_rows(ws)
 
     with get_db() as conn:
+        # Remember which notifs were locally marked read before we wipe
+        locally_read = {
+            r[0] for r in conn.execute(
+                "SELECT notif_id FROM notifications WHERE read = 1"
+            ).fetchall() if r and r[0]
+        }
         conn.execute("DELETE FROM notifications")
         for row in rows:
             if len(row) < 6 or not row[0]:
                 continue
             padded = row + [""] * (8 - len(row))
-            read_val = 1 if padded[6].upper() == "TRUE" else 0
+            notif_id = padded[0]
+            sheets_read = 1 if padded[6].upper() == "TRUE" else 0
+            # OR with the local flag — read state is monotonic (unread → read)
+            # so once-read-always-read across sync boundaries.
+            read_val = 1 if (sheets_read or notif_id in locally_read) else 0
             conn.execute(
                 """INSERT INTO notifications
                    (notif_id, timestamp, recipient, type, title, message, read, link)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (padded[0], padded[1], padded[2], padded[3],
+                (notif_id, padded[1], padded[2], padded[3],
                  padded[4], padded[5], read_val, padded[7]),
             )
 
