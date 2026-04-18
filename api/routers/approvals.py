@@ -240,18 +240,20 @@ async def decide_approval(
     approval["decided_at"] = now
     approval["notes"] = new_notes
 
-    # On approval: fire-and-forget Sheets write if target is set
+    # On approval: fire-and-forget Sheets write, dispatched by content_type.
     if (
         body.decision == "Approved"
-        and approval.get("content_type") == "script"
         and approval.get("target_sheet")
         and approval.get("target_range")
     ):
-        threading.Thread(
-            target=_write_script_to_sheet,
-            args=(approval,),
-            daemon=True,
-        ).start()
+        writer = _WRITER_DISPATCH.get(approval.get("content_type", ""))
+        if writer:
+            threading.Thread(target=writer, args=(approval,), daemon=True).start()
+        else:
+            _log.warning(
+                "No write-back handler for content_type=%s (approval %s)",
+                approval.get("content_type"), approval_id,
+            )
 
     # Notify the original submitter about the decision
     try:
@@ -275,6 +277,75 @@ async def decide_approval(
 # ---------------------------------------------------------------------------
 # Sheets write helper
 # ---------------------------------------------------------------------------
+
+def _cell_coords(target_range: str) -> Optional[tuple[int, int]]:
+    """Parse a cell ref like 'J5' or 'H12' → (row, col_1_indexed)."""
+    import re
+    m = re.match(r"^([A-Za-z]+)(\d+)(?::[A-Za-z]+\d+)?$", (target_range or "").strip())
+    if not m:
+        return None
+    col_letters = m.group(1).upper()
+    col = 0
+    for ch in col_letters:
+        col = col * 26 + (ord(ch) - ord("A") + 1)
+    return (int(m.group(2)), col)
+
+
+def _write_description_to_sheet(approval: dict) -> None:
+    """Write approved description (+ optional SEO meta) to the Grail sheet."""
+    try:
+        content = json.loads(approval.get("content_json", "{}"))
+        tab_name = approval.get("target_sheet", "")
+        target_range = approval.get("target_range", "")
+        description = content.get("description") or ""
+        if not (tab_name and target_range and description):
+            return
+
+        from api.sheets_client import open_grail
+        sh = open_grail()
+        ws = sh.worksheet(tab_name)
+
+        coords = _cell_coords(target_range)
+        if not coords:
+            _log.warning("Bad target_range %r for description approval %s",
+                         target_range, approval.get("approval_id"))
+            return
+        row_num, col = coords
+        with_retry(lambda: ws.update_cell(row_num, col, description))
+        _log.info("Grail description write: %s R%d C%d", tab_name, row_num, col)
+    except Exception:
+        _log.exception("Failed to write approved description to Sheets")
+
+
+def _write_title_to_sheet(approval: dict) -> None:
+    """Write approved title to the Grail (or Scripts) sheet."""
+    try:
+        content = json.loads(approval.get("content_json", "{}"))
+        tab_name = approval.get("target_sheet", "")
+        target_range = approval.get("target_range", "")
+        title = content.get("title") or ""
+        if not (tab_name and target_range and title):
+            return
+
+        # target_sheet may be either the Scripts sheet or Grail. open_scripts
+        # handles Scripts monthly tabs; open_grail handles Grail tabs.
+        # Heuristic: Grail tabs are {FPVR, VRH, VRA, NNJOI}; anything else → Scripts.
+        from api.sheets_client import open_grail, open_scripts
+        grail_tabs = {"FPVR", "VRH", "VRA", "NNJOI"}
+        sh = open_grail() if tab_name in grail_tabs else open_scripts()
+        ws = sh.worksheet(tab_name)
+
+        coords = _cell_coords(target_range)
+        if not coords:
+            _log.warning("Bad target_range %r for title approval %s",
+                         target_range, approval.get("approval_id"))
+            return
+        row_num, col = coords
+        with_retry(lambda: ws.update_cell(row_num, col, title))
+        _log.info("Title write: %s R%d C%d", tab_name, row_num, col)
+    except Exception:
+        _log.exception("Failed to write approved title to Sheets")
+
 
 def _write_script_to_sheet(approval: dict) -> None:
     """
@@ -320,6 +391,13 @@ def _write_script_to_sheet(approval: dict) -> None:
 
     except Exception as exc:
         _log.error("Failed to write approved script to Sheets: %s", exc)
+
+
+_WRITER_DISPATCH = {
+    "script":      _write_script_to_sheet,
+    "description": _write_description_to_sheet,
+    "title":       _write_title_to_sheet,
+}
 
 
 # ---------------------------------------------------------------------------
