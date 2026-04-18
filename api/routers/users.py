@@ -13,7 +13,7 @@ import logging
 import threading
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from api.auth import CurrentUser, require_user_manager
@@ -50,13 +50,8 @@ async def get_me(user: CurrentUser):
 
 
 @router.get("/")
-async def list_users(user: CurrentUser):
+async def list_users(_manager: dict = Depends(require_user_manager)):
     """List all users. Requires user-manager permission."""
-    if user["name"] not in {"Drew", "David"}:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User management access required",
-        )
     with get_db() as conn:
         rows = conn.execute(
             "SELECT email, name, role, allowed_tabs FROM users ORDER BY name"
@@ -65,13 +60,12 @@ async def list_users(user: CurrentUser):
 
 
 @router.patch("/{email}")
-async def update_user(email: str, body: UserUpdate, user: CurrentUser):
+async def update_user(
+    email: str,
+    body: UserUpdate,
+    _manager: dict = Depends(require_user_manager),
+):
     """Update a user's role and/or allowed_tabs. Requires user-manager permission."""
-    if user["name"] not in {"Drew", "David"}:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User management access required",
-        )
 
     with get_db() as conn:
         row = conn.execute(
