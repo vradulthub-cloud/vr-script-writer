@@ -1,4 +1,7 @@
+"use client"
+
 import type { ReactNode } from "react"
+import { useEffect, useState } from "react"
 import { studioColor } from "@/lib/studio-colors"
 
 /**
@@ -9,6 +12,10 @@ import { studioColor } from "@/lib/studio-colors"
  *
  * Deliberately unopinionated about the actions slot: pass in filter tabs,
  * buttons, a search input, whatever the page needs on the right.
+ *
+ * Responsive behavior: at narrow viewports (<900px) the actions slot
+ * collapses onto its own row beneath the title to avoid z-stacking with
+ * long filter-tab rows and the eyebrow. TKT-0098.
  */
 export function PageHeader({
   title,
@@ -24,13 +31,21 @@ export function PageHeader({
   studioAccent?: string
 }) {
   const accent = studioAccent ? studioColor(studioAccent) : undefined
+  const stacked = useStackedLayout()
+
+  // Column template: accent rule column only when we have a studio accent
+  // AND we're in side-by-side layout. When stacked, the title and actions
+  // live in one full-width column so long filter bars don't squish the h1.
+  const columns = stacked
+    ? (accent ? "2px minmax(0, 1fr)" : "minmax(0, 1fr)")
+    : (accent ? "2px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto")
 
   return (
     <header
       className="page-header"
       style={{
         display: "grid",
-        gridTemplateColumns: accent ? "2px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
+        gridTemplateColumns: columns,
         alignItems: "end",
         gap: 16,
         columnGap: accent ? 14 : 16,
@@ -87,11 +102,13 @@ export function PageHeader({
       {actions && (
         <div
           style={{
+            gridColumn: stacked ? (accent ? "2" : "1") : undefined,
             display: "flex",
             alignItems: "center",
             gap: 10,
             flexWrap: "wrap",
-            justifyContent: "flex-end",
+            justifyContent: stacked ? "flex-start" : "flex-end",
+            marginTop: stacked ? 12 : 0,
           }}
         >
           {actions}
@@ -99,4 +116,24 @@ export function PageHeader({
       )}
     </header>
   )
+}
+
+/**
+ * Stacks actions below title when viewport is narrow enough that side-by-side
+ * layout causes wrapping collisions. Threshold 900px: above → side-by-side;
+ * below → stacked. Uses matchMedia for performance; hydration-safe via a
+ * state initializer that matches SSR default (side-by-side) and syncs after
+ * mount.
+ */
+function useStackedLayout() {
+  const [stacked, setStacked] = useState(false)
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const mq = window.matchMedia("(max-width: 900px)")
+    const sync = () => setStacked(mq.matches)
+    sync()
+    mq.addEventListener("change", sync)
+    return () => mq.removeEventListener("change", sync)
+  }, [])
+  return stacked
 }

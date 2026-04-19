@@ -9,10 +9,12 @@
   --color-border:   oklch(20% 0.006 82);
   --color-border-subtle: oklch(14% 0.004 82);
 
-  /* Text — slightly warm instead of pure gray */
+  /* Text — slightly warm instead of pure gray.
+     TKT-0109: muted + faint bumped up (was 60% / 45%) to clear WCAG AA
+     (4.5:1) on 13-14px metadata rendered against base (7% lightness). */
   --color-text:       oklch(92% 0.005 82);
-  --color-text-muted: oklch(60% 0.008 82);
-  --color-text-faint: oklch(45% 0.006 82);
+  --color-text-muted: oklch(70% 0.008 82);
+  --color-text-faint: oklch(58% 0.006 82);
 
   /* Primary action — lime green, use sparingly */
   --color-lime:      #bed62f;
@@ -108,17 +110,32 @@ h3 { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.06em; text-transf
 ::-webkit-scrollbar-thumb:hover { background: #333; }
 
 /* ─── Focus ring ──────────────────────────────────────────────────────────── */
+/* Uses both outline AND box-shadow so the ring survives inside parents with
+   overflow:hidden (common on our Panel primitive + sticky tables). box-shadow
+   doesn't clip; outline degrades gracefully if box-shadow is unsupported. */
 :focus-visible {
-  outline: 1.5px solid var(--color-lime);
+  outline: 2px solid var(--color-lime);
   outline-offset: 2px;
+  box-shadow:
+    0 0 0 2px var(--color-base),
+    0 0 0 4px var(--color-lime);
   border-radius: 3px;
 }
 
-/* Input focus glow */
-input:focus, textarea:focus, select:focus {
+/* Input focus: full lime border + soft glow, no double-ring */
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  border-color: var(--color-lime) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-lime) 22%, transparent);
+}
+
+/* Non-keyboard focus stays quiet (matches mouse-click expectation) */
+input:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible),
+select:focus:not(:focus-visible) {
+  outline: none;
   border-color: var(--color-lime) !important;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-lime) 12%, transparent);
-  outline: none;
 }
 
 /* ─── Selection ───────────────────────────────────────────────────────────── */
