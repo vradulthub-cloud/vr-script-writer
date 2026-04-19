@@ -533,6 +533,44 @@ def _match_scene_row(conn, studio: str, female: str, shoot_date: date) -> Option
 # Scene state vector
 # ---------------------------------------------------------------------------
 
+def _load_asset_state_overlay(conn, scene_ids: list[str]) -> dict[str, dict[str, dict]]:
+    """
+    Bulk-load the remote `scene_asset_state` rows for these scene_ids and
+    return {scene_id: {asset_type: {status, validity_json}}}.
+
+    This table is written by mega_scan_worker / asset_states sync and is the
+    freshest source of truth for MEGA-derived cells (photoset_uploaded,
+    bg_edit_uploaded, title_done, etc.). The scenes table booleans are fed
+    from a sparse mega_scan.json and go stale fast, so we treat
+    scene_asset_state as the authoritative overlay when a row exists.
+    """
+    import json as _json
+    if not scene_ids:
+        return {}
+    placeholders = ",".join("?" * len(scene_ids))
+    rows = conn.execute(
+        f"""SELECT scene_id, asset_type, status, validity_json
+              FROM scene_asset_state
+             WHERE scene_id IN ({placeholders})""",
+        scene_ids,
+    ).fetchall()
+    out: dict[str, dict[str, dict]] = {}
+    for r in rows:
+        d = dict(r)
+        validity = []
+        raw = d.get("validity_json") or ""
+        if raw:
+            try:
+                validity = _json.loads(raw) or []
+            except Exception:
+                validity = []
+        out.setdefault(d["scene_id"], {})[d["asset_type"]] = {
+            "status":   d.get("status") or "not_present",
+            "validity": validity,
+        }
+    return out
+
+
 def _scene_state(
     scene_row: Optional[dict],
     script_row: dict,
@@ -544,6 +582,7 @@ def _scene_state(
     call_sheet_status: str,
     call_sheet_validity: list[ValidityCheck],
     checked_at: str,
+    asset_overlay: Optional[dict[str, dict]] = None,
 ) -> list[SceneAssetState]:
     """Compute the 11-cell state vector for one scene."""
     assets: dict[str, SceneAssetState] = {}
@@ -580,30 +619,62 @@ def _scene_state(
     # because the Doc is shared across all scenes on the same day.
     put("call_sheet_sent", call_sheet_status, call_sheet_validity)
 
-    # encoded_uploaded — no validator yet
-    put("encoded_uploaded", "not_present")
+    # MEGA-derived states — prefer `scene_asset_state` (fresh scan) over
+    # the `scenes` booleans (fed by sparse mega_scan.json and often stale).
+    is_solo_like = scene_type.lower() in ("solo", "joi")
+    mega_cells = ("bg_edit_uploaded", "solo_uploaded", "title_done",
+                  "photoset_uploaded", "storyboard_uploaded", "encoded_uploaded")
 
-    # MEGA-derived states
-    if scene_row is None:
-        for at in ("bg_edit_uploaded", "solo_uploaded", "title_done", "photoset_uploaded", "storyboard_uploaded"):
+    def _put_overlay(at: str, fallback: str = "not_present") -> bool:
+        """Apply scene_asset_state row for `at` if present. Returns True on hit."""
+        if not asset_overlay:
+            return False
+        row = asset_overlay.get(at)
+        if not row:
+            return False
+        raw_validity = row.get("validity") or []
+        checks: list[ValidityCheck] = []
+        for v in raw_validity:
+            if not isinstance(v, dict):
+                continue
+            try:
+                checks.append(ValidityCheck(
+                    check=str(v.get("check", "")),
+                    status=str(v.get("status", "")),
+                    message=str(v.get("message", "")),
+                ))
+            except Exception:
+                continue
+        put(at, row.get("status") or fallback, checks)
+        return True
+
+    if scene_row is None and not asset_overlay:
+        for at in mega_cells:
             put(at, "not_present")
     else:
-        has_videos = bool(scene_row.get("has_videos"))
-        video_count = int(scene_row.get("video_count") or 0)
-        is_solo_like = scene_type.lower() in ("solo", "joi")
+        has_videos = bool((scene_row or {}).get("has_videos"))
+        video_count = int((scene_row or {}).get("video_count") or 0)
 
+        # bg_edit / solo — one is always not_present based on scene_type
         if is_solo_like:
+            if not _put_overlay("solo_uploaded"):
+                put("solo_uploaded", "validated" if has_videos else "not_present")
             put("bg_edit_uploaded", "not_present")
-            put("solo_uploaded", "validated" if has_videos else "not_present")
         else:
+            if not _put_overlay("bg_edit_uploaded"):
+                put("bg_edit_uploaded", "validated" if has_videos else "not_present")
             put("solo_uploaded", "not_present")
-            put("bg_edit_uploaded", "validated" if has_videos else "not_present")
 
-        put("title_done",        "validated" if scene_row.get("has_thumbnail")  else "not_present")
-        put("photoset_uploaded", "validated" if scene_row.get("has_photos")     else "not_present")
-        put("storyboard_uploaded","validated" if scene_row.get("has_storyboard") else "not_present")
+        if not _put_overlay("title_done"):
+            put("title_done", "validated" if (scene_row or {}).get("has_thumbnail") else "not_present")
+        if not _put_overlay("photoset_uploaded"):
+            put("photoset_uploaded", "validated" if (scene_row or {}).get("has_photos") else "not_present")
+        if not _put_overlay("storyboard_uploaded"):
+            put("storyboard_uploaded", "validated" if (scene_row or {}).get("has_storyboard") else "not_present")
+        if not _put_overlay("encoded_uploaded"):
+            put("encoded_uploaded", "not_present")
 
-        if has_videos and video_count == 0:
+        if has_videos and video_count == 0 and not asset_overlay:
             assets["bg_edit_uploaded" if not is_solo_like else "solo_uploaded"].validity.append(
                 ValidityCheck(check="count", status="warn", message="Folder present but 0 files")
             )
@@ -709,16 +780,26 @@ def _load_shoots_window(from_date: date, to_date: date, include_cancelled: bool)
                 call_sheet_status = "not_present"
 
             scenes: list[BoardShootScene] = []
-            for position, it in enumerate(items[:3], start=1):
+            # Pre-match each scene so we can bulk-load the overlay
+            matched: list[tuple[dict, str, str, Optional[dict]]] = []
+            for it in items[:3]:
                 studio = (it.get("studio") or "").strip()
                 scene_type = (it.get("scene_type") or "BG").strip() or "BG"
                 scene_row = _match_scene_row(conn, studio, female, sd_obj)
+                matched.append((it, studio, scene_type, scene_row))
+
+            overlay_ids = [sr.get("id") for _, _, _, sr in matched if sr and sr.get("id")]
+            overlay_map = _load_asset_state_overlay(conn, overlay_ids)
+
+            for position, (it, studio, scene_type, scene_row) in enumerate(matched, start=1):
+                scene_id = (scene_row or {}).get("id") or ""
                 assets = _scene_state(
                     scene_row, it, scene_type,
                     legal_run_status, legal_run_v,
                     legal_docs_status, legal_docs_v,
                     call_sheet_status, call_sheet_v,
                     checked_at,
+                    asset_overlay=overlay_map.get(scene_id),
                 )
                 scenes.append(BoardShootScene(
                     scene_id=(scene_row or {}).get("id", "") or "",

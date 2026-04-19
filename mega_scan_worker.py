@@ -40,6 +40,10 @@ STUDIOS = {
 
 OUTPUT_FILE = Path(os.path.dirname(__file__)) / "mega_scan.json"
 
+# Single-flight lock so hot + cold + on-demand scans can't thrash MEGAcmd.
+import threading as _threading
+_SCAN_LOCK = _threading.Lock()
+
 # Scene ID pattern: letters + digits (FPVR0001, VRH0640, NJOI0001, etc.)
 _SCENE_RE = re.compile(r'^[A-Za-z]+\d+$')
 
@@ -150,6 +154,162 @@ def _mega_ls_recursive(mega_path: str) -> str:
     return result.stdout
 
 
+def _build_scene_dict(scene_id: str, studio: str, file_paths: list[str]) -> dict:
+    """Extract the scene dict structure used by both run_scan and run_hot_scan.
+    Single source of truth for the scene schema written to mega_scan.json.
+    """
+    has_desc = _has_description(file_paths)
+    female, male = _extract_talents(file_paths)
+
+    has_videos     = any(p.startswith("Videos/") for p in file_paths)
+    has_thumbnail  = any(p.startswith("Video Thumbnail/") for p in file_paths)
+    has_photos     = any(p.startswith("Photos/") for p in file_paths)
+    has_storyboard = any(p.startswith("Storyboard/") for p in file_paths)
+    has_legal      = any(p.startswith("Legal/") for p in file_paths)
+
+    video_count      = sum(1 for p in file_paths if p.startswith("Videos/"))
+    storyboard_count = sum(1 for p in file_paths if p.startswith("Storyboard/"))
+    legal_count      = sum(1 for p in file_paths if p.startswith("Legal/"))
+
+    return {
+        "scene_id":         scene_id,
+        "studio":           studio,
+        "has_description":  has_desc,
+        "has_videos":       has_videos,
+        "has_thumbnail":    has_thumbnail,
+        "has_photos":       has_photos,
+        "has_storyboard":   has_storyboard,
+        "has_legal":        has_legal,
+        "video_count":      video_count,
+        "storyboard_count": storyboard_count,
+        "legal_count":      legal_count,
+        "female":           female,
+        "male":             male,
+        "folder_mtime":     "",
+        "files": {
+            "description": [p for p in file_paths if p.startswith("Description/")],
+            "videos":      [p for p in file_paths if p.startswith("Videos/")],
+            "thumbnail":   [p for p in file_paths if p.startswith("Video Thumbnail/")],
+            "photos":      [p for p in file_paths if p.startswith("Photos/")],
+            "storyboard":  [p for p in file_paths if p.startswith("Storyboard/")],
+            "legal":       [p for p in file_paths if p.startswith("Legal/")],
+        },
+    }
+
+
+# Mapping from scene_id prefix → MEGA path (used by hot scan for per-scene lookups)
+_STUDIO_FROM_PREFIX = {
+    "FPVR": ("FPVR", "/Grail/FPVR"),
+    "VRH":  ("VRH",  "/Grail/VRH"),
+    "VRA":  ("VRA",  "/Grail/VRA"),
+    "NJOI": ("NJOI", "/Grail/NNJOI"),
+}
+
+
+def _studio_for_scene_id(scene_id: str) -> tuple[str, str] | None:
+    """FPVR0401 → ('FPVR', '/Grail/FPVR'). None if unrecognized prefix."""
+    for prefix, info in _STUDIO_FROM_PREFIX.items():
+        if scene_id.startswith(prefix):
+            return info
+    return None
+
+
+def run_hot_scan(scene_ids: list[str], progress_callback=None) -> dict:
+    """
+    Scan only the given scene folders and merge their state into mega_scan.json.
+
+    Much cheaper than run_scan() — a per-scene `mega-ls -R /Grail/VRH/VRH0762`
+    takes ~1s. For ~14 hot scenes that's under 20s versus run_scan's 30s+ full
+    sweep. Preserves all other scenes in mega_scan.json untouched.
+
+    Thread-safe via _SCAN_LOCK. If the lock is held (another scan in flight),
+    skips this tick rather than queueing.
+
+    Args:
+        scene_ids: list of scene IDs (e.g. ["VRH0762", "FPVR0393"]) to refresh.
+        progress_callback: optional callable(message: str) for UI updates.
+
+    Returns:
+        {"scanned_at": iso, "hot_scenes": N, "skipped_locked": bool}
+    """
+    if not scene_ids:
+        return {"scanned_at": "", "hot_scenes": 0, "skipped_locked": False}
+
+    if not Path(MEGA_LS).exists():
+        raise RuntimeError(f"MEGAcmd not found at {MEGA_LS}")
+
+    if not _SCAN_LOCK.acquire(blocking=False):
+        return {"scanned_at": "", "hot_scenes": 0, "skipped_locked": True}
+
+    try:
+        # Load existing scan data; we'll replace only the scanned scenes.
+        if OUTPUT_FILE.exists():
+            with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        else:
+            existing = {"scanned_at": "", "scenes": []}
+
+        scanned_at = datetime.now().isoformat(timespec="seconds")
+        # Index existing scenes by id for O(1) replace
+        scenes_by_id = {s["scene_id"]: s for s in existing.get("scenes", [])}
+
+        updated = 0
+        for scene_id in scene_ids:
+            if progress_callback:
+                progress_callback(f"Hot-scanning {scene_id}...")
+            info = _studio_for_scene_id(scene_id)
+            if not info:
+                continue
+            studio, studio_root = info
+            scene_path = f"{studio_root}/{scene_id}/"
+            try:
+                output = _mega_ls_recursive(scene_path)
+            except (subprocess.TimeoutExpired, RuntimeError) as e:
+                print(f"[WARN] hot scan failed for {scene_id}: {e}", file=sys.stderr)
+                continue
+            # mega-ls -R on a specific scene path emits the scene's *subfolders*
+            # at level 0 (no scene_id header), so the tree parser — which keys
+            # off a level-0 scene row — returns {}. Prepend a synthetic scene
+            # header and indent every existing line by one tab so the existing
+            # parser sees subfolders at level 1 and files at level 2.
+            indented = "\n".join("\t" + ln if ln.strip() else ln for ln in output.splitlines())
+            output_with_header = f"{scene_id}\n{indented}"
+            scene_files = _parse_mega_ls_tree(output_with_header)
+            if scene_id not in scene_files:
+                # Folder is empty or doesn't exist — treat as no-op; preserve
+                # previous entry if any, otherwise write an empty shell so
+                # downstream code can reason about "scanned but nothing there".
+                scene_files[scene_id] = []
+            scenes_by_id[scene_id] = _build_scene_dict(
+                scene_id, studio, scene_files[scene_id],
+            )
+            updated += 1
+
+        merged = list(scenes_by_id.values())
+        merged.sort(key=lambda s: (s.get("has_description", False), s["scene_id"]))
+
+        result = {"scanned_at": scanned_at, "scenes": merged}
+
+        # Atomic write
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(OUTPUT_FILE.parent), suffix=".tmp",
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, str(OUTPUT_FILE))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+        return {"scanned_at": scanned_at, "hot_scenes": updated, "skipped_locked": False}
+    finally:
+        _SCAN_LOCK.release()
+
+
 def run_scan(progress_callback=None) -> dict:
     """
     Scan all studios via MEGAcmd and write mega_scan.json.
@@ -170,6 +330,13 @@ def run_scan(progress_callback=None) -> dict:
             "Install MEGAcmd or set MEGACMD_DIR environment variable."
         )
 
+    # Single-flight: if another scan is in flight, wait instead of starting a
+    # second one (full scans can take 30s+ — parallel scans trash MEGAcmd state).
+    with _SCAN_LOCK:
+        return _run_scan_locked(progress_callback)
+
+
+def _run_scan_locked(progress_callback=None) -> dict:
     scanned_at = datetime.now().isoformat(timespec="seconds")
     all_scenes = []
     errors = []
@@ -220,17 +387,20 @@ def run_scan(progress_callback=None) -> dict:
             )
             has_photos = any(p.startswith("Photos/") for p in file_paths)
             has_storyboard = any(p.startswith("Storyboard/") for p in file_paths)
+            has_legal = any(p.startswith("Legal/") for p in file_paths)
 
             video_count = sum(1 for p in file_paths if p.startswith("Videos/"))
             storyboard_count = sum(
                 1 for p in file_paths if p.startswith("Storyboard/")
             )
+            legal_count = sum(1 for p in file_paths if p.startswith("Legal/"))
 
             desc_files = [p for p in file_paths if p.startswith("Description/")]
             video_files = [p for p in file_paths if p.startswith("Videos/")]
             thumb_files = [p for p in file_paths if p.startswith("Video Thumbnail/")]
             photo_files = [p for p in file_paths if p.startswith("Photos/")]
             story_files = [p for p in file_paths if p.startswith("Storyboard/")]
+            legal_files = [p for p in file_paths if p.startswith("Legal/")]
 
             all_scenes.append({
                 "scene_id":         scene_id,
@@ -240,8 +410,10 @@ def run_scan(progress_callback=None) -> dict:
                 "has_thumbnail":    has_thumbnail,
                 "has_photos":       has_photos,
                 "has_storyboard":   has_storyboard,
+                "has_legal":        has_legal,
                 "video_count":      video_count,
                 "storyboard_count": storyboard_count,
+                "legal_count":      legal_count,
                 "female":           female,
                 "male":             male,
                 "folder_mtime":     "",
@@ -251,6 +423,7 @@ def run_scan(progress_callback=None) -> dict:
                     "thumbnail":   thumb_files,
                     "photos":      photo_files,
                     "storyboard":  story_files,
+                    "legal":       legal_files,
                 },
             })
 
