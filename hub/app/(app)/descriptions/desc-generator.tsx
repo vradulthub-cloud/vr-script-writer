@@ -9,6 +9,7 @@ import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
+import { PageHeader } from "@/components/ui/page-header"
 
 // ---------------------------------------------------------------------------
 // Per-studio category lists — grouped for visual structure
@@ -390,9 +391,15 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   const studioColor = STUDIO_COLOR[studio]
 
   return (
-    <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
-      {/* ── Left — inputs ── */}
-      <div style={{ width: 300, flexShrink: 0 }}>
+    <div>
+      <PageHeader
+        title="Descriptions"
+        eyebrow={isCompilation ? "Compilation write-up" : "Scene write-up"}
+        studioAccent={studio}
+      />
+      <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
+        {/* ── Left — inputs ── */}
+        <div style={{ width: 300, flexShrink: 0 }}>
 
         {/* Missing descriptions queue */}
         {missingDescScenes.length > 0 && (
@@ -854,6 +861,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
           </>
         )}
       </div>
+    </div>
     </div>
   )
 }

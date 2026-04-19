@@ -4,6 +4,8 @@ import { useState, useMemo } from "react"
 import { api, type UserProfile, type UserUpdate } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
+import { PageHeader } from "@/components/ui/page-header"
+import { Panel } from "@/components/ui/panel"
 
 const ALL_TABS = [
   "Tickets",
@@ -133,9 +135,17 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
 
   if (error) return <ErrorAlert>{error}</ErrorAlert>
 
+  const admins = users.filter(u => u.role === "admin").length
+
   return (
-    <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-      <table className="w-full" style={{ borderCollapse: "collapse" }}>
+    <div>
+      <PageHeader
+        title="User Permissions"
+        eyebrow="Admin"
+        subtitle={`${users.length} user${users.length === 1 ? "" : "s"} · ${admins} admin · role + tab access control`}
+      />
+      <Panel>
+        <table className="w-full" style={{ borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
             {["Name", "Email", "Role", "Allowed Tabs", ""].map((h) => (
@@ -186,11 +196,12 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
                       className="rounded px-2 py-0.5"
                       style={{
                         fontSize: 11,
-                        fontWeight: 500,
-                        background: u.role === "admin"
-                          ? "color-mix(in srgb, var(--color-lime) 15%, transparent)"
-                          : "color-mix(in srgb, var(--color-text-muted) 15%, transparent)",
-                        color: u.role === "admin" ? "var(--color-lime)" : "var(--color-text-muted)",
+                        fontWeight: 600,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                        background: "transparent",
+                        border: `1px solid ${u.role === "admin" ? "color-mix(in srgb, var(--color-text) 40%, transparent)" : "var(--color-border)"}`,
+                        color: u.role === "admin" ? "var(--color-text)" : "var(--color-text-muted)",
                       }}
                     >
                       {u.role}
@@ -264,6 +275,7 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
           })}
         </tbody>
       </table>
+      </Panel>
     </div>
   )
 }

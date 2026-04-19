@@ -10,6 +10,7 @@ import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
+import { PageHeader } from "@/components/ui/page-header"
 const SCENE_TYPES = ["BG", "BGCP"]
 
 // Parse structured sections from generated output
@@ -325,11 +326,17 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
   }, [stream.streaming, stream.output, female, selectedRow, saving])
 
   return (
-    <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
-      {/* Left panel — inputs */}
-      <div style={{ width: 300, flexShrink: 0 }}>
-        {/* Mode tabs */}
-        <div className="flex gap-1 mb-5">
+    <div>
+      <PageHeader
+        title="Scripts"
+        eyebrow={mode === "manual" ? "Manual mode" : "From Sheet"}
+        studioAccent={studio}
+      />
+      <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
+        {/* Left panel — inputs */}
+        <div style={{ width: 300, flexShrink: 0 }}>
+          {/* Mode tabs */}
+          <div className="flex gap-1 mb-5">
           {(["manual", "sheet"] as const).map(m => {
             const showDirtyDot = m === "manual" && mode !== "manual" && manualIsDirty
             return (
@@ -883,6 +890,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
           </>
         )}
       </div>
+    </div>
     </div>
   )
 }

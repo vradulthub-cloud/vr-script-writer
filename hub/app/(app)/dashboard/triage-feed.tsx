@@ -7,6 +7,7 @@ import { api, type Approval, type Scene, type Script } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { STUDIO_COLOR, STUDIO_ABBR } from "@/lib/studio-colors"
 import { showToast } from "@/components/ui/toast"
+import { AssetCells, type AssetCell } from "@/components/ui/asset-cells"
 
 const CONTENT_TYPE_LABEL: Record<string, string> = {
   description: "Description",
@@ -22,8 +23,11 @@ const ASSET_COLS = [
   { key: "has_storyboard"  as const, label: "Story" },
 ]
 
-function missingLabels(scene: Scene): string[] {
-  return ASSET_COLS.filter(a => !scene[a.key]).map(a => a.label)
+function sceneAssetCells(scene: Scene): AssetCell[] {
+  return ASSET_COLS.map(a => ({
+    label: a.label,
+    status: scene[a.key] ? "ok" as const : "missing" as const,
+  }))
 }
 
 const UNDO_DURATION_MS = 7000
@@ -297,7 +301,7 @@ export function TriageFeed({
           {missingScenes.slice(0, 5).map(scene => {
             const color = STUDIO_COLOR[scene.studio] ?? "var(--color-text-muted)"
             const abbr = STUDIO_ABBR[scene.studio] ?? scene.studio
-            const missing = missingLabels(scene)
+            const cells = sceneAssetCells(scene)
             const dateStr = (scene.release_date ?? "").slice(0, 10)
             return (
               <Link
@@ -323,14 +327,24 @@ export function TriageFeed({
                   {scene.id}
                 </span>
 
-                <span style={{ display: "flex", flexWrap: "wrap", gap: 3, flex: 1, minWidth: 0 }}>
-                  {missing.map(m => (
-                    <span key={m} style={{
-                      fontSize: 10, fontWeight: 600, padding: "0 5px", borderRadius: 3,
-                      background: "color-mix(in srgb, var(--color-err) 12%, transparent)",
-                      color: "var(--color-err)",
-                    }}>{m}</span>
-                  ))}
+                <span
+                  title={scene.performers || undefined}
+                  style={{
+                    fontSize: 12,
+                    color: "var(--color-text)",
+                    fontWeight: 500,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    flex: "1 1 auto",
+                  }}
+                >
+                  {scene.performers || <span style={{ color: "var(--color-text-faint)", fontStyle: "italic" }}>—</span>}
+                </span>
+
+                <span style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+                  <AssetCells cells={cells} />
                 </span>
 
                 {dateStr && (

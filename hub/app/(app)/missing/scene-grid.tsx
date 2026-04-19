@@ -4,7 +4,9 @@ import { useState, useMemo, useCallback, useDeferredValue, useEffect, memo } fro
 import { flushSync } from "react-dom"
 import { useSearchParams } from "next/navigation"
 import { FilterTabs } from "@/components/ui/filter-tabs"
+import { PageHeader } from "@/components/ui/page-header"
 import { RetryError } from "@/components/ui/retry-error"
+import { AssetCells, type AssetCell } from "@/components/ui/asset-cells"
 import { useIdToken } from "@/hooks/use-id-token"
 import { api, type Scene, type SceneStats } from "@/lib/api"
 import { API_BASE_URL } from "@/lib/api"
@@ -197,97 +199,96 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
           Scene <span style={{ fontFamily: "var(--font-mono)" }}>{deepLinkError}</span> wasn&apos;t found in the current list and couldn&apos;t be fetched directly. It may have been renamed or removed.
         </div>
       )}
-      {/* Filter bar */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24, flexWrap: "wrap" }}>
-        <FilterTabs
-          options={STUDIOS}
-          value={studio}
-          onChange={setStudio}
-          counts={studioCounts}
-        />
-        <button
-          role="switch"
-          aria-checked={missingOnly}
-          onClick={() => setMissingOnly(v => !v)}
-          title={missingOnly
-            ? "Showing only scenes missing at least one asset — click to show all"
-            : "Showing all scenes — click to filter to only those missing assets"}
-          style={{
-            padding: "4px 10px", borderRadius: 4, fontSize: 11, cursor: "pointer",
-            background: missingOnly ? "color-mix(in srgb, var(--color-warn) 15%, transparent)" : "transparent",
-            color: missingOnly ? "var(--color-warn)" : "var(--color-text-muted)",
-            border: `1px solid ${missingOnly ? "color-mix(in srgb, var(--color-warn) 30%, transparent)" : "var(--color-border)"}`,
-          }}
-        >
-          Missing only
-        </button>
-        <input
-          type="text"
-          placeholder="Search…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{
-            padding: "4px 10px", borderRadius: 4, fontSize: 11, outline: "none", minWidth: 140,
-            background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)",
-          }}
-        />
-        <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-          <span style={{ fontVariantNumeric: "tabular-nums" }}>{totalVisible}</span> shown ·{" "}
-          <span style={{ fontVariantNumeric: "tabular-nums" }}>{stats.missing_any}</span> missing of{" "}
-          <span style={{ fontVariantNumeric: "tabular-nums" }}>{stats.total}</span>
-        </span>
-        <label
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 11,
-            color: "var(--color-text-muted)",
-          }}
-          title="Max scenes fetched per studio. Apply filters locally after."
-        >
-          Per studio
-          <select
-            value={perStudio}
-            onChange={e => { void reloadWithLimit(Number(e.target.value) as PerStudio) }}
-            disabled={loadingMore}
-            style={{
-              padding: "3px 6px",
-              borderRadius: 4,
-              fontSize: 11,
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-text)",
-              cursor: loadingMore ? "wait" : "pointer",
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {PER_STUDIO_OPTIONS.map(n => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
-          {loadingMore && <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>loading…</span>}
-        </label>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-          {megaMsg && (
-            <span style={{ fontSize: 11, color: megaMsg.includes("Scan") ? "var(--color-ok)" : "var(--color-err)" }}>
-              {megaMsg}
-            </span>
-          )}
-          <button
-            onClick={triggerMegaRefresh}
-            disabled={megaRefreshing}
-            title="Scan MEGA for new files — results will sync in ~5 minutes"
-            style={{
-              padding: "4px 10px", borderRadius: 4, fontSize: 11, cursor: megaRefreshing ? "wait" : "pointer",
-              background: "transparent", border: "1px solid var(--color-border)",
-              color: megaRefreshing ? "var(--color-text-faint)" : "var(--color-text-muted)",
-            }}
-          >
-            {megaRefreshing ? "Requesting…" : "Refresh MEGA"}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Studio Catalog"
+        eyebrow={`${totalVisible} shown · ${stats.missing_any} missing of ${stats.total}`}
+        studioAccent={studio !== "All" ? studio : undefined}
+        actions={
+          <>
+            <FilterTabs
+              options={STUDIOS}
+              value={studio}
+              onChange={setStudio}
+              counts={studioCounts}
+            />
+            <button
+              role="switch"
+              aria-checked={missingOnly}
+              onClick={() => setMissingOnly(v => !v)}
+              title={missingOnly
+                ? "Showing only scenes missing at least one asset — click to show all"
+                : "Showing all scenes — click to filter to only those missing assets"}
+              style={{
+                padding: "4px 10px", borderRadius: 4, fontSize: 11, cursor: "pointer",
+                background: missingOnly ? "color-mix(in srgb, var(--color-warn) 15%, transparent)" : "transparent",
+                color: missingOnly ? "var(--color-warn)" : "var(--color-text-muted)",
+                border: `1px solid ${missingOnly ? "color-mix(in srgb, var(--color-warn) 30%, transparent)" : "var(--color-border)"}`,
+              }}
+            >
+              Missing only
+            </button>
+            <input
+              type="text"
+              placeholder="Search…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{
+                padding: "4px 10px", borderRadius: 4, fontSize: 11, outline: "none", minWidth: 140,
+                background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)",
+              }}
+            />
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 11,
+                color: "var(--color-text-muted)",
+              }}
+              title="Max scenes fetched per studio. Apply filters locally after."
+            >
+              Per studio
+              <select
+                value={perStudio}
+                onChange={e => { void reloadWithLimit(Number(e.target.value) as PerStudio) }}
+                disabled={loadingMore}
+                style={{
+                  padding: "3px 6px",
+                  borderRadius: 4,
+                  fontSize: 11,
+                  background: "var(--color-surface)",
+                  border: "1px solid var(--color-border)",
+                  color: "var(--color-text)",
+                  cursor: loadingMore ? "wait" : "pointer",
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {PER_STUDIO_OPTIONS.map(n => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+              {loadingMore && <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>loading…</span>}
+            </label>
+            {megaMsg && (
+              <span style={{ fontSize: 11, color: megaMsg.includes("Scan") ? "var(--color-ok)" : "var(--color-err)" }}>
+                {megaMsg}
+              </span>
+            )}
+            <button
+              onClick={triggerMegaRefresh}
+              disabled={megaRefreshing}
+              title="Scan MEGA for new files — results will sync in ~5 minutes"
+              style={{
+                padding: "4px 10px", borderRadius: 4, fontSize: 11, cursor: megaRefreshing ? "wait" : "pointer",
+                background: "transparent", border: "1px solid var(--color-border)",
+                color: megaRefreshing ? "var(--color-text-faint)" : "var(--color-text-muted)",
+              }}
+            >
+              {megaRefreshing ? "Requesting…" : "Refresh MEGA"}
+            </button>
+          </>
+        }
+      />
 
       {error && (
         <RetryError message={error} onRetry={() => { setError(null); window.location.reload() }} className="mb-4" />
@@ -517,20 +518,12 @@ const SceneCard = memo(function SceneCard({
         <span style={{ fontSize: 10, fontWeight: 600, color: pctColor }}>{pct}%</span>
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-        {missing.length === 0
-          ? <span style={{ fontSize: 10, color: "var(--color-ok)" }}>✓ complete</span>
-          : missing.map(m => (
-              <span key={m} style={{
-                fontSize: 10, fontWeight: 600, padding: "1px 5px", borderRadius: 3,
-                background: "color-mix(in srgb, var(--color-err) 12%, transparent)",
-                color: "var(--color-err)",
-              }}>
-                {m}
-              </span>
-            ))
-        }
-      </div>
+      <AssetCells
+        cells={ASSET_COLS.map<AssetCell>(a => ({
+          label: a.label,
+          status: scene[a.key] ? "ok" : "missing",
+        }))}
+      />
     </button>
   )
 })

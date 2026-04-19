@@ -15,6 +15,7 @@ import {
 import { studioColor } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
+import { PageHeader } from "@/components/ui/page-header"
 import { formatApiError } from "@/lib/errors"
 
 // ── Config ────────────────────────────────────────────────────────────
@@ -194,56 +195,57 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
 
   return (
     <div>
-      {/* Header / filter bar */}
-      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-        <div
-          className="flex items-center gap-1 rounded-md"
-          style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "3px" }}
-        >
-          {(["All", ...STUDIOS] as const).map(st => {
-            const active = studioFilter === st
-            const color = st === "All" ? "var(--color-lime)" : studioColor(st)
-            return (
-              <button
-                key={st}
-                onClick={() => setStudioFilter(st)}
-                aria-pressed={active}
-                className="rounded px-2 py-1 transition-colors"
-                style={{
-                  fontSize: 11,
-                  fontWeight: active ? 600 : 400,
-                  background: active ? "var(--color-elevated)" : "transparent",
-                  color: active ? color : "var(--color-text-muted)",
-                  border: "none",
-                }}
-              >
-                {st} <span className="tabular-nums" style={{ opacity: 0.7 }}>{counts[st] ?? 0}</span>
-              </button>
-            )
-          })}
-        </div>
-        <div className="flex items-center gap-2">
-          <MonthFilter value={monthFilter} onChange={setMonthFilter} />
-          <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-            {refreshing ? "Refreshing…" : "Auto-refreshes every 30s"}
-          </span>
-          <button
-            onClick={() => { void refresh() }}
-            disabled={refreshing}
-            className="px-2.5 py-1 rounded text-xs transition-colors"
-            style={{
-              background: "transparent",
-              color: "var(--color-text-muted)",
-              border: "1px solid var(--color-border)",
-              cursor: refreshing ? "not-allowed" : "pointer",
-              opacity: refreshing ? 0.5 : 1,
-            }}
-          >
-            <RefreshCcw size={11} className="inline mr-1" aria-hidden="true" />
-            Refresh
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Shoot Tracker"
+        eyebrow={`${filtered.length} in window · ${refreshing ? "refreshing" : "auto-refresh 30s"}`}
+        studioAccent={studioFilter !== "All" ? studioFilter : undefined}
+        actions={
+          <>
+            <div
+              className="flex items-center gap-1 rounded-md"
+              style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "3px" }}
+            >
+              {(["All", ...STUDIOS] as const).map(st => {
+                const active = studioFilter === st
+                const color = st === "All" ? "var(--color-lime)" : studioColor(st)
+                return (
+                  <button
+                    key={st}
+                    onClick={() => setStudioFilter(st)}
+                    aria-pressed={active}
+                    className="rounded px-2 py-1 transition-colors"
+                    style={{
+                      fontSize: 11,
+                      fontWeight: active ? 600 : 400,
+                      background: active ? "var(--color-elevated)" : "transparent",
+                      color: active ? color : "var(--color-text-muted)",
+                      border: "none",
+                    }}
+                  >
+                    {st} <span className="tabular-nums" style={{ opacity: 0.7 }}>{counts[st] ?? 0}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <MonthFilter value={monthFilter} onChange={setMonthFilter} />
+            <button
+              onClick={() => { void refresh() }}
+              disabled={refreshing}
+              className="px-2.5 py-1 rounded text-xs transition-colors"
+              style={{
+                background: "transparent",
+                color: "var(--color-text-muted)",
+                border: "1px solid var(--color-border)",
+                cursor: refreshing ? "not-allowed" : "pointer",
+                opacity: refreshing ? 0.5 : 1,
+              }}
+            >
+              <RefreshCcw size={11} className="inline mr-1" aria-hidden="true" />
+              Refresh
+            </button>
+          </>
+        }
+      />
 
       {error && <ErrorAlert className="mb-3">{error}</ErrorAlert>}
 

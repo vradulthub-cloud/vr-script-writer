@@ -5,6 +5,7 @@ import { API_BASE_URL } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { StudioBadge } from "@/components/ui/studio-badge"
+import { PageHeader } from "@/components/ui/page-header"
 import type { ShootDate, ShootScene } from "@/lib/api"
 
 // ---------------------------------------------------------------------------
@@ -283,27 +284,30 @@ export function CallSheetsClient() {
 
   return (
     <div>
-      {/* Door code */}
-      <div className="mb-4 flex items-center gap-2">
-        <label style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Door code</label>
-        <input
-          type="text"
-          value={doorCode}
-          onChange={e => setDoorCode(e.target.value)}
-          className="px-2.5 py-1.5 rounded text-xs outline-none"
-          style={{
-            background: "var(--color-surface)",
-            border: "1px solid var(--color-border)",
-            color: "var(--color-text)",
-            width: 72,
-          }}
-        />
-      </div>
+      <PageHeader
+        title="Call Sheets"
+        eyebrow={activeTab ? `${activeTab} · door ${doorCode}` : "generate per-shoot call sheets"}
+        actions={
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "var(--color-text-muted)" }}>
+            Door code
+            <input
+              type="text"
+              value={doorCode}
+              onChange={e => setDoorCode(e.target.value)}
+              className="px-2.5 py-1.5 rounded text-xs outline-none"
+              style={{
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text)",
+                width: 72,
+              }}
+            />
+          </label>
+        }
+      />
 
       {/* Loading / error states */}
-      {tabsLoading && (
-        <p style={{ fontSize: 12, color: "var(--color-text-faint)" }}>Loading budget tabs…</p>
-      )}
+      {tabsLoading && <CallSheetsSkeleton />}
       {tabsError && <ErrorAlert className="mb-4">{tabsError}</ErrorAlert>}
 
       {/* Tab selector */}
@@ -398,13 +402,26 @@ export function CallSheetsClient() {
       )}
 
       {/* Dates */}
-      {datesLoading && (
-        <p style={{ fontSize: 12, color: "var(--color-text-faint)" }}>Loading shoot dates…</p>
-      )}
+      {datesLoading && <CallSheetsSkeleton />}
       {datesError && <ErrorAlert className="mb-4">{datesError}</ErrorAlert>}
 
       {!datesLoading && dates.length === 0 && activeTab && !datesError && (
-        <p style={{ fontSize: 13, color: "var(--color-text-muted)" }}>No shoot dates found in {activeTab}.</p>
+        <div
+          style={{
+            border: "1px solid var(--color-border)",
+            borderRadius: 6,
+            padding: "28px 18px",
+            textAlign: "center",
+            marginTop: 8,
+          }}
+        >
+          <div style={{ fontFamily: "var(--font-display-hero)", fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--color-text)", marginBottom: 6 }}>
+            No dates in {activeTab}.
+          </div>
+          <p style={{ fontSize: 12, color: "var(--color-text-muted)", maxWidth: 360, margin: "0 auto" }}>
+            This budget tab has no shoot dates scheduled yet — come back once the production calendar is filled in.
+          </p>
+        </div>
       )}
 
       {dates.map(d => (
@@ -417,5 +434,57 @@ export function CallSheetsClient() {
         />
       ))}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Skeleton — shown while budget tabs / dates are loading. Matches the
+// eventual DateRow shape (compact header row) so the transition to real
+// content doesn't shift layout.
+// ---------------------------------------------------------------------------
+
+function CallSheetsSkeleton() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }} aria-label="Loading…" aria-live="polite">
+      {[0, 1, 2].map(i => (
+        <div
+          key={i}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "10px 14px",
+            border: "1px solid var(--color-border)",
+            borderRadius: 6,
+            background: "var(--color-surface)",
+            opacity: 1 - i * 0.15,
+          }}
+        >
+          <SkeletonBar width={72} />
+          <SkeletonBar width={120} />
+          <SkeletonBar width={56} />
+          <div style={{ flex: 1 }} />
+          <SkeletonBar width={48} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SkeletonBar({ width }: { width: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: "inline-block",
+        width,
+        height: 10,
+        borderRadius: 3,
+        background:
+          "linear-gradient(90deg, var(--color-elevated) 0%, var(--color-border) 50%, var(--color-elevated) 100%)",
+        backgroundSize: "200% 100%",
+        animation: "skeletonShimmer 1400ms linear infinite",
+      }}
+    />
   )
 }

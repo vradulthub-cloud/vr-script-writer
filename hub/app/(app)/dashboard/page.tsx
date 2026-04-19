@@ -3,6 +3,8 @@ import { AlertTriangle } from "lucide-react"
 import { auth } from "@/auth"
 import { api, type SceneStats, type Shoot } from "@/lib/api"
 import { studioColor, studioAbbr } from "@/lib/studio-colors"
+import { PageHeader } from "@/components/ui/page-header"
+import { Panel } from "@/components/ui/panel"
 import { NotificationFeed } from "./notification-feed"
 import { TriageFeed } from "./triage-feed"
 
@@ -44,31 +46,50 @@ export default async function DashboardPage() {
     .flatMap(r => r.status === "fulfilled" ? r.value : [])
     .sort((a, b) => (b.release_date ?? "").localeCompare(a.release_date ?? ""))
 
-  const hour      = new Date().getHours()
+  const now       = new Date()
+  const hour      = now.getHours()
   const greeting  = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
   const firstName = session?.user?.name?.split(" ")[0] ?? "there"
   const unreadCount = notifications.filter((n) => n.read === 0).length
   const systemOk    = health !== null
 
+  // Mono-style timecode eyebrow — echoes the backstage/production vibe
+  const eyebrow = now
+    .toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+    .toUpperCase()
+
   return (
     <div style={{ maxWidth: 1200 }}>
-      {/* ── Condensed header ─────────────────────────────────────────────── */}
-      <div className="page-header" style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-        <h1 style={{ margin: 0 }}>
-          {greeting}, {firstName}
-        </h1>
-        <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--color-text-faint)" }}>
+      <PageHeader
+        title={`${greeting}, ${firstName}`}
+        eyebrow={eyebrow}
+        actions={
           <span
-            aria-hidden="true"
             style={{
-              width: 6, height: 6, borderRadius: "50%",
-              background: systemOk ? "var(--color-ok)" : "var(--color-err)",
-              display: "inline-block", flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 12,
+              color: systemOk ? "var(--color-text-muted)" : "var(--color-err)",
+              fontVariantNumeric: "tabular-nums",
             }}
-          />
-          {systemOk ? "All green" : "Connection lost"}
-        </span>
-      </div>
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                background: systemOk ? "var(--color-ok)" : "var(--color-err)",
+                boxShadow: systemOk
+                  ? "0 0 0 3px color-mix(in srgb, var(--color-ok) 20%, transparent)"
+                  : "0 0 0 3px color-mix(in srgb, var(--color-err) 20%, transparent)",
+              }}
+            />
+            {systemOk ? "All green" : "Connection lost"}
+          </span>
+        }
+      />
 
       {/* ── Body: Triage dominates (2/3), Notifications rail recedes ─── */}
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start">
@@ -168,48 +189,16 @@ function AgingShootsPanel({ shoots }: { shoots: Shoot[] }) {
     .slice(0, 5)
 
   return (
-    <div
-      style={{
-        background: "var(--color-surface)",
-        border: "1px solid var(--color-border)",
-        borderRadius: 6,
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          padding: "9px 14px",
-          borderBottom: "1px solid var(--color-border)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <h3 style={{ margin: 0 }}>Aging Shoots</h3>
-          {aging.length > 0 && (
-            <span
-              aria-label={`${aging.length} shoots need attention`}
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color: "var(--color-err)",
-                border: "1px solid color-mix(in srgb, var(--color-err) 28%, transparent)",
-                background: "color-mix(in srgb, var(--color-err) 10%, transparent)",
-                borderRadius: 10,
-                padding: "0 6px",
-                lineHeight: 1.5,
-              }}
-            >
-              {aging.length}
-            </span>
-          )}
-        </div>
+    <Panel
+      title="Aging Shoots"
+      count={aging.length > 0 ? aging.length : undefined}
+      tone={aging.length > 0 ? "urgent" : "default"}
+      action={
         <Link href="/shoots" style={{ fontSize: 10, color: "var(--color-text-faint)", textDecoration: "none" }}>
           All shoots →
         </Link>
-      </div>
-
+      }
+    >
       {aging.length === 0 ? (
         <div style={{ padding: "16px 14px", textAlign: "center", color: "var(--color-text-faint)", fontSize: 12 }}>
           Nothing stuck past 72h ✓
@@ -261,23 +250,13 @@ function AgingShootsPanel({ shoots }: { shoots: Shoot[] }) {
           })}
         </div>
       )}
-    </div>
+    </Panel>
   )
 }
 
 function SyncStatusPanel({ syncs }: { syncs: Record<string, unknown> }) {
   return (
-    <div
-      style={{
-        background: "var(--color-surface)",
-        border: "1px solid var(--color-border)",
-        borderRadius: 6,
-        overflow: "hidden",
-      }}
-    >
-      <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--color-border)" }}>
-        <h3 style={{ margin: 0 }}>Sync Status</h3>
-      </div>
+    <Panel title="Sync Status">
       <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
         {Object.entries(syncs).map(([source, infoRaw]) => {
           const info = infoRaw as { last_synced_at?: string; row_count?: number; status?: string; error?: string }
@@ -301,6 +280,6 @@ function SyncStatusPanel({ syncs }: { syncs: Record<string, unknown> }) {
           )
         })}
       </div>
-    </div>
+    </Panel>
   )
 }

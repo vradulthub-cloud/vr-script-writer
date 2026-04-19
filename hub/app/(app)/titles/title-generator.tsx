@@ -6,6 +6,7 @@ import { ErrorAlert } from "@/components/ui/error-alert"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
+import { PageHeader } from "@/components/ui/page-header"
 const NAME_STUDIOS = ["VRA", "VRH"] as const
 type NameStudio = typeof NAME_STUDIOS[number]
 const STYLES = ["cinematic", "bold", "minimal"] as const
@@ -212,9 +213,15 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
   const errorResults   = results.filter(r => r.error)
 
   return (
-    <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
-      {/* ── Left — inputs ── */}
-      <div style={{ width: 280, flexShrink: 0 }}>
+    <div>
+      <PageHeader
+        title="Titles"
+        eyebrow={engine === "cloud" ? "Cloud · Ideogram V3" : "Local · PIL treatments"}
+        studioAccent={studio}
+      />
+      <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
+        {/* ── Left — inputs ── */}
+        <div style={{ width: 280, flexShrink: 0 }}>
         {/* Engine toggle */}
         <div className="flex gap-1 mb-4">
           {(["cloud", "local"] as const).map(e => (
@@ -667,6 +674,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
           )}
         </div>
       </div>
+    </div>
     </div>
   )
 }
