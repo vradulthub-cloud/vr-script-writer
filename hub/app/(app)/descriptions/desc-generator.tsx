@@ -357,8 +357,23 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
           meta_description: metaDesc || undefined,
         }),
       })
-      if (!res.ok) throw new Error(`Server ${res.status}`)
+      if (!res.ok) {
+        // Server may return JSON error body alongside 4xx/5xx — surface it
+        // so users see "generation failed: …" instead of a mysterious blank.
+        let detail = `Server ${res.status}`
+        try {
+          const ct = res.headers.get("content-type") || ""
+          if (ct.includes("json")) {
+            const j = await res.json()
+            if (j?.detail) detail += `: ${j.detail}`
+          }
+        } catch { /* leave default detail */ }
+        throw new Error(detail)
+      }
       const blob = await res.blob()
+      if (blob.size === 0) {
+        throw new Error("Server returned an empty file")
+      }
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
