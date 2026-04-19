@@ -72,12 +72,15 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
         zIndex: 40,
       }}
     >
-      {/* Logo */}
-      <div
-        className="flex items-center justify-center xl:justify-start gap-2 px-0 xl:px-4 shrink-0"
+      {/* Logo — links home, per convention */}
+      <Link
+        href="/dashboard"
+        aria-label="Eclatech Hub — Dashboard"
+        className="flex items-center justify-center xl:justify-start gap-2 px-0 xl:px-4 shrink-0 transition-opacity hover:opacity-80"
         style={{
           height: "var(--spacing-topbar)",
           borderBottom: "1px solid var(--color-border)",
+          textDecoration: "none",
         }}
       >
         {/* Collapsed: single letter */}
@@ -95,7 +98,7 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
         <span className="hidden xl:inline" style={{ fontSize: 13, color: "var(--color-text-faint)", fontWeight: 400, letterSpacing: "0.12em" }}>
           HUB
         </span>
-      </div>
+      </Link>
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-2">

@@ -178,6 +178,7 @@ export function CallSheetsClient() {
   const [activeTab, setActiveTab] = useState<string>("")
   const [dates, setDates] = useState<ShootDate[]>([])
   const [doorCode, setDoorCode] = useState("1322")
+  const [showDoorCode, setShowDoorCode] = useState(false)
   const [tabsLoading, setTabsLoading] = useState(true)
   const [datesLoading, setDatesLoading] = useState(false)
   const [tabsError, setTabsError] = useState<string | null>(null)
@@ -286,12 +287,14 @@ export function CallSheetsClient() {
     <div>
       <PageHeader
         title="Call Sheets"
-        eyebrow={activeTab ? `${activeTab} · door ${doorCode}` : "generate per-shoot call sheets"}
+        eyebrow={activeTab ? `${activeTab} · door set` : "generate per-shoot call sheets"}
         actions={
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "var(--color-text-muted)" }}>
             Door code
             <input
-              type="text"
+              // TKT-0101: door is a physical access code; hide by default so
+              // it doesn't live in the page header readable to shoulder-surfers.
+              type={showDoorCode ? "text" : "password"}
               value={doorCode}
               onChange={e => setDoorCode(e.target.value)}
               className="px-2.5 py-1.5 rounded text-xs outline-none"
@@ -300,8 +303,27 @@ export function CallSheetsClient() {
                 border: "1px solid var(--color-border)",
                 color: "var(--color-text)",
                 width: 72,
+                fontFamily: showDoorCode ? "var(--font-mono)" : undefined,
+                letterSpacing: showDoorCode ? 0 : "0.15em",
               }}
             />
+            <button
+              type="button"
+              onClick={() => setShowDoorCode(v => !v)}
+              aria-pressed={showDoorCode}
+              aria-label={showDoorCode ? "Hide door code" : "Show door code"}
+              className="px-2 py-1 rounded transition-colors"
+              style={{
+                fontSize: 10,
+                fontWeight: 500,
+                background: "transparent",
+                color: "var(--color-text-muted)",
+                border: "1px solid var(--color-border)",
+                cursor: "pointer",
+              }}
+            >
+              {showDoorCode ? "Hide" : "Show"}
+            </button>
           </label>
         }
       />

@@ -63,7 +63,26 @@ export function Panel({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-            {title && <h3 style={{ margin: 0 }}>{title}</h3>}
+            {title && (
+              // Semantic h2: Panel is always a first-class page region; it
+              // sits under the page's single h1 in PageHeader. Visual style
+              // matches the existing uppercase label — inherits the h3 rules
+              // in globals.css by shared font-size / letter-spacing tokens.
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: "0.8125rem",
+                  fontWeight: 600,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "var(--color-text-muted)",
+                  fontFamily: "var(--font-display)",
+                  lineHeight: 1.15,
+                }}
+              >
+                {title}
+              </h2>
+            )}
             {count !== undefined && count !== null && (
               <span
                 aria-label={typeof count === "number" ? `${count} items` : undefined}
