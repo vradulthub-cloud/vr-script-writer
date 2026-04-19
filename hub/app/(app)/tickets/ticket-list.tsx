@@ -93,6 +93,11 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const [flashId, setFlashId] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkStatus, setBulkStatus] = useState<string>("")
+  const [bulkAssignee, setBulkAssignee] = useState<string>("")
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null)
 
   // "Content only" filter — hides engineering/audit tickets that are
   // mostly AI chatter about the hub itself. Default on. Persisted so a
@@ -447,12 +452,145 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
         </div>
       )}
 
+      {/* Bulk action bar — visible when any ticket row is checked */}
+      {selected.size > 0 && (
+        <div
+          className="mb-2 rounded flex items-center gap-2 flex-wrap"
+          style={{
+            padding: "6px 10px",
+            background: "color-mix(in srgb, var(--color-lime) 7%, var(--color-surface))",
+            border: "1px solid color-mix(in srgb, var(--color-lime) 25%, var(--color-border))",
+            fontSize: 11,
+          }}
+        >
+          <span style={{ color: "var(--color-text)", fontWeight: 500 }}>
+            {selected.size} selected
+          </span>
+          <select
+            value={bulkStatus}
+            onChange={e => setBulkStatus(e.target.value)}
+            disabled={bulkBusy}
+            aria-label="Bulk status"
+            style={{
+              fontSize: 11, padding: "3px 6px", borderRadius: 4,
+              background: "var(--color-base)", color: "var(--color-text)",
+              border: "1px solid var(--color-border)",
+            }}
+          >
+            <option value="">Set status…</option>
+            {TICKET_STATUSES.filter(s => isAdmin || !ADMIN_ONLY_STATUSES.has(s)).map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+          <select
+            value={bulkAssignee}
+            onChange={e => setBulkAssignee(e.target.value)}
+            disabled={bulkBusy}
+            aria-label="Bulk assignee"
+            style={{
+              fontSize: 11, padding: "3px 6px", borderRadius: 4,
+              background: "var(--color-base)", color: "var(--color-text)",
+              border: "1px solid var(--color-border)",
+            }}
+          >
+            <option value="">Set assignee…</option>
+            <option value="__clear__">(Unassign)</option>
+            {users.map(u => <option key={u.email} value={u.name}>{u.name}</option>)}
+          </select>
+          <button
+            disabled={bulkBusy || (!bulkStatus && !bulkAssignee)}
+            onClick={async () => {
+              if (!bulkStatus && !bulkAssignee) return
+              setBulkBusy(true); setBulkMsg(null)
+              try {
+                const res = await client.tickets.bulkUpdate({
+                  ticket_ids: [...selected],
+                  status: bulkStatus || undefined,
+                  assignee: bulkAssignee === "__clear__" ? "" : (bulkAssignee || undefined),
+                })
+                // Optimistically apply updates locally so the UI reflects it
+                setTickets(prev => prev.map(t => {
+                  if (!res.updated.includes(t.ticket_id)) return t
+                  return {
+                    ...t,
+                    ...(bulkStatus ? { status: bulkStatus } : {}),
+                    ...(bulkAssignee ? { assignee: bulkAssignee === "__clear__" ? "" : bulkAssignee } : {}),
+                  }
+                }))
+                setSelected(new Set())
+                setBulkStatus(""); setBulkAssignee("")
+                const parts = [`${res.updated.length} updated`]
+                if (res.skipped.length) parts.push(`${res.skipped.length} skipped`)
+                setBulkMsg(parts.join(" · "))
+              } catch (e) {
+                setBulkMsg(formatApiError(e, "Bulk update"))
+              } finally {
+                setBulkBusy(false)
+              }
+            }}
+            className="px-2.5 py-1 rounded transition-colors"
+            style={{
+              fontSize: 11, fontWeight: 600,
+              background: "var(--color-lime)",
+              color: "var(--color-base)",
+              border: "none",
+              cursor: bulkBusy ? "wait" : (!bulkStatus && !bulkAssignee ? "not-allowed" : "pointer"),
+              opacity: (bulkBusy || (!bulkStatus && !bulkAssignee)) ? 0.5 : 1,
+            }}
+          >
+            {bulkBusy ? "Applying…" : "Apply"}
+          </button>
+          <button
+            onClick={() => { setSelected(new Set()); setBulkStatus(""); setBulkAssignee(""); setBulkMsg(null) }}
+            style={{
+              fontSize: 11, padding: "3px 8px", borderRadius: 4,
+              background: "transparent", color: "var(--color-text-muted)",
+              border: "1px solid var(--color-border)",
+            }}
+          >
+            Clear
+          </button>
+          {bulkMsg && (
+            <span style={{ color: bulkMsg.includes("updated") ? "var(--color-ok)" : "var(--color-err)", marginLeft: "auto" }}>
+              {bulkMsg}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Table */}
       {!error && displayTickets.length > 0 && (
         <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
           <table className="w-full" style={{ borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
+                <th
+                  scope="col"
+                  className="px-3 py-2"
+                  style={{ width: 32, fontSize: 11, color: "var(--color-text-muted)" }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    aria-label="Select all visible"
+                    checked={displayTickets.length > 0 && displayTickets.every(t => selected.has(t.ticket_id))}
+                    ref={el => {
+                      if (!el) return
+                      const some = displayTickets.some(t => selected.has(t.ticket_id))
+                      const all  = displayTickets.every(t => selected.has(t.ticket_id))
+                      el.indeterminate = some && !all
+                    }}
+                    onChange={e => {
+                      const next = new Set(selected)
+                      if (e.target.checked) {
+                        for (const t of displayTickets) next.add(t.ticket_id)
+                      } else {
+                        for (const t of displayTickets) next.delete(t.ticket_id)
+                      }
+                      setSelected(next)
+                    }}
+                  />
+                </th>
                 {COLUMNS.map(col => (
                   <th
                     key={col.key}
@@ -488,6 +626,23 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                         animation: isNew ? "fadeIn 350ms var(--ease-out-expo) both" : undefined,
                       }}
                     >
+                      <td
+                        className="px-3 py-2.5"
+                        style={{ width: 32 }}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${ticket.ticket_id}`}
+                          checked={selected.has(ticket.ticket_id)}
+                          onChange={e => {
+                            const next = new Set(selected)
+                            if (e.target.checked) next.add(ticket.ticket_id)
+                            else next.delete(ticket.ticket_id)
+                            setSelected(next)
+                          }}
+                        />
+                      </td>
                       <td className="px-3 py-2.5" style={{ whiteSpace: "nowrap" }}>
                         <span className="flex items-center gap-1.5">
                           <span style={{ color: "var(--color-text-faint)", flexShrink: 0, display: "flex", alignItems: "center" }}>
@@ -517,7 +672,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                         data-saved={flashId === ticket.ticket_id ? true : undefined}
                         style={{ borderBottom: !isLast ? "1px solid var(--color-border-subtle)" : undefined }}
                       >
-                        <td colSpan={5} className="px-3 pb-4 pt-2" style={{ background: "var(--color-surface)" }}>
+                        <td colSpan={6} className="px-3 pb-4 pt-2" style={{ background: "var(--color-surface)" }}>
                           <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
                             {/* Left: description + meta */}
                             <div style={{ flex: 1, minWidth: 0 }}>
