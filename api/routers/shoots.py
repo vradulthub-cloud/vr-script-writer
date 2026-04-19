@@ -655,7 +655,16 @@ def _load_shoots_window(from_date: date, to_date: date, include_cancelled: bool)
             sd_iso = first["_parsed_date"]
             sd_obj = date.fromisoformat(sd_iso)
             female = (first.get("female") or "").strip()
-            male = (first.get("male") or "").strip()
+            # Male: take the first non-empty male across all scenes on this
+            # day. A female doing BG (with male) + Solo (no male) on the same
+            # day would otherwise report male='' if the Solo row sorted first,
+            # which breaks legal folder lookup and shoot-card display.
+            male = ""
+            for it in items:
+                m = (it.get("male") or "").strip()
+                if m:
+                    male = m
+                    break
             shoot_id = _shoot_id(sd_iso, female)
 
             _, legal_folder_name = _legal_folder_key(sd_obj, female, male)
