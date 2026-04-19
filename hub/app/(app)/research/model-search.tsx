@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useRef } from "react"
 import { api, ApiError, API_BASE_URL, type Model, type ModelProfile, type TrendingModel } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
+import { PageHeader } from "@/components/ui/page-header"
 
 // ─── Priority outreach (hardcoded) ───────────────────────────────────────────
 
@@ -871,30 +872,35 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
     <div>
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
 
-      {/* ── Search bar ─────────────────────────────────────────────────────── */}
-      <form onSubmit={handleSearch} style={{ display: "flex", gap: 8, marginBottom: 24 }}>
-        <input
-          type="text"
-          placeholder="Search any performer…"
-          value={searchInput}
-          onChange={e => setSearchInput(e.target.value)}
-          style={{
-            flex: 1, padding: "8px 12px", borderRadius: 4, fontSize: 13,
-            background: "var(--color-surface)",
-            border: "1px solid var(--color-border)",
-            color: "var(--color-text)", outline: "none",
-          }}
-        />
-        <button
-          type="submit"
-          style={{
-            padding: "8px 18px", borderRadius: 4, fontSize: 13, fontWeight: 600,
-            background: "var(--color-lime)", color: "#000", border: "none", cursor: "pointer",
-          }}
-        >
-          Search
-        </button>
-      </form>
+      <PageHeader
+        title="Model Research"
+        eyebrow={trending ? `${trending.length} trending · ${PRIORITY.length} priority outreach` : "booking intel"}
+        actions={
+          <form onSubmit={handleSearch} style={{ display: "flex", gap: 8 }}>
+            <input
+              type="text"
+              placeholder="Search any performer…"
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+              style={{
+                width: 280, padding: "7px 12px", borderRadius: 4, fontSize: 13,
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text)", outline: "none",
+              }}
+            />
+            <button
+              type="submit"
+              style={{
+                padding: "7px 16px", borderRadius: 4, fontSize: 13, fontWeight: 600,
+                background: "var(--color-lime)", color: "#000", border: "none", cursor: "pointer",
+              }}
+            >
+              Search
+            </button>
+          </form>
+        }
+      />
 
       {/* ── Trending Now ───────────────────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>

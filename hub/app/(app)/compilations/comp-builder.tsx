@@ -8,6 +8,7 @@ import { ErrorAlert } from "@/components/ui/error-alert"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
+import { PageHeader } from "@/components/ui/page-header"
 
 type Mode = "ideas" | "builder" | "existing"
 
@@ -195,32 +196,38 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
 
   const studioColor = STUDIO_COLOR[studio]
 
+  const modeLabel = mode === "ideas" ? "Suggest Ideas" : mode === "builder" ? "Build Comp" : "Existing"
+
   return (
     <div>
-      {/* Studio selector */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <StudioSelector value={studio} onChange={(s) => { setStudio(s); setSelected([]) }} />
-
-        {/* Mode tabs */}
-        <div
-          className="flex rounded overflow-hidden ml-4"
-          style={{ border: "1px solid var(--color-border)" }}
-        >
-          {(["ideas", "builder", "existing"] as Mode[]).map(m => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              className="px-3 py-1 text-xs transition-colors capitalize"
-              style={{
-                background: mode === m ? "var(--color-elevated)" : "transparent",
-                color: mode === m ? "var(--color-text)" : "var(--color-text-muted)",
-              }}
+      <PageHeader
+        title="Compilations"
+        eyebrow={modeLabel}
+        studioAccent={studio}
+        actions={
+          <>
+            <StudioSelector value={studio} onChange={(s) => { setStudio(s); setSelected([]) }} />
+            <div
+              className="flex rounded overflow-hidden"
+              style={{ border: "1px solid var(--color-border)" }}
             >
-              {m === "ideas" ? "Suggest Ideas" : m === "builder" ? "Build Comp" : "Existing"}
-            </button>
-          ))}
-        </div>
-      </div>
+              {(["ideas", "builder", "existing"] as Mode[]).map(m => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className="px-3 py-1 text-xs transition-colors capitalize"
+                  style={{
+                    background: mode === m ? "var(--color-elevated)" : "transparent",
+                    color: mode === m ? "var(--color-text)" : "var(--color-text-muted)",
+                  }}
+                >
+                  {m === "ideas" ? "Suggest Ideas" : m === "builder" ? "Build Comp" : "Existing"}
+                </button>
+              ))}
+            </div>
+          </>
+        }
+      />
 
       {/* ── IDEAS MODE ── */}
       {mode === "ideas" && (
@@ -613,3 +620,4 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
     </div>
   )
 }
+

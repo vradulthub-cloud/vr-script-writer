@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from "react"
 import { X, ChevronRight, ChevronDown, Search } from "lucide-react"
 import { ErrorAlert } from "@/components/ui/error-alert"
+import { PageHeader } from "@/components/ui/page-header"
 import { api, type Ticket, type TicketCreate, type TicketUpdate, type UserProfile } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { formatApiError } from "@/lib/errors"
@@ -24,12 +25,12 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 const STAT_CONFIGS = [
-  { key: "New",         label: "NEW",         color: "var(--color-text)" },
-  { key: "Approved",    label: "APPROVED",    color: "var(--color-ok)" },
-  { key: "In Progress", label: "IN PROGRESS", color: "var(--color-fpvr)" },
-  { key: "In Review",   label: "IN REVIEW",   color: "var(--color-lime)" },
-  { key: "Closed",      label: "CLOSED",      color: "var(--color-text-faint)" },
-  { key: "Rejected",    label: "REJECTED",    color: "var(--color-err)" },
+  { key: "New",         label: "New",         color: "var(--color-text)" },
+  { key: "Approved",    label: "Approved",    color: "var(--color-ok)" },
+  { key: "In Progress", label: "In Progress", color: "var(--color-fpvr)" },
+  { key: "In Review",   label: "In Review",   color: "var(--color-lime)" },
+  { key: "Closed",      label: "Closed",      color: "var(--color-text-faint)" },
+  { key: "Rejected",    label: "Rejected",    color: "var(--color-err)" },
 ] as const
 
 const TICKET_STATUSES = ["New", "Approved", "In Progress", "In Review", "Closed", "Rejected"]
@@ -331,67 +332,70 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
 
   return (
     <div>
-      {/* Compact filter row */}
       {!error && (
-        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-          <div className="flex items-center gap-1 rounded-md" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "3px" }}>
-            {([
-              { key: "Active", label: "Active", count: activeCount, color: undefined as string | undefined },
-              { key: "All",    label: "All",    count: tickets.length, color: undefined as string | undefined },
-              ...STAT_CONFIGS.filter(({ key }) => (counts[key] ?? 0) > 0).map(({ key, label, color }) => ({
-                key, label, count: counts[key] ?? 0, color: color as string | undefined,
-              })),
-            ]).map(({ key, label, count, color }) => {
-              const isActive = statusFilter === key
-              const chipColor = color ?? (key === "Active" ? "var(--color-lime)" : "var(--color-text-muted)")
-              return (
-                <button
-                  key={key}
-                  onClick={() => setStatusFilter(key)}
-                  aria-pressed={isActive}
-                  className="rounded px-2 py-1 transition-colors"
-                  style={{
-                    fontSize: 11,
-                    fontWeight: isActive ? 600 : 400,
-                    background: isActive ? "var(--color-elevated)" : "transparent",
-                    color: isActive ? chipColor : "var(--color-text-muted)",
-                    border: "none",
-                  }}
-                >
-                  {label} <span className="tabular-nums" style={{ opacity: 0.7 }}>{count}</span>
-                </button>
-              )
-            })}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setContentOnly(v => !v)}
-              role="switch"
-              aria-checked={contentOnly}
-              title={contentOnly
-                ? "Hiding Hub/engineering + audit tickets — click to show everything"
-                : "Showing all tickets — click to hide Hub/engineering + audit"}
-              className="rounded transition-colors"
-              style={{
-                padding: "4px 10px",
-                fontSize: 11,
-                cursor: "pointer",
-                background: contentOnly ? "color-mix(in srgb, var(--color-lime) 12%, transparent)" : "transparent",
-                color: contentOnly ? "var(--color-lime)" : "var(--color-text-muted)",
-                border: `1px solid ${contentOnly ? "color-mix(in srgb, var(--color-lime) 30%, transparent)" : "var(--color-border)"}`,
-              }}
-            >
-              Content only
-            </button>
-            <button
-              onClick={() => setShowCreate(true)}
-              className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-              style={{ background: "var(--color-lime)", color: "var(--color-base)" }}
-            >
-              + New Ticket
-            </button>
-          </div>
-        </div>
+        <PageHeader
+          title="Tickets"
+          eyebrow={`${activeCount} active · ${tickets.length} total`}
+          actions={
+            <>
+              <div className="flex items-center gap-1 rounded-md" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "3px" }}>
+                {([
+                  { key: "Active", label: "Active", count: activeCount, color: undefined as string | undefined },
+                  { key: "All",    label: "All",    count: tickets.length, color: undefined as string | undefined },
+                  ...STAT_CONFIGS.filter(({ key }) => (counts[key] ?? 0) > 0).map(({ key, label, color }) => ({
+                    key, label, count: counts[key] ?? 0, color: color as string | undefined,
+                  })),
+                ]).map(({ key, label, count, color }) => {
+                  const isActive = statusFilter === key
+                  const chipColor = color ?? (key === "Active" ? "var(--color-lime)" : "var(--color-text-muted)")
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setStatusFilter(key)}
+                      aria-pressed={isActive}
+                      className="rounded px-2 py-1 transition-colors"
+                      style={{
+                        fontSize: 11,
+                        fontWeight: isActive ? 600 : 400,
+                        background: isActive ? "var(--color-elevated)" : "transparent",
+                        color: isActive ? chipColor : "var(--color-text-muted)",
+                        border: "none",
+                      }}
+                    >
+                      {label} <span className="tabular-nums" style={{ opacity: 0.7 }}>{count}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <button
+                onClick={() => setContentOnly(v => !v)}
+                role="switch"
+                aria-checked={contentOnly}
+                title={contentOnly
+                  ? "Hiding Hub/engineering + audit tickets — click to show everything"
+                  : "Showing all tickets — click to hide Hub/engineering + audit"}
+                className="rounded transition-colors"
+                style={{
+                  padding: "4px 10px",
+                  fontSize: 11,
+                  cursor: "pointer",
+                  background: contentOnly ? "color-mix(in srgb, var(--color-lime) 12%, transparent)" : "transparent",
+                  color: contentOnly ? "var(--color-lime)" : "var(--color-text-muted)",
+                  border: `1px solid ${contentOnly ? "color-mix(in srgb, var(--color-lime) 30%, transparent)" : "var(--color-border)"}`,
+                }}
+              >
+                Content only
+              </button>
+              <button
+                onClick={() => setShowCreate(true)}
+                className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+                style={{ background: "var(--color-lime)", color: "var(--color-base)" }}
+              >
+                + New Ticket
+              </button>
+            </>
+          }
+        />
       )}
 
       {/* Search */}

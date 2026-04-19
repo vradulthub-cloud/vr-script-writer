@@ -24,6 +24,16 @@ const generalSans = localFont({
   display: "swap",
 })
 
+const cabinetGrotesk = localFont({
+  src: [
+    { path: "../public/fonts/CabinetGrotesk-Medium.woff2", weight: "500", style: "normal" },
+    { path: "../public/fonts/CabinetGrotesk-Bold.woff2", weight: "700", style: "normal" },
+    { path: "../public/fonts/CabinetGrotesk-Extrabold.woff2", weight: "800", style: "normal" },
+  ],
+  variable: "--font-cabinet-grotesk",
+  display: "swap",
+})
+
 export const metadata: Metadata = {
   title: "Eclatech Hub",
   description: "Production management for FPVR · VRH · VRA · NJOI",
@@ -37,7 +47,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${generalSans.variable} h-full`}
+      className={`${geistSans.variable} ${geistMono.variable} ${generalSans.variable} ${cabinetGrotesk.variable} h-full`}
     >
       <body className="h-full antialiased">
         <Providers>{children}</Providers>

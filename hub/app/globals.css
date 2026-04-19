@@ -32,6 +32,7 @@
   /* Typography */
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-general-sans), var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display-hero: var(--font-cabinet-grotesk), var(--font-general-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
   /* Type scale — amplified for drama */
@@ -39,8 +40,8 @@
   --text-sm:    0.75rem;     /* 12px — secondary, labels */
   --text-base:  0.875rem;    /* 14px — body */
   --text-lg:    1.125rem;    /* 18px — subheadings */
-  --text-xl:    1.75rem;     /* 28px — page headings */
-  /* --text-2xl removed: contradicts density-first principle */
+  --text-xl:    1.75rem;     /* 28px — section headings */
+  --text-display: clamp(2.25rem, 1.5rem + 1.6vw, 2.75rem);  /* page-level h1 — cinematic display step */
 
   /* Spacing */
   --spacing-sidebar:   220px;
@@ -79,6 +80,26 @@ h1, h2, h3 {
 h1 { font-size: var(--text-xl); letter-spacing: -0.03em; }
 h2 { font-size: var(--text-lg); }
 h3 { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
+
+/* Display hero — reserved for page-level h1 via PageHeader.
+   Using a class rather than re-styling bare h1 so modal/panel headings
+   don't accidentally inherit the hero face. */
+.display-hero {
+  font-family: var(--font-display-hero);
+  font-weight: 700;
+  font-size: var(--text-display);
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--color-text);
+  margin: 0;
+}
+
+@media (max-width: 767px) {
+  .display-hero {
+    font-size: clamp(1.75rem, 1.3rem + 2vw, 2.125rem);
+    letter-spacing: -0.035em;
+  }
+}
 
 /* ─── Scrollbar ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -223,6 +244,11 @@ button[style*="color-lime"]:hover:not(:disabled) {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes skeletonShimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 /* ─── Responsive ─────────────────────────────────────────────────────────── */
