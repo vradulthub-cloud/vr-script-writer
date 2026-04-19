@@ -437,6 +437,30 @@ export interface LocalTitleResult {
   error: string | null
 }
 
+export interface CompSceneRow {
+  scene_id: string
+  scene_num: number
+  title: string
+  performers: string
+  slr_link: string
+  mega_link: string
+}
+
+export interface ExistingComp {
+  comp_id: string
+  title: string
+  volume: string
+  status: string
+  studio_key: string
+  created: string
+  created_by: string
+  updated: string
+  description: string
+  notes: string
+  scene_count: number
+  scenes: CompSceneRow[]
+}
+
 // ─── API client factory ──────────────────────────────────────────────────────
 
 /**
@@ -629,11 +653,11 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         const params = studio ? `?studio=${encodeURIComponent(studio)}` : ""
         return get<Scene[]>(`/compilations/scenes${params}`)
       },
-      save: (body: { studio: string; title: string; scene_ids: string[]; description?: string; notes?: string; target_sheet?: string; target_range?: string }) =>
+      save: (body: { studio: string; title: string; scene_ids: string[]; description?: string; notes?: string; status?: string; volume?: string }) =>
         post<{ task_id: string; status: string }>("/compilations/save", body),
       existing: (studio?: string) => {
         const params = studio ? `?studio=${encodeURIComponent(studio)}` : ""
-        return get<{ title: string; scenes: string[]; date: string }[]>(`/compilations/existing${params}`)
+        return get<ExistingComp[]>(`/compilations/existing${params}`)
       },
       grailWrite: (body: { studio: string; title: string; scene_ids: string[] }) =>
         post<{ status: string; scene_count: number }>("/compilations/grail-write", body),

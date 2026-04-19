@@ -108,7 +108,50 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
 
   // ── Compilations ──────────────────────────────────────────────────────
   if (base === "/compilations/scenes") return wait(MOCK_SCENES as unknown as T)
-  if (base === "/compilations/existing") return wait([] as unknown as T)
+  if (base === "/compilations/existing") {
+    const studio = params.get("studio") ?? "FuckPassVR"
+    const studioKey: Record<string, string> = {
+      FuckPassVR: "FPVR", VRHush: "VRH", VRAllure: "VRA", NaughtyJOI: "NJOI",
+    }
+    const key = studioKey[studio] ?? "FPVR"
+    return wait([
+      {
+        comp_id: `${key}-C0002`,
+        title: "Best of Blondes Vol. 3",
+        volume: "Vol. 3",
+        status: "Draft",
+        studio_key: key,
+        created: "2026-04-18 14:22",
+        created_by: "Drew",
+        updated: "2026-04-18 14:22",
+        description: "A curated set of our most-requested blonde performers.",
+        notes: "",
+        scene_count: 3,
+        scenes: [
+          { scene_id: `${key}0369`, scene_num: 1, title: "Sample Scene 1", performers: "Ava Addams", slr_link: "", mega_link: "https://mega.nz/folder/AAAA#demo1" },
+          { scene_id: `${key}0412`, scene_num: 2, title: "Sample Scene 2", performers: "Mia Khalifa", slr_link: "", mega_link: "https://mega.nz/folder/BBBB#demo2" },
+          { scene_id: `${key}0455`, scene_num: 3, title: "Sample Scene 3", performers: "Riley Reid", slr_link: "", mega_link: "" },
+        ],
+      },
+      {
+        comp_id: `${key}-C0001`,
+        title: "Rainy Night In",
+        volume: "New",
+        status: "Published",
+        studio_key: key,
+        created: "2026-03-02 09:11",
+        created_by: "Drew",
+        updated: "2026-03-05 10:04",
+        description: "",
+        notes: "",
+        scene_count: 2,
+        scenes: [
+          { scene_id: `${key}0291`, scene_num: 1, title: "Rain Scene A", performers: "Katie Kush", slr_link: "", mega_link: "https://mega.nz/folder/CCCC#demo3" },
+          { scene_id: `${key}0305`, scene_num: 2, title: "Rain Scene B", performers: "Lulu Chu", slr_link: "", mega_link: "https://mega.nz/folder/DDDD#demo4" },
+        ],
+      },
+    ] as unknown as T)
+  }
 
   // ── Shoots ────────────────────────────────────────────────────────────
   if (base === "/shoots/") {
