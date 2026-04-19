@@ -60,6 +60,18 @@ class TicketUpdate(BaseModel):
     note: Optional[str] = None
 
 
+class BulkTicketUpdate(BaseModel):
+    ticket_ids: list[str]
+    status: Optional[str] = None
+    assignee: Optional[str] = None
+    priority: Optional[str] = None
+
+
+class BulkTicketResult(BaseModel):
+    updated: list[str]
+    skipped: list[dict]  # [{ticket_id, reason}]
+
+
 class TicketResponse(BaseModel):
     ticket_id: str
     title: str
@@ -374,3 +386,105 @@ async def update_ticket(ticket_id: str, body: TicketUpdate, user: CurrentUser):
         _log.warning("Failed to send ticket notification: %s", exc)
 
     return ticket
+
+
+@router.post("/bulk-update", response_model=BulkTicketResult)
+async def bulk_update_tickets(body: BulkTicketUpdate, user: CurrentUser):
+    """
+    Apply the same status / assignee / priority to many tickets at once.
+
+    Per-ticket permission check still applies — a non-admin only updates
+    tickets they submitted or are assigned. Skipped tickets are returned
+    with their reason so the UI can show a partial-success summary.
+    """
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    is_admin = (user.get("role") or "").lower() == "admin"
+
+    if not body.ticket_ids:
+        return BulkTicketResult(updated=[], skipped=[])
+    if not any([body.status, body.assignee is not None, body.priority]):
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    updated: list[str] = []
+    skipped: list[dict] = []
+    touched_for_notify: list[dict] = []
+
+    with get_db() as conn:
+        for ticket_id in body.ticket_ids:
+            row = conn.execute(
+                "SELECT * FROM tickets WHERE ticket_id = ?", (ticket_id,)
+            ).fetchone()
+            if not row:
+                skipped.append({"ticket_id": ticket_id, "reason": "not_found"})
+                continue
+
+            ticket = dict(row)
+            is_submitter = (ticket.get("submitted_by") or "") == user["name"]
+            is_assignee  = (ticket.get("assignee") or "") == user["name"]
+            if not (is_admin or is_submitter or is_assignee):
+                skipped.append({"ticket_id": ticket_id, "reason": "forbidden"})
+                continue
+
+            sheet_updates: dict = {}
+            if body.status and body.status != ticket["status"]:
+                ticket["status"] = body.status
+                sheet_updates["status"] = body.status
+                if body.status in ("Closed", "Rejected"):
+                    ticket["resolved_at"] = now
+                    sheet_updates["resolved_at"] = now
+            if body.assignee is not None and body.assignee != ticket["assignee"]:
+                ticket["assignee"] = body.assignee
+                sheet_updates["assignee"] = body.assignee
+            if body.priority and body.priority != ticket["priority"]:
+                ticket["priority"] = body.priority
+                sheet_updates["priority"] = body.priority
+
+            if not sheet_updates:
+                skipped.append({"ticket_id": ticket_id, "reason": "no_change"})
+                continue
+
+            conn.execute(
+                """UPDATE tickets
+                   SET status=?, assignee=?, priority=?, resolved_at=?
+                   WHERE ticket_id=?""",
+                (
+                    ticket["status"], ticket["assignee"], ticket["priority"],
+                    ticket["resolved_at"], ticket_id,
+                ),
+            )
+            updated.append(ticket_id)
+            touched_for_notify.append({"ticket": ticket, "updates": sheet_updates})
+
+    import threading
+    for item in touched_for_notify:
+        threading.Thread(
+            target=_update_ticket_in_sheet,
+            args=(item["ticket"]["ticket_id"], item["updates"]),
+            daemon=True,
+        ).start()
+
+    try:
+        from api.routers.notifications import create_notification, TYPE_TICKET_STATUS, TYPE_TICKET_ASSIGNED
+        for item in touched_for_notify:
+            t = item["ticket"]
+            u = item["updates"]
+            if "status" in u:
+                submitter = t.get("submitted_by", "")
+                if submitter and submitter != user["name"]:
+                    create_notification(
+                        submitter, TYPE_TICKET_STATUS,
+                        f"{t['ticket_id']} → {u['status']}",
+                        f'{user["name"]} changed status to {u["status"]}',
+                        "/tickets",
+                    )
+            if "assignee" in u and u["assignee"] and u["assignee"] != user["name"]:
+                create_notification(
+                    u["assignee"], TYPE_TICKET_ASSIGNED,
+                    f"Assigned: {t['ticket_id']}",
+                    f'{user["name"]} assigned "{t["title"]}" to you',
+                    "/tickets",
+                )
+    except Exception as exc:
+        _log.warning("Bulk ticket notifications partly failed: %s", exc)
+
+    return BulkTicketResult(updated=updated, skipped=skipped)

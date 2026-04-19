@@ -508,6 +508,16 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       get: (id: string) => get<Ticket>(`/tickets/${encodeURIComponent(id)}`),
       create: (body: TicketCreate) => post<Ticket>("/tickets/", body),
       update: (id: string, body: TicketUpdate) => patch<Ticket>(`/tickets/${encodeURIComponent(id)}`, body),
+      bulkUpdate: (body: {
+        ticket_ids: string[]
+        status?: string
+        assignee?: string
+        priority?: string
+      }) =>
+        post<{ updated: string[]; skipped: { ticket_id: string; reason: string }[] }>(
+          "/tickets/bulk-update",
+          body,
+        ),
     },
 
     scenes: {
