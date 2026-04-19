@@ -19,11 +19,15 @@ from pathlib import Path
 
 RCLONE_REMOTE = "mega_test"
 
+# Each studio can have multiple scan paths (primary + backup).
+# Older VRH / VRA scenes live in Grail/Backup/{studio}/ per CLAUDE.md's mega rules
+# (175 VRH + 375 VRA scenes were previously being silently skipped because the
+#  older code explicitly listed "Backup" in the non-scene-folder ignore list).
 STUDIOS = {
-    "FPVR": "Grail/FPVR",
-    "VRH":  "Grail/VRH",
-    "VRA":  "Grail/VRA",
-    "NJOI": "Grail/NNJOI",  # folder name NNJOI, but scene prefix is NJOI
+    "FPVR": ["Grail/FPVR"],
+    "VRH":  ["Grail/VRH",  "Grail/Backup/VRH"],
+    "VRA":  ["Grail/VRA",  "Grail/Backup/VRA"],
+    "NJOI": ["Grail/NNJOI"],  # folder name NNJOI, but scene prefix is NJOI
 }
 
 DROPBOX_PATH = Path.home() / "Library" / "CloudStorage" / "Dropbox"
@@ -185,10 +189,16 @@ def main():
         print(f"Mode: recent only (last {RECENT_DAYS} days)")
     print()
 
-    for studio, mega_path in STUDIOS.items():
+    # De-dupe by (studio, scene_id): if a scene exists in both primary and
+    # backup, prefer whichever has the fresher mtime so the latest asset state
+    # wins.
+    seen_scenes: dict[tuple[str, str], str] = {}  # (studio, scene_id_lower) → mtime
+
+    for studio, mega_paths in STUDIOS.items():
+      for mega_path in mega_paths:
         print(f"[{studio}] Single recursive listing of {mega_path}…", flush=True)
 
-        # ONE rclone call per studio — get all files recursively
+        # ONE rclone call per studio path — get all files recursively
         all_files = rclone_lsf_recursive(mega_path)
         if not all_files:
             print(f"  No files found (or error).")
@@ -205,8 +215,12 @@ def main():
                 scene_files.setdefault(scene_folder, []).append(parts[1])
 
         # Filter out non-scene folders (Videos, Legal, Storyboard, etc.)
+        # Note: "Backup" stays in this list to handle the case where someone
+        # runs the scan against /Grail/{STUDIO} (which has a Backup/ subfolder
+        # for VRH/VRA). The backup path itself is scanned explicitly via the
+        # STUDIOS dict above.
         _SKIP_FOLDERS = {"Videos", "Legal", "Storyboard", "Photos", "Description",
-                         "Brand", "Dump", "SYNC", "Backup", "Models"}
+                         "Brand", "Dump", "SYNC", "Backup", "Models", "Premiums"}
         scene_files = {k: v for k, v in scene_files.items() if k not in _SKIP_FOLDERS}
 
         # Also get folder mtimes from lsd (one call, already fast for top-level dirs)
@@ -217,11 +231,18 @@ def main():
             if parsed:
                 folder_mtimes[parsed[0]] = parsed[1]
 
-        # Filter to recent folders
+        # Filter to recent folders + dedupe against scenes already scanned
+        # from a higher-priority path (primary before backup).
         in_scope = []
         for folder_name in sorted(scene_files.keys()):
             mtime_str = folder_mtimes.get(folder_name, "")
+            # Normalize scene_id case for dedupe — backup folders sometimes mix
+            # casing (e.g. vrh0002 vs VRH0485 in /Grail/Backup/VRH).
+            key = (studio, folder_name.lower())
+            if key in seen_scenes:
+                continue
             if args.force or is_recent(mtime_str, RECENT_DAYS):
+                seen_scenes[key] = mtime_str
                 in_scope.append((folder_name, mtime_str))
 
         print(f"  {len(scene_files)} total folders, {len(in_scope)} in scope, {len(all_files)} files indexed")

@@ -35,6 +35,7 @@ from api.sheets_client import (
     get_or_create_worksheet,
     with_retry,
     fetch_all_rows,
+    fetch_as_dicts,
 )
 
 _log = logging.getLogger(__name__)
@@ -176,7 +177,17 @@ def sync_notifications() -> int:
 
 
 def sync_approvals() -> int:
-    """Sync Approvals tab → approvals table."""
+    """
+    Sync Approvals tab → approvals table.
+
+    Reads by HEADER NAME, not positional index, because the sheet was
+    originally created by the legacy Streamlit approval_tools.py using
+    column order [Approval ID, Date Submitted, Submitted By, Content Type,
+    Scene ID, Studio, …] while the v2 schema expects [Approval ID, Scene ID,
+    Studio, Content Type, Submitted By, Submitted At, …]. A positional read
+    mis-mapped 4 fields in the UI (scene_id showed dates, studio showed
+    submitter names, etc.). Header-indexed reads make sync order-agnostic.
+    """
     sh = open_tickets()
     ws = get_or_create_worksheet(
         sh,
@@ -188,14 +199,29 @@ def sync_approvals() -> int:
             "Target Sheet", "Target Range", "Superseded By",
         ],
     )
-    rows = fetch_all_rows(ws)
+
+    # Read all rows *with headers* so we can address columns by name.
+    # fetch_as_dicts uses gspread's get_all_records() which handles both
+    # legacy and v2 column orders transparently.
+    records = fetch_as_dicts(ws)
+
+    # Map sheet column names → db column name. Legacy sheet headers differ
+    # from v2 headers for a handful of columns; we accept either.
+    # Priority: v2 header → legacy header → "".
+    def pick(rec: dict, *keys: str) -> str:
+        for k in keys:
+            v = rec.get(k)
+            if v not in (None, ""):
+                return str(v)
+        return ""
 
     with get_db() as conn:
         conn.execute("DELETE FROM approvals")
-        for row in rows:
-            if len(row) < 6 or not row[0]:
+        count = 0
+        for rec in records:
+            approval_id = pick(rec, "Approval ID")
+            if not approval_id:
                 continue
-            padded = row + [""] * (15 - len(row))
             conn.execute(
                 """INSERT OR REPLACE INTO approvals
                    (approval_id, scene_id, studio, content_type,
@@ -203,10 +229,30 @@ def sync_approvals() -> int:
                     decided_at, content_json, notes, linked_ticket,
                     target_sheet, target_range, superseded_by)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                padded[:15],
+                (
+                    approval_id,
+                    pick(rec, "Scene ID"),
+                    pick(rec, "Studio"),
+                    pick(rec, "Content Type"),
+                    pick(rec, "Submitted By"),
+                    # Legacy sheet called this "Date Submitted"
+                    pick(rec, "Submitted At", "Date Submitted"),
+                    pick(rec, "Status"),
+                    # Legacy sheet called this "Approved By"
+                    pick(rec, "Decided By", "Approved By"),
+                    # Legacy sheet called this "Date Decided"
+                    pick(rec, "Decided At", "Date Decided"),
+                    pick(rec, "Content JSON"),
+                    # Legacy sheet called this "Admin Notes"
+                    pick(rec, "Notes", "Admin Notes"),
+                    pick(rec, "Linked Ticket"),
+                    pick(rec, "Target Sheet"),
+                    pick(rec, "Target Range"),
+                    pick(rec, "Superseded By"),
+                ),
             )
+            count += 1
 
-    count = len([r for r in rows if r and r[0]])
     update_sync_meta("approvals", row_count=count)
     _log.info("Synced %d approvals", count)
     return count
