@@ -111,6 +111,31 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
 
+  // Detect volume series: given an idea title, scan existing comps whose
+  // titles share a root (after stripping "Vol. N" / "Best X" suffixes) and
+  // return either the next volume number or "New" when the series is fresh.
+  function detectVolume(ideaTitle: string): string {
+    const strip = (s: string) =>
+      s.toLowerCase()
+        .replace(/\bvol(?:\.|ume)?\s*\d+\b/g, "")
+        .replace(/\bbest\s+(?:of\s+)?/g, "")
+        .replace(/\bcompilation\b/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+    const root = strip(ideaTitle)
+    if (!root) return "New"
+    const matches = existingComps.filter(c => strip(c.title) === root)
+    if (matches.length === 0) return "New"
+    // Find the highest "Vol. N" in matching titles and return N+1
+    let maxVol = 1
+    for (const c of matches) {
+      const m = c.title.match(/\bvol(?:\.|ume)?\s*(\d+)\b/i)
+      if (m) maxVol = Math.max(maxVol, parseInt(m[1], 10))
+      else maxVol = Math.max(maxVol, 1)  // treat un-numbered as Vol. 1
+    }
+    return `Vol. ${maxVol + 1}`
+  }
+
   // Parse ideas as they stream in
   const parsedIdeas = useMemo(() => {
     if (!ideasStream.output) return []
@@ -285,8 +310,33 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div style={{ minWidth: 0 }}>
-                        <p style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)", marginBottom: 4 }}>
-                          {idea.title}
+                        <p style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                          <span>{idea.title}</span>
+                          {(() => {
+                            const badge = detectVolume(idea.title)
+                            const isNew = badge === "New"
+                            return (
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  fontWeight: 600,
+                                  letterSpacing: "0.04em",
+                                  textTransform: "uppercase",
+                                  padding: "1px 6px",
+                                  borderRadius: 9,
+                                  color: isNew ? "var(--color-lime)" : studioColor,
+                                  background: isNew
+                                    ? "color-mix(in srgb, var(--color-lime) 12%, transparent)"
+                                    : `color-mix(in srgb, ${studioColor} 12%, transparent)`,
+                                  border: isNew
+                                    ? "1px solid color-mix(in srgb, var(--color-lime) 28%, transparent)"
+                                    : `1px solid color-mix(in srgb, ${studioColor} 28%, transparent)`,
+                                }}
+                              >
+                                {badge}
+                              </span>
+                            )
+                          })()}
                         </p>
                         {idea.concept && (
                           <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: idea.talent ? 4 : 0 }}>
