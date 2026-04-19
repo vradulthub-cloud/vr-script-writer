@@ -48,6 +48,24 @@ const PHASES: { name: string; assets: AssetType[] }[] = [
 const PHASE_GAP = 10  // px between phase clusters
 const CELL_GAP  = 2   // px between cells inside a phase
 
+// Which asset cells actually apply to a given scene_type. Cells that don't
+// apply (e.g. "BG edit" on a Solo scene) are dimmed in the strip and hidden
+// in the detail table so the UI doesn't mislead with false negatives.
+function cellApplies(assetType: AssetType, sceneType: string): boolean {
+  const t = (sceneType || "").toUpperCase()
+  const isSolo = t === "SOLO" || t === "JOI"
+  const isBG   = t === "BG"   || t === "BGCP"
+  switch (assetType) {
+    case "bg_edit_uploaded":     return isBG
+    case "solo_uploaded":        return isSolo
+    case "legal_run":            return isBG
+    case "legal_docs_uploaded":  return isBG
+    // call_sheet_sent, grail_run, script_done, title_done, encoded_uploaded,
+    // photoset_uploaded, storyboard_uploaded apply to every scene type
+    default: return true
+  }
+}
+
 function statusIcon(status: AssetStatus, hasValidityWarning: boolean) {
   if (status === "stuck")     return <AlertTriangle size={10} aria-hidden="true" />
   if (status === "validated") return hasValidityWarning ? <AlertTriangle size={10} aria-hidden="true" /> : <CheckCircle2 size={10} aria-hidden="true" />
@@ -104,6 +122,9 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
   const [shoots, setShoots] = useState<Shoot[]>(initialShoots)
   const [error, setError] = useState<string | null>(initialError)
   const [studioFilter, setStudioFilter] = useState<string>("All")
+  // Month filter key: "" = default window (current + next month), or a
+  // specific month in YYYY-MM form for a custom 1-month view.
+  const [monthFilter, setMonthFilter] = useState<string>("")
   const [selectedShootId, setSelectedShootId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshFailures, setRefreshFailures] = useState(0)
@@ -123,7 +144,17 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
     if (!idToken) return
     setRefreshing(true)
     try {
-      const next = await client.shoots.list()
+      const filters: { from_date?: string; to_date?: string } = {}
+      if (monthFilter) {
+        // YYYY-MM → full calendar month window
+        const [y, m] = monthFilter.split("-").map(Number)
+        const first = new Date(y, m - 1, 1)
+        const last  = new Date(y, m, 0)  // day 0 of next month = last of this
+        const pad = (n: number) => String(n).padStart(2, "0")
+        filters.from_date = `${y}-${pad(m)}-${pad(first.getDate())}`
+        filters.to_date   = `${y}-${pad(m)}-${pad(last.getDate())}`
+      }
+      const next = await client.shoots.list(filters)
       setShoots(next)
       setError(null)
       setRefreshFailures(0)
@@ -137,7 +168,10 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
     } finally {
       setRefreshing(false)
     }
-  }, [client, idToken, refreshFailures])
+  }, [client, idToken, monthFilter, refreshFailures])
+
+  // Re-fetch when the month filter changes
+  useEffect(() => { void refresh() }, [monthFilter])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-refresh every 30s
   useEffect(() => {
@@ -189,6 +223,7 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
           })}
         </div>
         <div className="flex items-center gap-2">
+          <MonthFilter value={monthFilter} onChange={setMonthFilter} />
           <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
             {refreshing ? "Refreshing…" : "Auto-refreshes every 30s"}
           </span>
@@ -400,6 +435,47 @@ function ShootRow({ shoot, selected, onSelect, onCellClick }: ShootRowProps) {
   )
 }
 
+// ── Month filter (±6 months around today, plus "Default") ────────────
+function MonthFilter({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const options = useMemo(() => {
+    const now = new Date()
+    const items: { key: string; label: string }[] = []
+    for (let offset = -6; offset <= 6; offset++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + offset, 1)
+      const y = d.getFullYear()
+      const m = d.getMonth() + 1
+      const key = `${y}-${String(m).padStart(2, "0")}`
+      const label = d.toLocaleDateString(undefined, { month: "short", year: "2-digit" })
+      items.push({ key, label })
+    }
+    return items
+  }, [])
+
+  return (
+    <label
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 6,
+        fontSize: 11, color: "var(--color-text-muted)",
+      }}
+    >
+      Month
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        style={{
+          fontSize: 11, padding: "3px 6px", borderRadius: 4,
+          background: "var(--color-surface)", color: "var(--color-text)",
+          border: "1px solid var(--color-border)",
+          cursor: "pointer",
+        }}
+      >
+        <option value="">Default (this + next)</option>
+        {options.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+      </select>
+    </label>
+  )
+}
+
 // ── Asset legend (rendered once above the list) ──────────────────────
 function AssetLegend() {
   return (
@@ -486,6 +562,27 @@ function AssetStrip({ scene, onCellClick }: AssetStripProps) {
               const status: AssetStatus = a?.status ?? "not_present"
               const hasWarn = !!a && a.validity.some(v => v.status === "warn")
               const color = statusColor(status, hasWarn)
+              const applies = cellApplies(at, scene.scene_type)
+              // Irrelevant cells: dashed placeholder, no click, muted — keeps
+              // the 11-cell grid aligned with the legend but signals N/A.
+              if (!applies) {
+                return (
+                  <span
+                    key={at}
+                    aria-label={`${SHOOT_ASSET_LABELS[at]} (not applicable for ${scene.scene_type})`}
+                    title={`${SHOOT_ASSET_LABELS[at]} — N/A for ${scene.scene_type}`}
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: 3,
+                      border: "1px dashed var(--color-border)",
+                      background: "transparent",
+                      opacity: 0.3,
+                      flexShrink: 0,
+                    }}
+                  />
+                )
+              }
               return (
                 <span
                   key={at}
@@ -763,7 +860,7 @@ function SceneAssetTable({
       </div>
       <table className="w-full" style={{ borderCollapse: "collapse" }}>
         <tbody>
-          {scene.assets.map(a => {
+          {scene.assets.filter(a => cellApplies(a.asset_type, scene.scene_type)).map(a => {
             const hasWarn = a.validity.some(v => v.status === "warn")
             const color = statusColor(a.status, hasWarn)
             return (

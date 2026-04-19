@@ -66,10 +66,22 @@ STUDIO_TO_GRAIL_TAB = {
     "NaughtyJOI": "NNJOI",
 }
 
+# For call-sheet title cross-check: Docs use the UI name (VRHush), not the
+# Grail tab (VRH). We treat either form as a valid match.
+STUDIO_TITLE_TOKENS = {
+    "FuckPassVR": ("FUCKPASSVR", "FPVR"),
+    "VRHush":     ("VRHUSH",     "VRH"),
+    "VRAllure":   ("VRALLURE",   "VRA"),
+    "NaughtyJOI": ("NAUGHTYJOI", "NNJOI"),
+}
+
 SKIP_SCRIPT_ROWS = re.compile(r"^(cancel|note|tbd|tba)", re.IGNORECASE)
 
 LEGAL_ROOT_FOLDER = "132MZR2EgBeEEJRmF3OJke5WnZozkv2cJ"
 LEGAL_CREDS_PATH = "~/.config/google-legal-docs/credentials.json"
+
+# Call-sheet Doc title format (from call_sheets.py): "{M/D/YYYY} - {studios} Call Sheet"
+CALL_SHEET_TOKEN_RE = re.compile(r"Call Sheet", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +283,94 @@ def _load_legal_folders(shoot_dates: set[date]) -> dict[tuple[date, str], list[s
         return {}
 
 
+def _load_call_sheets(shoot_dates: set[date]) -> dict[date, str]:
+    """
+    Return {date: doc_title} for every date in `shoot_dates` whose Call
+    Sheet Google Doc exists. Callers use the doc title to cross-check the
+    Scripts sheet (title format is "M/D/YYYY - {studios} Call Sheet").
+
+    Uses vr_oauth_token.json that call_sheets.py already relies on.
+    Degrades gracefully on any error — callers fall back to not_present.
+    """
+    import json
+    import os
+    import urllib.parse
+    import urllib.request
+
+    if not shoot_dates:
+        return {}
+
+    # call_sheets.py reads from settings.base_dir / "vr_oauth_token.json"
+    from api.config import get_settings
+    token_path = get_settings().base_dir / "vr_oauth_token.json"
+    if not token_path.exists():
+        _log.info("vr_oauth_token missing — skipping call_sheet validation")
+        return {}
+
+    try:
+        with open(token_path) as f:
+            tok = json.load(f)
+
+        params = urllib.parse.urlencode({
+            "grant_type":    "refresh_token",
+            "refresh_token": tok["refresh_token"],
+            "client_id":     tok["client_id"],
+            "client_secret": tok["client_secret"],
+        }).encode()
+        req = urllib.request.Request(
+            tok.get("token_uri", "https://oauth2.googleapis.com/token"),
+            data=params, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            access_token = json.loads(r.read()).get("access_token")
+        if not access_token:
+            return {}
+
+        # Call-sheet Doc titles contain the date in M/D/YYYY form (no zero pad).
+        # Build a single Drive query per unique month — Drive's fulltext /
+        # name-contains search is case-insensitive and indexed.
+        found: dict[date, str] = {}
+        months = {(d.month, d.year) for d in shoot_dates}
+        for month, year in months:
+            q = (
+                f"name contains '/{year} - ' "
+                "and name contains 'Call Sheet' "
+                "and mimeType='application/vnd.google-apps.document' "
+                "and trashed=false"
+            )
+            url = (
+                "https://www.googleapis.com/drive/v3/files"
+                f"?q={urllib.parse.quote(q)}&fields=files(name)&pageSize=1000"
+            )
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {access_token}"})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    res = json.loads(r.read())
+            except Exception as exc:
+                _log.warning("Call-sheet Drive query failed for %s/%s: %s", month, year, exc)
+                continue
+            # Parse each title's leading "M/D/YYYY - ..." and collect the dates
+            for f in (res.get("files") or []):
+                name = f.get("name", "")
+                m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})\s*-", name)
+                if not m:
+                    continue
+                try:
+                    d = date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+                except ValueError:
+                    continue
+                if d in shoot_dates:
+                    # Drive may return trashed duplicates, picking newest by
+                    # longer title is arbitrary but deterministic.
+                    existing = found.get(d)
+                    if existing is None or len(name) > len(existing):
+                        found[d] = name
+        return found
+    except Exception as exc:  # pragma: no cover
+        _log.warning("Call-sheet lookup failed: %s", exc)
+        return {}
+
+
 def _validate_legal_files(
     folder_files: list[str],
     female: str,
@@ -441,6 +541,8 @@ def _scene_state(
     legal_run_validity: list[ValidityCheck],
     legal_docs_status: str,
     legal_docs_validity: list[ValidityCheck],
+    call_sheet_status: str,
+    call_sheet_validity: list[ValidityCheck],
     checked_at: str,
 ) -> list[SceneAssetState]:
     """Compute the 11-cell state vector for one scene."""
@@ -473,9 +575,13 @@ def _scene_state(
         put("legal_run", "not_present")
         put("legal_docs_uploaded", "not_present")
 
-    # call_sheet_sent / encoded_uploaded — not validated yet
-    for at in ("call_sheet_sent", "encoded_uploaded"):
-        put(at, "not_present")
+    # call_sheet_sent — Doc whose title matches this shoot's date.
+    # Status + validity is computed once per shoot (in _load_shoots_window)
+    # because the Doc is shared across all scenes on the same day.
+    put("call_sheet_sent", call_sheet_status, call_sheet_validity)
+
+    # encoded_uploaded — no validator yet
+    put("encoded_uploaded", "not_present")
 
     # MEGA-derived states
     if scene_row is None:
@@ -536,9 +642,11 @@ def _load_shoots_window(from_date: date, to_date: date, include_cancelled: bool)
             key = f"{sd.isoformat()}|{female.lower()}"
             groups.setdefault(key, []).append({**d, "_parsed_date": sd.isoformat()})
 
-        # One Drive round-trip for legal docs across all shoot dates
+        # One Drive round-trip each for legal docs + call sheets, spanning
+        # every shoot date in the window
         shoot_dates = {date.fromisoformat(items[0]["_parsed_date"]) for items in groups.values() if items}
         legal_folders = _load_legal_folders(shoot_dates)
+        call_sheet_dates = _load_call_sheets(shoot_dates)
 
         shoots: list[Shoot] = []
         for _, items in groups.items():
@@ -557,6 +665,40 @@ def _load_shoots_window(from_date: date, to_date: date, include_cancelled: bool)
                 legal_files, female, male, date_code,
             )
 
+            # Call sheet: validated if Drive Doc exists for this date AND
+            # the Doc title mentions every studio we have scripts for.
+            # Docs use either the UI name (VRHush) or tab (VRH) — either counts.
+            expected_studios = {
+                (it.get("studio") or "").strip()
+                for it in items
+            }
+            expected_studios.discard("")
+            call_sheet_title = call_sheet_dates.get(sd_obj)
+            call_sheet_v: list[ValidityCheck] = []
+            if call_sheet_title:
+                title_upper = call_sheet_title.upper()
+                missing_studios = []
+                for studio_name in expected_studios:
+                    tokens = STUDIO_TITLE_TOKENS.get(studio_name)
+                    if tokens is None:
+                        continue  # unknown studio; don't false-warn
+                    if not any(t in title_upper for t in tokens):
+                        missing_studios.append(studio_name)
+                if missing_studios:
+                    call_sheet_v.append(ValidityCheck(
+                        check="studio_match", status="warn",
+                        message=f"Call sheet missing studios: {', '.join(sorted(missing_studios))}",
+                    ))
+                    call_sheet_status = "available"
+                else:
+                    call_sheet_v.append(ValidityCheck(
+                        check="studio_match", status="pass",
+                        message=f"Doc: {call_sheet_title[:60]}",
+                    ))
+                    call_sheet_status = "validated"
+            else:
+                call_sheet_status = "not_present"
+
             scenes: list[BoardShootScene] = []
             for position, it in enumerate(items[:3], start=1):
                 studio = (it.get("studio") or "").strip()
@@ -566,6 +708,7 @@ def _load_shoots_window(from_date: date, to_date: date, include_cancelled: bool)
                     scene_row, it, scene_type,
                     legal_run_status, legal_run_v,
                     legal_docs_status, legal_docs_v,
+                    call_sheet_status, call_sheet_v,
                     checked_at,
                 )
                 scenes.append(BoardShootScene(
