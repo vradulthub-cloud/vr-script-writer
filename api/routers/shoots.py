@@ -310,12 +310,19 @@ def _validate_legal_files(
             pdf_checks.append(ValidityCheck(check="male_pdf", status="fail",
                                             message=f"Missing {male_nosp}-{date_code}.pdf"))
 
-    if has_female_pdf and has_male_pdf:
-        legal_run_status = "validated"
-    elif has_female_pdf or has_male_pdf:
-        legal_run_status = "available"
+    if male_nosp:
+        # BG with male: we expect both PDFs
+        if has_female_pdf and has_male_pdf:
+            legal_run_status = "validated"
+        elif has_female_pdf or has_male_pdf:
+            legal_run_status = "available"
+        else:
+            legal_run_status = "not_present"
     else:
-        legal_run_status = "not_present"
+        # Female-only BG: only the female PDF matters; male_nosp missing
+        # means has_male_pdf defaulted to True, so we'd otherwise false-
+        # positive "available" even with nothing uploaded.
+        legal_run_status = "validated" if has_female_pdf else "not_present"
 
     # ── legal_docs_uploaded: IDs + video ─────────────────────────────
     doc_checks: list[ValidityCheck] = []
@@ -379,19 +386,29 @@ def _validate_legal_files(
 _COMPILATION_RE = re.compile(r"\b(vol\.?|compilation|best\b)", re.IGNORECASE)
 
 
-def _match_scene_row(conn, studio: str, female: str) -> Optional[dict]:
+def _match_scene_row(conn, studio: str, female: str, shoot_date: date) -> Optional[dict]:
     """
-    Pick the NEWEST non-compilation Grail scene for this studio that lists
-    `female`. `release_date` is always empty in the DB, so we fall back to
-    id DESC (scene IDs are monotonically increasing). This prevents ancient
-    archive scenes from masquerading as the current shoot.
+    Find the Grail scene created for THIS shoot. `daily_grail_update.py`
+    appends a new Grail row on the morning of each shoot, so the most
+    recently-appended row for (studio, talent) is the row for the nearest
+    shoot.
+
+    Rules:
+      - Skip compilations (Vol./Best/Compilation)
+      - Order by `grail_row DESC` (append order ≈ shoot order) so the
+        newest-added row wins over an ancient archive scene
+      - For FUTURE shoots (shoot_date > today), do not match — the Grail
+        row doesn't exist yet, and matching to any older scene creates a
+        false "grail_run: validated"
     """
     grail_tab = STUDIO_TO_GRAIL_TAB.get(studio, "")
     if not grail_tab:
         return None
+    if shoot_date > date.today():
+        return None  # No Grail row exists until the morning of the shoot
 
     rows = conn.execute(
-        """SELECT id, studio, grail_tab, title, performers, female, male,
+        """SELECT id, studio, grail_tab, grail_row, title, performers, female, male,
                   has_thumbnail, has_videos, video_count, has_photos, has_storyboard,
                   release_date, is_compilation
              FROM scenes
@@ -400,7 +417,7 @@ def _match_scene_row(conn, studio: str, female: str) -> Optional[dict]:
                     LOWER(female)     LIKE LOWER(?)
                  OR LOWER(performers) LIKE LOWER(?)
               )
-            ORDER BY id DESC""",
+            ORDER BY grail_row DESC""",
         (grail_tab, f"%{female.strip()}%", f"%{female.strip()}%"),
     ).fetchall()
     for r in rows:
@@ -544,7 +561,7 @@ def _load_shoots_window(from_date: date, to_date: date, include_cancelled: bool)
             for position, it in enumerate(items[:3], start=1):
                 studio = (it.get("studio") or "").strip()
                 scene_type = (it.get("scene_type") or "BG").strip() or "BG"
-                scene_row = _match_scene_row(conn, studio, female)
+                scene_row = _match_scene_row(conn, studio, female, sd_obj)
                 assets = _scene_state(
                     scene_row, it, scene_type,
                     legal_run_status, legal_run_v,
