@@ -19,6 +19,18 @@ from pathlib import Path
 
 RCLONE_REMOTE = "mega_test"
 
+# MEGA is known to block IPs on fast-paced requests. rclone docs recommend
+# spacing calls ~3s apart and using retries. --tpslimit 3 paces API calls
+# within a single invocation; retries recover from transient rate-limit errors.
+# https://rclone.org/mega/
+_RETRY_FLAGS = [
+    "--retries", "10",
+    "--retries-sleep", "30s",
+    "--low-level-retries", "10",
+    "--tpslimit", "3",
+    "--tpslimit-burst", "1",
+]
+
 STUDIOS = {
     "FPVR": "Grail/FPVR",
     "VRH":  "Grail/VRH",
@@ -36,7 +48,7 @@ RECENT_DAYS = 30
 
 def rclone_lsd(remote_path: str) -> list[str]:
     """Run `rclone lsd` and return stdout lines. Returns [] on error."""
-    cmd = ["rclone", "lsd", f"{RCLONE_REMOTE}:{remote_path}", "--timeout", "600s"]
+    cmd = ["rclone", "lsd", f"{RCLONE_REMOTE}:{remote_path}", "--timeout", "600s", *_RETRY_FLAGS]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=660)
         if result.returncode != 0:
@@ -53,7 +65,7 @@ def rclone_lsd(remote_path: str) -> list[str]:
 
 def rclone_ls(remote_path: str) -> list[str]:
     """Run `rclone ls` and return file paths. Returns [] on error."""
-    cmd = ["rclone", "ls", f"{RCLONE_REMOTE}:{remote_path}", "--timeout", "600s"]
+    cmd = ["rclone", "ls", f"{RCLONE_REMOTE}:{remote_path}", "--timeout", "600s", *_RETRY_FLAGS]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=660)
         if result.returncode != 0:
@@ -157,7 +169,7 @@ def is_recent(mtime_str: str, days: int) -> bool:
 
 def rclone_lsf_recursive(remote_path: str) -> list[str]:
     """Run `rclone lsf -R` to get all files recursively in one call. Much faster than per-folder ls."""
-    cmd = ["rclone", "lsf", "-R", f"{RCLONE_REMOTE}:{remote_path}", "--timeout", "600s"]
+    cmd = ["rclone", "lsf", "-R", f"{RCLONE_REMOTE}:{remote_path}", "--timeout", "600s", *_RETRY_FLAGS]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=660)
         if result.returncode != 0:
