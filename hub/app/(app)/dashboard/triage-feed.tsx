@@ -327,7 +327,23 @@ export function TriageFeed({
                   {scene.id}
                 </span>
 
-                <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center" }}>
+                <span
+                  title={scene.performers || undefined}
+                  style={{
+                    fontSize: 12,
+                    color: "var(--color-text)",
+                    fontWeight: 500,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    flex: "1 1 auto",
+                  }}
+                >
+                  {scene.performers || <span style={{ color: "var(--color-text-faint)", fontStyle: "italic" }}>—</span>}
+                </span>
+
+                <span style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
                   <AssetCells cells={cells} />
                 </span>
 
