@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     tickets_sheet_id: str = "1t92DvQxZzgHKjp4-uxaPLdyaqlmcGNLxSd6qx8hANyA"
     budgets_sheet_id: str = "1bM1G49p2KK9WY3WfjzPixrWUw8KBiDGKR-0jKw5QUVc"
     booking_sheet_id: str = "1Dxrh0UZNqoBt6otZqsU85fxz9z-dt0csSCV9sGdobKw"
-    comp_planning_sheet_id: str = "1i6W4eZ8BvacGD1wSqhJxNxJ_m5h8MfN-SvXdRj0Bnbk"
+    comp_planning_sheet_id: str = "1i6W4eZ8Bva3HvVmhpAVgjeHwfqbARkwBZ38aUhriaGs"
 
     # --- Google OAuth (for user auth, not service account) ---
     google_client_id: str = ""
