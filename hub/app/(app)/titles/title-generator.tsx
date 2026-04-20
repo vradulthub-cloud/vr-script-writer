@@ -271,6 +271,9 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
                 color: "var(--color-text)",
               }}
             />
+            <p style={{ fontSize: 10, color: titleText.length > 55 ? "var(--color-warn)" : "var(--color-text-faint)", marginTop: 3 }}>
+              {titleText.length}/55 chars — fits cleanly on card at ≤55
+            </p>
           </div>
 
           {engine === "cloud" ? (

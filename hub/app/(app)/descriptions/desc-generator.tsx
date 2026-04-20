@@ -500,6 +500,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                 color: "var(--color-text)",
               }}
             />
+            <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 3 }}>Comma-separated stage names — must match the scene's cast exactly</p>
           </div>
 
           {/* Positions */}

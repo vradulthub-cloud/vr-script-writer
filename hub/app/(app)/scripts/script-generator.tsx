@@ -531,6 +531,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
                   color: "var(--color-text)",
                 }}
               />
+              <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 3 }}>Stage name — used in script header and title generation</p>
             </div>
 
             {/* Male */}
