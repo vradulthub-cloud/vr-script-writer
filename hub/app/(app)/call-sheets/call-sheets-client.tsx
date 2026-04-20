@@ -6,6 +6,7 @@ import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { StudioBadge } from "@/components/ui/studio-badge"
 import { PageHeader } from "@/components/ui/page-header"
+import { SkeletonBar } from "@/components/ui/skeleton"
 import type { ShootDate, ShootScene } from "@/lib/api"
 
 // ---------------------------------------------------------------------------
@@ -493,20 +494,3 @@ function CallSheetsSkeleton() {
   )
 }
 
-function SkeletonBar({ width }: { width: number }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        display: "inline-block",
-        width,
-        height: 10,
-        borderRadius: 3,
-        background:
-          "linear-gradient(90deg, var(--color-elevated) 0%, var(--color-border) 50%, var(--color-elevated) 100%)",
-        backgroundSize: "200% 100%",
-        animation: "skeletonShimmer 1400ms linear infinite",
-      }}
-    />
-  )
-}

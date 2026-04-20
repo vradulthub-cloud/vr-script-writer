@@ -532,7 +532,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                 </button>
               )}
             </label>
-            <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {(STUDIO_CATEGORY_GROUPS[studio] ?? []).map(({ label, cats }) => (
                 <div key={label}>
                   <p style={{ fontSize: 9, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginBottom: 3 }}>

@@ -129,6 +129,7 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
   const [selectedShootId, setSelectedShootId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshFailures, setRefreshFailures] = useState(0)
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const [popoverCell, setPopoverCell] = useState<{
     shootId: string
     position: number
@@ -159,6 +160,7 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
       setShoots(next)
       setError(null)
       setRefreshFailures(0)
+      setLastRefreshed(new Date())
     } catch (e) {
       setRefreshFailures(n => n + 1)
       // Only surface the error banner after 2 consecutive failures so a
@@ -228,21 +230,32 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
               })}
             </div>
             <MonthFilter value={monthFilter} onChange={setMonthFilter} />
-            <button
-              onClick={() => { void refresh() }}
-              disabled={refreshing}
-              className="px-2.5 py-1 rounded text-xs transition-colors"
-              style={{
-                background: "transparent",
-                color: "var(--color-text-muted)",
-                border: "1px solid var(--color-border)",
-                cursor: refreshing ? "not-allowed" : "pointer",
-                opacity: refreshing ? 0.5 : 1,
-              }}
-            >
-              <RefreshCcw size={11} className="inline mr-1" aria-hidden="true" />
-              Refresh
-            </button>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+              <button
+                onClick={() => { void refresh() }}
+                disabled={refreshing}
+                className="px-2.5 py-1 rounded text-xs transition-colors"
+                style={{
+                  display: "flex", alignItems: "center", gap: 4,
+                  background: "transparent",
+                  color: "var(--color-text-muted)",
+                  border: "1px solid var(--color-border)",
+                  cursor: refreshing ? "not-allowed" : "pointer",
+                }}
+              >
+                <RefreshCcw
+                  size={11}
+                  aria-hidden="true"
+                  style={{ animation: refreshing ? "spin 0.8s linear infinite" : undefined }}
+                />
+                {refreshing ? "Refreshing…" : "Refresh"}
+              </button>
+              {lastRefreshed && !refreshing && (
+                <span style={{ fontSize: 9, color: "var(--color-text-faint)", letterSpacing: "0.02em" }}>
+                  updated {lastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
+            </div>
           </>
         }
       />

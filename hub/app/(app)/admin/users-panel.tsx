@@ -232,7 +232,20 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
                     </div>
                   ) : (
                     <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                      {u.allowed_tabs === "ALL" ? "All tabs" : u.allowed_tabs || "—"}
+                      {u.allowed_tabs === "ALL" && u.role !== "admin" ? (
+                        <span style={{
+                          display: "inline-flex", alignItems: "center", gap: 4,
+                          padding: "1px 6px", borderRadius: 4, fontSize: 10, fontWeight: 600,
+                          background: "color-mix(in srgb, var(--color-lime) 12%, transparent)",
+                          color: "var(--color-lime)",
+                          border: "1px solid color-mix(in srgb, var(--color-lime) 28%, transparent)",
+                          letterSpacing: "0.04em",
+                        }}>
+                          Full access
+                        </span>
+                      ) : (
+                        u.allowed_tabs === "ALL" ? "All tabs" : u.allowed_tabs || "—"
+                      )}
                     </span>
                   )}
                 </td>
