@@ -35,32 +35,38 @@ router = APIRouter(prefix="/api/compilations", tags=["compilations"])
 
 
 # ---------------------------------------------------------------------------
-# Index-tab schema (one row per scene within a compilation).
+# v3 block-per-comp Index tab schema.
 #
-# A single comp spans N contiguous rows sharing the same Comp ID. Comp-level
-# fields (Title, Volume, Status, Description, Notes, Created, Created By)
-# repeat on every scene row so each row stands alone for the video editor —
-# filter by Comp ID in the sheet UI and every MEGA link is visible.
+# Each compilation is a visual block of rows:
+#   1. Title row  — col B: comp_id, col D: title, col E: "Vol. X · STATUS"
+#   2. Meta row   — col D: "Created {date} by {user} · {N} scenes\n{description}"
+#   3. Sub-header — col B: "#", C: "SCENE ID", D: "SCENE TITLE", …
+#   4+. Scene rows — col B: scene_num, C: scene_id, D: title, E: performers,
+#                    F: mega_link, G: slr_link
+#   N. Spacer row  — empty, 28px tall
+#
+# Parsing: scan col B for STUDIO-CNNNN pattern → title row starts a new block.
 # ---------------------------------------------------------------------------
-INDEX_HEADERS = [
-    "Created (UTC)",    # A
-    "Created By",       # B
-    "Comp ID",          # C — e.g. FPVR-C0007
-    "Comp Title",       # D
-    "Volume",           # E — "Vol. 3" or "New"
-    "Status",           # F — Draft / Planned / Published
-    "Scene #",          # G — 1, 2, 3 …
-    "Scene ID",         # H — FPVR0369
-    "Scene Title",      # I
-    "Performers",       # J
-    "SLR Link",         # K
-    "MEGA Link",        # L — shareable URL for the video editor
-    "Description",      # M — only on Scene # = 1
-    "Notes",            # N
-    "Updated",          # O
-]
-
 INDEX_TAB_SUFFIX = " Index"
+
+# Studio accent colors (r/g/b, 0-1 scale)
+STUDIO_ACCENTS: dict[str, tuple[float, float, float]] = {
+    "FPVR": (0.231, 0.510, 0.965),
+    "VRH":  (0.545, 0.361, 0.965),
+    "VRA":  (0.925, 0.282, 0.600),
+    "NJOI": (0.976, 0.451, 0.086),
+}
+
+# Status colors for the "Vol. X · STATUS" label in the title row
+STATUS_COLORS: dict[str, dict] = {
+    "Draft":     {"red": 0.60, "green": 0.60, "blue": 0.60},
+    "Planned":   {"red": 0.95, "green": 0.77, "blue": 0.25},
+    "Published": {"red": 0.30, "green": 0.75, "blue": 0.45},
+}
+
+
+def _rgb(r: float, g: float, b: float) -> dict:
+    return {"red": r, "green": g, "blue": b}
 
 
 # ---------------------------------------------------------------------------
@@ -131,30 +137,38 @@ def _index_tab_name(studio_key: str) -> str:
 
 
 def _open_index_ws(studio_key: str):
-    """Get-or-create the studio's Index worksheet with header row."""
-    from api.sheets_client import open_comp_planning, get_or_create_worksheet
+    """Get-or-create the studio's Index worksheet (no header row — block format)."""
+    from api.sheets_client import open_comp_planning, with_retry
+    import gspread as _gspread
 
     sh = open_comp_planning()
-    return get_or_create_worksheet(
-        sh,
-        _index_tab_name(studio_key),
-        headers=INDEX_HEADERS,
-        rows=1000,
-    )
+    tab_name = _index_tab_name(studio_key)
+    try:
+        return with_retry(lambda: sh.worksheet(tab_name))
+    except _gspread.WorksheetNotFound:
+        return with_retry(lambda: sh.add_worksheet(title=tab_name, rows=3000, cols=8))
 
 
 def _next_comp_id(ws, studio_key: str) -> str:
-    """Scan Comp ID column (C) and return the next sequential ID."""
+    """Scan col B (Comp ID in title rows) and return the next sequential ID."""
     from api.sheets_client import with_retry
 
-    col_c = with_retry(lambda: ws.col_values(3))  # ['Comp ID', 'FPVR-C0001', ...]
+    col_b = with_retry(lambda: ws.col_values(2))  # col B, 1-indexed
     max_n = 0
     pat = re.compile(rf"^{re.escape(studio_key)}-C(\d+)$")
-    for cell in col_c[1:]:  # skip header
+    for cell in col_b:
         m = pat.match(cell.strip())
         if m:
             max_n = max(max_n, int(m.group(1)))
     return f"{studio_key}-C{max_n + 1:04d}"
+
+
+def _parse_vol_status(raw: str) -> tuple[str, str]:
+    """Parse 'Vol. 3  ·  Draft' → ('Vol. 3', 'Draft')."""
+    if "·" in raw:
+        parts = [p.strip() for p in raw.split("·", 1)]
+        return parts[0], parts[1]
+    return "", raw.strip()
 
 
 def _mega_link_for(grail_id: str) -> str:
@@ -354,7 +368,7 @@ async def save_compilation(body: CompSaveBody, user: CurrentUser):
 
 
 def _write_comp_to_index(body: CompSaveBody, created_by: str) -> None:
-    """Append per-scene rows to the studio's {STUDIO} Index worksheet."""
+    """Write a v3 comp block to the studio's Index worksheet."""
     try:
         from api.sheets_client import with_retry
 
@@ -365,7 +379,8 @@ def _write_comp_to_index(body: CompSaveBody, created_by: str) -> None:
 
         ws = _open_index_ws(studio_key)
         comp_id = _next_comp_id(ws, studio_key)
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        now_dt = datetime.now(timezone.utc)
+        date_str = f"{now_dt.day} {now_dt.strftime('%b %Y')}"  # "19 Apr 2026"
 
         # Look up scene metadata
         scene_meta: dict[str, dict] = {}
@@ -378,36 +393,288 @@ def _write_comp_to_index(body: CompSaveBody, created_by: str) -> None:
                 ).fetchall()
             scene_meta = {dict(r)["id"]: dict(r) for r in rows}
 
-        # Build rows in the same order the user picked them
-        new_rows: list[list] = []
+        # Generate MEGA links per scene (slow — shells to MEGAcmd)
+        scene_rows_data: list[dict] = []
         for i, sid in enumerate(body.scene_ids, start=1):
             meta = scene_meta.get(sid, {})
-            mega = _mega_link_for(sid)
-            desc_cell = body.description if i == 1 else ""
-            notes_cell = body.notes if i == 1 else ""
-            new_rows.append([
-                now,                              # A Created
-                created_by,                       # B Created By
-                comp_id,                          # C Comp ID
-                body.title,                       # D Comp Title
-                body.volume or "",                # E Volume
-                body.status or "Draft",           # F Status
-                i,                                # G Scene #
-                sid,                              # H Scene ID
-                meta.get("title", ""),            # I Scene Title
-                meta.get("performers", ""),       # J Performers
-                "",                               # K SLR Link (reserved)
-                mega,                             # L MEGA Link
-                desc_cell,                        # M Description
-                notes_cell,                       # N Notes
-                now,                              # O Updated
-            ])
+            mega_url = _mega_link_for(sid)
+            scene_rows_data.append({
+                "num": i,
+                "scene_id": sid,
+                "title": meta.get("title", ""),
+                "performers": meta.get("performers", ""),
+                "mega_url": mega_url,
+            })
 
-        if new_rows:
-            with_retry(lambda: ws.append_rows(new_rows, value_input_option="USER_ENTERED"))
-            _log.info("Wrote %d scene rows for comp %s (%s)", len(new_rows), comp_id, studio_key)
+        n_scenes = len(scene_rows_data)
+        status = body.status or "Draft"
+        vol_status = f"{body.volume}  ·  {status}" if body.volume else status
+        meta_parts = [f"Created {date_str} by {created_by}  ·  {n_scenes} scene{'s' if n_scenes != 1 else ''}"]
+        if body.description:
+            meta_parts.append(body.description)
+        meta_text = "\n".join(meta_parts)
+
+        # v3 block rows — 8 columns (A-H)
+        block_rows: list[list] = [
+            ["", comp_id, "", body.title, vol_status, "", "", ""],     # title row
+            ["", "", "", meta_text, "", "", "", ""],                   # meta row
+            ["", "#", "SCENE ID", "SCENE TITLE", "PERFORMERS", "MEGA", "SLR", "NOTES"],  # sub-header
+        ]
+        for sd in scene_rows_data:
+            block_rows.append([
+                "", str(sd["num"]), sd["scene_id"], sd["title"],
+                sd["performers"], sd["mega_url"], "", "",
+            ])
+        block_rows.append(["", "", "", "", "", "", "", ""])  # spacer
+
+        # Append data then apply formatting
+        all_vals = with_retry(lambda: ws.get_all_values())
+        start_idx = len(all_vals)  # 0-indexed row where this block starts
+
+        with_retry(lambda: ws.append_rows(block_rows, value_input_option="USER_ENTERED"))
+        _format_comp_block(ws, studio_key, status, start_idx, n_scenes)
+        _log.info("Wrote comp block %s (%s) — %d scenes", comp_id, studio_key, n_scenes)
     except Exception as exc:
-        _log.error("Failed to write compilation to Index tab: %s", exc, exc_info=True)
+        _log.error("Failed to write comp block to Index tab: %s", exc, exc_info=True)
+
+
+def _format_comp_block(
+    ws,
+    studio_key: str,
+    status: str,
+    start_idx: int,
+    n_scenes: int,
+) -> None:
+    """Apply v3 block formatting to the rows we just appended."""
+    from api.sheets_client import with_retry
+
+    sid = ws.id
+    at = STUDIO_ACCENTS.get(studio_key, (0.5, 0.5, 0.5))
+    accent_rgb = _rgb(*at)
+    status_rgb = STATUS_COLORS.get(status, _rgb(0.6, 0.6, 0.6))
+    gray = _rgb(0.55, 0.55, 0.55)
+    light_gray = _rgb(0.80, 0.80, 0.80)
+
+    title_idx   = start_idx
+    meta_idx    = start_idx + 1
+    subhdr_idx  = start_idx + 2
+    first_scene = start_idx + 3
+    spacer_idx  = start_idx + 3 + n_scenes
+
+    requests: list[dict] = []
+
+    # ── Row heights ───────────────────────────────────────────────────────
+    heights = [
+        (title_idx, 32),
+        (meta_idx, 22),
+        (subhdr_idx, 18),
+        *[(first_scene + i, 22) for i in range(n_scenes)],
+        (spacer_idx, 28),
+    ]
+    for r_idx, px in heights:
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {"sheetId": sid, "dimension": "ROWS",
+                          "startIndex": r_idx, "endIndex": r_idx + 1},
+                "properties": {"pixelSize": px},
+                "fields": "pixelSize",
+            }
+        })
+
+    # ── Col A accent stripe across entire block ───────────────────────────
+    requests.append({
+        "repeatCell": {
+            "range": {"sheetId": sid,
+                      "startRowIndex": title_idx, "endRowIndex": spacer_idx + 1,
+                      "startColumnIndex": 0, "endColumnIndex": 1},
+            "cell": {"userEnteredFormat": {"backgroundColor": accent_rgb}},
+            "fields": "userEnteredFormat.backgroundColor",
+        }
+    })
+
+    # ── Title row ─────────────────────────────────────────────────────────
+    # Col B: comp_id — bold, monospace, studio color
+    requests.append({
+        "repeatCell": {
+            "range": {"sheetId": sid,
+                      "startRowIndex": title_idx, "endRowIndex": title_idx + 1,
+                      "startColumnIndex": 1, "endColumnIndex": 2},
+            "cell": {
+                "userEnteredFormat": {
+                    "textFormat": {
+                        "bold": True, "fontFamily": "Roboto Mono", "fontSize": 11,
+                        "foregroundColorStyle": {"rgbColor": accent_rgb},
+                    },
+                    "verticalAlignment": "MIDDLE",
+                    "padding": {"left": 8, "right": 4, "top": 4, "bottom": 4},
+                }
+            },
+            "fields": "userEnteredFormat(textFormat,verticalAlignment,padding)",
+        }
+    })
+    # Col D: title — bold, 13pt
+    requests.append({
+        "repeatCell": {
+            "range": {"sheetId": sid,
+                      "startRowIndex": title_idx, "endRowIndex": title_idx + 1,
+                      "startColumnIndex": 3, "endColumnIndex": 4},
+            "cell": {
+                "userEnteredFormat": {
+                    "textFormat": {"bold": True, "fontSize": 13},
+                    "verticalAlignment": "MIDDLE",
+                    "padding": {"left": 8, "right": 4, "top": 4, "bottom": 4},
+                }
+            },
+            "fields": "userEnteredFormat(textFormat,verticalAlignment,padding)",
+        }
+    })
+    # Col E: vol·status — right-aligned, status color, bold
+    requests.append({
+        "repeatCell": {
+            "range": {"sheetId": sid,
+                      "startRowIndex": title_idx, "endRowIndex": title_idx + 1,
+                      "startColumnIndex": 4, "endColumnIndex": 5},
+            "cell": {
+                "userEnteredFormat": {
+                    "textFormat": {
+                        "bold": True, "fontSize": 10,
+                        "foregroundColorStyle": {"rgbColor": status_rgb},
+                    },
+                    "horizontalAlignment": "RIGHT",
+                    "verticalAlignment": "MIDDLE",
+                    "padding": {"left": 4, "right": 10, "top": 4, "bottom": 4},
+                }
+            },
+            "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,padding)",
+        }
+    })
+
+    # ── Meta row ─────────────────────────────────────────────────────────
+    requests.append({
+        "repeatCell": {
+            "range": {"sheetId": sid,
+                      "startRowIndex": meta_idx, "endRowIndex": meta_idx + 1,
+                      "startColumnIndex": 3, "endColumnIndex": 8},
+            "cell": {
+                "userEnteredFormat": {
+                    "textFormat": {
+                        "italic": True, "fontSize": 9,
+                        "foregroundColorStyle": {"rgbColor": gray},
+                    },
+                    "wrapStrategy": "WRAP",
+                    "verticalAlignment": "MIDDLE",
+                    "padding": {"left": 8, "right": 8, "top": 3, "bottom": 3},
+                }
+            },
+            "fields": "userEnteredFormat(textFormat,wrapStrategy,verticalAlignment,padding)",
+        }
+    })
+
+    # ── Sub-header row ────────────────────────────────────────────────────
+    requests.append({
+        "repeatCell": {
+            "range": {"sheetId": sid,
+                      "startRowIndex": subhdr_idx, "endRowIndex": subhdr_idx + 1,
+                      "startColumnIndex": 1, "endColumnIndex": 8},
+            "cell": {
+                "userEnteredFormat": {
+                    "textFormat": {
+                        "bold": True, "fontSize": 8,
+                        "foregroundColorStyle": {"rgbColor": _rgb(0.65, 0.65, 0.65)},
+                    },
+                    "verticalAlignment": "BOTTOM",
+                    "padding": {"left": 8, "right": 4, "top": 2, "bottom": 4},
+                    "borders": {
+                        "bottom": {
+                            "style": "SOLID",
+                            "colorStyle": {"rgbColor": light_gray},
+                        }
+                    },
+                }
+            },
+            "fields": "userEnteredFormat(textFormat,verticalAlignment,padding,borders)",
+        }
+    })
+
+    # ── Scene rows ────────────────────────────────────────────────────────
+    if n_scenes > 0:
+        # Col B (scene #): centered, gray, small
+        requests.append({
+            "repeatCell": {
+                "range": {"sheetId": sid,
+                          "startRowIndex": first_scene, "endRowIndex": spacer_idx,
+                          "startColumnIndex": 1, "endColumnIndex": 2},
+                "cell": {
+                    "userEnteredFormat": {
+                        "textFormat": {
+                            "fontSize": 9,
+                            "foregroundColorStyle": {"rgbColor": gray},
+                        },
+                        "horizontalAlignment": "CENTER",
+                        "verticalAlignment": "MIDDLE",
+                    }
+                },
+                "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)",
+            }
+        })
+        # Col C (scene_id): monospace
+        requests.append({
+            "repeatCell": {
+                "range": {"sheetId": sid,
+                          "startRowIndex": first_scene, "endRowIndex": spacer_idx,
+                          "startColumnIndex": 2, "endColumnIndex": 3},
+                "cell": {
+                    "userEnteredFormat": {
+                        "textFormat": {"fontFamily": "Roboto Mono", "fontSize": 10},
+                        "verticalAlignment": "MIDDLE",
+                    }
+                },
+                "fields": "userEnteredFormat(textFormat,verticalAlignment)",
+            }
+        })
+        # Col F (MEGA link): studio accent, bold
+        requests.append({
+            "repeatCell": {
+                "range": {"sheetId": sid,
+                          "startRowIndex": first_scene, "endRowIndex": spacer_idx,
+                          "startColumnIndex": 5, "endColumnIndex": 6},
+                "cell": {
+                    "userEnteredFormat": {
+                        "textFormat": {
+                            "bold": True, "fontSize": 10,
+                            "foregroundColorStyle": {"rgbColor": accent_rgb},
+                        },
+                        "verticalAlignment": "MIDDLE",
+                    }
+                },
+                "fields": "userEnteredFormat(textFormat,verticalAlignment)",
+            }
+        })
+        # Alternating row banding
+        for i in range(n_scenes):
+            bg = _rgb(1.0, 1.0, 1.0) if i % 2 == 0 else _rgb(0.965, 0.965, 0.965)
+            requests.append({
+                "repeatCell": {
+                    "range": {"sheetId": sid,
+                              "startRowIndex": first_scene + i, "endRowIndex": first_scene + i + 1,
+                              "startColumnIndex": 1, "endColumnIndex": 8},
+                    "cell": {"userEnteredFormat": {"backgroundColor": bg}},
+                    "fields": "userEnteredFormat.backgroundColor",
+                }
+            })
+
+    # ── Spacer row: white ─────────────────────────────────────────────────
+    requests.append({
+        "repeatCell": {
+            "range": {"sheetId": sid,
+                      "startRowIndex": spacer_idx, "endRowIndex": spacer_idx + 1,
+                      "startColumnIndex": 1, "endColumnIndex": 8},
+            "cell": {"userEnteredFormat": {"backgroundColor": _rgb(1.0, 1.0, 1.0)}},
+            "fields": "userEnteredFormat.backgroundColor",
+        }
+    })
+
+    with_retry(lambda: ws.spreadsheet.batch_update({"requests": requests}))
 
 
 # ---------------------------------------------------------------------------
@@ -419,78 +686,83 @@ async def list_existing_comps(
     user: CurrentUser,
     studio: Optional[str] = None,
 ):
-    """List existing compilations from the Index tabs, grouped by Comp ID.
+    """List existing compilations from the v3 block-format Index tabs.
 
-    If `studio` is given (UI name or key), only that studio's tab is read.
-    Otherwise all four studio tabs are read and merged.
+    Parses by scanning col B for STUDIO-CNNNN patterns (title rows).
     """
-    from api.sheets_client import fetch_as_dicts
+    from api.sheets_client import with_retry
 
-    # Figure out which studio_keys to read
-    if studio:
-        # Accept either UI name ("FuckPassVR") or key ("FPVR")
-        keys = [STUDIO_KEY_MAP.get(studio, studio)]
-    else:
-        keys = list(STUDIO_KEY_MAP.values())
+    keys = [STUDIO_KEY_MAP.get(studio, studio)] if studio else list(STUDIO_KEY_MAP.values())
 
-    comps_by_id: dict[str, ExistingComp] = {}
+    results: list[ExistingComp] = []
 
     for key in keys:
         try:
             ws = _open_index_ws(key)
-            records = fetch_as_dicts(ws)
+            all_rows = with_retry(lambda: ws.get_all_values())
         except Exception as exc:
             _log.warning("Could not read %s Index: %s", key, exc)
             continue
 
-        for rec in records:
-            cid = str(rec.get("Comp ID", "")).strip()
-            if not cid:
-                continue
-            scene_num_raw = rec.get("Scene #", "")
-            try:
-                scene_num = int(scene_num_raw)
-            except (TypeError, ValueError):
-                continue
+        pat = re.compile(rf"^{re.escape(key)}-C\d{{4}}$")
+        current: ExistingComp | None = None
 
-            if cid not in comps_by_id:
-                comps_by_id[cid] = ExistingComp(
-                    comp_id=cid,
-                    title=str(rec.get("Comp Title", "")).strip(),
-                    volume=str(rec.get("Volume", "")).strip(),
-                    status=str(rec.get("Status", "")).strip(),
+        for row in all_rows:
+            # Pad to 8 cols so all index accesses are safe
+            r = (list(row) + [""] * 8)[:8]
+            col_b = r[1].strip()
+
+            if pat.match(col_b):
+                # Title row — flush previous comp, start new one
+                if current is not None:
+                    current.scene_count = len(current.scenes)
+                    results.append(current)
+                vol, status = _parse_vol_status(r[4].strip())
+                current = ExistingComp(
+                    comp_id=col_b,
+                    title=r[3].strip(),
+                    volume=vol,
+                    status=status,
                     studio_key=key,
-                    created=str(rec.get("Created (UTC)", "")).strip(),
-                    created_by=str(rec.get("Created By", "")).strip(),
-                    updated=str(rec.get("Updated", "")).strip(),
+                    created="",
+                    created_by="",
+                    updated="",
                     description="",
                     notes="",
                     scene_count=0,
                     scenes=[],
                 )
 
-            comp = comps_by_id[cid]
-            comp.scenes.append(CompSceneRow(
-                scene_id=str(rec.get("Scene ID", "")).strip(),
-                scene_num=scene_num,
-                title=str(rec.get("Scene Title", "")).strip(),
-                performers=str(rec.get("Performers", "")).strip(),
-                slr_link=str(rec.get("SLR Link", "")).strip(),
-                mega_link=str(rec.get("MEGA Link", "")).strip(),
-            ))
-            # Description lives on scene #1 — grab it when we see it
-            if scene_num == 1:
-                comp.description = str(rec.get("Description", "")).strip()
-                comp.notes = str(rec.get("Notes", "")).strip()
+            elif col_b == "" and current is not None:
+                # Meta row — col D starts with "Created"
+                col_d = r[3].strip()
+                if col_d.startswith("Created"):
+                    dm = re.match(r"Created (.+?) by (.+?)\s+·", col_d)
+                    if dm:
+                        current.created = dm.group(1)
+                        current.created_by = dm.group(2)
+                    if "\n" in col_d:
+                        current.description = col_d.split("\n", 1)[1].strip()
 
-    # Finalise
-    results: list[ExistingComp] = []
-    for comp in comps_by_id.values():
+            elif col_b.isdigit() and current is not None:
+                # Scene row
+                current.scenes.append(CompSceneRow(
+                    scene_id=r[2].strip(),
+                    scene_num=int(col_b),
+                    title=r[3].strip(),
+                    performers=r[4].strip(),
+                    slr_link=r[6].strip(),
+                    mega_link=r[5].strip(),
+                ))
+
+        # Flush last comp
+        if current is not None:
+            current.scene_count = len(current.scenes)
+            results.append(current)
+
+    for comp in results:
         comp.scenes.sort(key=lambda s: s.scene_num)
-        comp.scene_count = len(comp.scenes)
-        results.append(comp)
 
-    # Newest-first by Created timestamp (falls back alphabetically)
     results.sort(key=lambda c: (c.created, c.comp_id), reverse=True)
     return results
 
