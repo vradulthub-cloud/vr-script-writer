@@ -321,17 +321,17 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
 
   // TKT-0085: track whether each physical stat came from sheet or scrape
   const BIO_KEYS: [string | null, string | null, string][] = [
-    [null,             "birthday",    "Born"],
-    [null,             "birthplace",  "Birthplace"],
-    [null,             "nationality", "Nationality"],
-    [null,             "ethnicity",   "Ethnicity"],
+    ["birthday",       "birthday",    "Born"],
+    ["birthplace",     "birthplace",  "Birthplace"],
+    ["nationality",    "nationality", "Nationality"],
+    ["ethnicity",      "ethnicity",   "Ethnicity"],
     ["height",         "height",      "Height"],
     ["weight",         "weight",      "Weight"],
     ["measurements",   "measurements","Measurements"],
-    [null,             "bra/cup size","Bra / Cup"],
+    ["bra/cup size",   "bra/cup size","Bra / Cup"],
     ["hair",           "hair",        "Hair"],
     ["eyes",           "eyes",        "Eyes"],
-    [null,             "years active","Years Active"],
+    ["years active",   "years active","Years Active"],
   ]
   const physStats = BIO_KEYS.map(([bk, bk2, label]) => {
     const sheetVal = bk ? sd[bk] : ""
@@ -480,6 +480,18 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
           >
             Retry ↺
           </button>
+        </div>
+      )}
+
+      {/* TKT-0090: identity uncertain banner — scraped DOBs disagree by >1yr */}
+      {profile?.identity_uncertain && (
+        <div style={{
+          marginBottom: 12, padding: "8px 12px", borderRadius: 6,
+          background: "color-mix(in srgb, var(--color-warn) 10%, transparent)",
+          border: "1px solid color-mix(in srgb, var(--color-warn) 30%, transparent)",
+          fontSize: 11, color: "var(--color-warn)",
+        }}>
+          Identity unverified — Babepedia and VRPorn profile birthdays disagree by more than 1 year. This may be a stage-name collision. Verify manually before booking.
         </div>
       )}
 

@@ -298,6 +298,7 @@ export interface ModelProfile {
   name: string
   photo_url: string
   bio: Record<string, string>
+  identity_uncertain?: boolean
   slr_profile_url: string
   slr_scenes: ProfileScene[]
   vrp_profile_url: string

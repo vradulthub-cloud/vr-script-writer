@@ -113,6 +113,7 @@ class ProfileResponse(BaseModel):
     name: str
     photo_url: str = ""
     bio: dict[str, str] = {}
+    identity_uncertain: bool = False
     slr_profile_url: str = ""
     slr_scenes: list[SceneResult] = []
     vrp_profile_url: str = ""
@@ -358,6 +359,12 @@ async def get_model_profile(
     if babe_data.get("about"):
         bio["about"] = babe_data["about"]
 
+    # TKT-0090: cross-check birthdays; flag identity_uncertain if sources disagree by >1yr
+    identity_uncertain = _dob_mismatch(
+        vrp_data.get("bio", {}).get("birthday", ""),
+        babe_data.get("birthday", ""),
+    )
+
     # Prefer VRPorn CDN photo (no hotlink block); fall back to Babepedia
     photo_url = vrp_data.get("photo", "") or babe_data.get("photo_url", "") or ""
     slr_profile_url = slr_hint or f"https://sexlikereal.com/stars/{_slug(canonical)}"
@@ -373,6 +380,7 @@ async def get_model_profile(
         "name": canonical,
         "photo_url": photo_url,
         "bio": bio,
+        "identity_uncertain": identity_uncertain,
         "slr_profile_url": slr_profile_url,
         "slr_scenes": slr_scenes,
         "vrp_profile_url": vrp_profile_url,
@@ -935,6 +943,29 @@ def _scrape_slr_scenes(name: str, profile_url: str = "") -> list[dict]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _parse_dob(s: str) -> datetime | None:
+    """Try to parse a date string into a datetime. Returns None on failure."""
+    s = s.strip()
+    if not s:
+        return None
+    for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%d %B %Y"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _dob_mismatch(dob_a: str, dob_b: str) -> bool:
+    """Return True if both dates parse and differ by more than 365 days."""
+    if not dob_a or not dob_b:
+        return False
+    da, db = _parse_dob(dob_a), _parse_dob(dob_b)
+    if da is None or db is None:
+        return False
+    return abs((da - db).days) > 365
+
 
 def _slug(name: str) -> str:
     return name.strip().lower().replace(" ", "-")
