@@ -72,15 +72,21 @@ interface Props {
   error: string | null
   idToken: string | undefined
   userRole: string
+  /** Pre-select a status filter on mount. "open" maps to the "Active" preset. */
+  defaultStatusFilter?: string
 }
 
-export function TicketList({ tickets: initialTickets, users, error, idToken: serverIdToken, userRole }: Props) {
+export function TicketList({ tickets: initialTickets, users, error, idToken: serverIdToken, userRole, defaultStatusFilter }: Props) {
   const isAdmin = userRole.toLowerCase() === "admin"
   const idToken = useIdToken(serverIdToken)
   const client = useMemo(() => api(idToken ?? null), [idToken])
 
   const [tickets, setTickets] = useState<Ticket[]>(initialTickets)
-  const [statusFilter, setStatusFilter] = useState("Active")
+  const [statusFilter, setStatusFilter] = useState(() => {
+    if (!defaultStatusFilter) return "Active"
+    if (defaultStatusFilter === "open") return "Active"
+    return defaultStatusFilter
+  })
   const [searchQuery, setSearchQuery] = useState("")
   const [sortKey, setSortKey] = useState<SortKey>("date")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
