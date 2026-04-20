@@ -254,6 +254,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                     color: "var(--color-text)",
                   }}
                 />
+                <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 3 }}>Theme, performer type, or angle — leave blank for open-ended ideas</p>
               </div>
               {/* Ideas count slider */}
               <div>
