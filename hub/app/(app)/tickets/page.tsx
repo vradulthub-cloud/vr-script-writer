@@ -1,6 +1,7 @@
 import { auth } from "@/auth"
 import { api, cachedUsersMe, type Approval, type Ticket, type UserProfile } from "@/lib/api"
 import { requireTab } from "@/lib/rbac"
+import { isEclatechV2 } from "@/lib/eclatech-flag"
 import { PageHeader } from "@/components/ui/page-header"
 import { TicketsTabs } from "./tickets-tabs"
 
@@ -11,6 +12,7 @@ export default async function TicketsPage() {
   const idToken = (session as { idToken?: string } | null)?.idToken
   await requireTab("Tickets", idToken)
   const client = api(session)
+  const v2 = await isEclatechV2()
 
   let approvals: Approval[]        = []
   let approvalsError: string | null = null
@@ -88,6 +90,7 @@ export default async function TicketsPage() {
         users={users}
         idToken={idToken}
         userRole={userRole}
+        v2={v2}
       />
     </div>
   )
