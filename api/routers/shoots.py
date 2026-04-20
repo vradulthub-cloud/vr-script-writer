@@ -619,34 +619,46 @@ def _scene_state(
     # because the Doc is shared across all scenes on the same day.
     put("call_sheet_sent", call_sheet_status, call_sheet_validity)
 
-    # MEGA-derived states — prefer `scene_asset_state` (fresh scan) over
-    # the `scenes` booleans (fed by sparse mega_scan.json and often stale).
+    # MEGA-derived states — primary signal comes from the `scenes` booleans
+    # (fed by mega_scan.json, refreshed per hot/cold scan). The
+    # `scene_asset_state` overlay is treated as *additive* — it can confirm
+    # validation or attach validity checks, but it must never *demote* a
+    # cell below what `scenes` already says is present. A stale overlay row
+    # stuck at `not_present` would otherwise override fresh, correct data
+    # (see: every BGCP scene after 2026-04-13 showing blank despite assets
+    # existing in MEGA).
     is_solo_like = scene_type.lower() in ("solo", "joi")
     mega_cells = ("bg_edit_uploaded", "solo_uploaded", "title_done",
                   "photoset_uploaded", "storyboard_uploaded", "encoded_uploaded")
 
-    def _put_overlay(at: str, fallback: str = "not_present") -> bool:
-        """Apply scene_asset_state row for `at` if present. Returns True on hit."""
-        if not asset_overlay:
-            return False
-        row = asset_overlay.get(at)
-        if not row:
-            return False
-        raw_validity = row.get("validity") or []
+    _STATUS_RANK = {"not_present": 0, "available": 1, "stuck": 2, "validated": 3}
+
+    def _merge_overlay(at: str, fallback_status: str) -> None:
+        """
+        Resolve final status for `at` as max(fallback, overlay). Overlay
+        validity checks are always carried forward so a "validated" cell
+        can still surface warnings.
+        """
+        overlay_row = (asset_overlay or {}).get(at)
         checks: list[ValidityCheck] = []
-        for v in raw_validity:
-            if not isinstance(v, dict):
-                continue
-            try:
-                checks.append(ValidityCheck(
-                    check=str(v.get("check", "")),
-                    status=str(v.get("status", "")),
-                    message=str(v.get("message", "")),
-                ))
-            except Exception:
-                continue
-        put(at, row.get("status") or fallback, checks)
-        return True
+        overlay_status = ""
+        if overlay_row:
+            overlay_status = overlay_row.get("status") or ""
+            for v in overlay_row.get("validity") or []:
+                if not isinstance(v, dict):
+                    continue
+                try:
+                    checks.append(ValidityCheck(
+                        check=str(v.get("check", "")),
+                        status=str(v.get("status", "")),
+                        message=str(v.get("message", "")),
+                    ))
+                except Exception:
+                    continue
+        fallback_rank = _STATUS_RANK.get(fallback_status, 0)
+        overlay_rank  = _STATUS_RANK.get(overlay_status, 0)
+        final = overlay_status if overlay_rank > fallback_rank else fallback_status
+        put(at, final, checks)
 
     if scene_row is None and not asset_overlay:
         for at in mega_cells:
@@ -655,29 +667,25 @@ def _scene_state(
         has_videos = bool((scene_row or {}).get("has_videos"))
         video_count = int((scene_row or {}).get("video_count") or 0)
 
-        # bg_edit / solo — one is always not_present based on scene_type
+        # bg_edit / solo — the cell that doesn't match the scene_type stays not_present
         if is_solo_like:
-            if not _put_overlay("solo_uploaded"):
-                put("solo_uploaded", "validated" if has_videos else "not_present")
+            _merge_overlay("solo_uploaded", "validated" if has_videos else "not_present")
             put("bg_edit_uploaded", "not_present")
         else:
-            if not _put_overlay("bg_edit_uploaded"):
-                put("bg_edit_uploaded", "validated" if has_videos else "not_present")
+            _merge_overlay("bg_edit_uploaded", "validated" if has_videos else "not_present")
             put("solo_uploaded", "not_present")
 
-        if not _put_overlay("title_done"):
-            put("title_done", "validated" if (scene_row or {}).get("has_thumbnail") else "not_present")
-        if not _put_overlay("photoset_uploaded"):
-            put("photoset_uploaded", "validated" if (scene_row or {}).get("has_photos") else "not_present")
-        if not _put_overlay("storyboard_uploaded"):
-            put("storyboard_uploaded", "validated" if (scene_row or {}).get("has_storyboard") else "not_present")
-        if not _put_overlay("encoded_uploaded"):
-            put("encoded_uploaded", "not_present")
+        _merge_overlay("title_done",          "validated" if (scene_row or {}).get("has_thumbnail")  else "not_present")
+        _merge_overlay("photoset_uploaded",   "validated" if (scene_row or {}).get("has_photos")     else "not_present")
+        _merge_overlay("storyboard_uploaded", "validated" if (scene_row or {}).get("has_storyboard") else "not_present")
+        _merge_overlay("encoded_uploaded",    "not_present")
 
-        if has_videos and video_count == 0 and not asset_overlay:
-            assets["bg_edit_uploaded" if not is_solo_like else "solo_uploaded"].validity.append(
-                ValidityCheck(check="count", status="warn", message="Folder present but 0 files")
-            )
+        if has_videos and video_count == 0:
+            target = "bg_edit_uploaded" if not is_solo_like else "solo_uploaded"
+            if target in assets:
+                assets[target].validity.append(
+                    ValidityCheck(check="count", status="warn", message="Folder present but 0 files")
+                )
 
     return [assets[at] for at in ASSET_ORDER]
 
