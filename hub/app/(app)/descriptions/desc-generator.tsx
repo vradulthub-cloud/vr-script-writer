@@ -652,15 +652,19 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
 
         {!stream.output && !stream.streaming && (
           <div
-            className="rounded flex items-center justify-center"
+            className="rounded flex flex-col items-center justify-center gap-2"
             style={{
               height: 200,
               border: "1px dashed var(--color-border)",
               color: "var(--color-text-faint)",
               fontSize: 12,
+              textAlign: "center",
+              padding: "0 24px",
             }}
           >
-            Select performers and categories to generate the description.
+            <span style={{ fontSize: 18, opacity: 0.4 }}>◈</span>
+            <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>Queue is empty</span>
+            <span>Select a scene from the left panel — fill the form and Generate.</span>
           </div>
         )}
 

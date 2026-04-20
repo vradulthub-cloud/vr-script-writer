@@ -611,10 +611,12 @@ function ExistingCompsTable({ comps, loading, studio, studioColor, expanded, onT
   if (comps.length === 0) {
     return (
       <div
-        className="rounded flex items-center justify-center"
-        style={{ height: 200, border: "1px dashed var(--color-border)", color: "var(--color-text-faint)", fontSize: 12 }}
+        className="rounded flex flex-col items-center justify-center gap-2"
+        style={{ height: 200, border: "1px dashed var(--color-border)", color: "var(--color-text-faint)", fontSize: 12, textAlign: "center", padding: "0 24px" }}
       >
-        No compilations found for {studio}. Build one and save to populate the Index tab.
+        <span style={{ fontSize: 18, opacity: 0.4 }}>◈</span>
+        <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>No compilations yet for {studio}</span>
+        <span>Build a compilation above and Save — it will appear here in the Index.</span>
       </div>
     )
   }
