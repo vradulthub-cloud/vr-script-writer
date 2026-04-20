@@ -671,6 +671,30 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
 
         {(stream.output || stream.streaming) && (
           <>
+            {/* Editor metadata strip: words · paragraphs · estimated read */}
+            {stream.output && (() => {
+              const words = stream.output.split(/\s+/).filter(Boolean).length
+              const paraCount = paragraphs.length
+              // ~200 WPM is typical silent reading speed for marketing copy;
+              // matches the estimate used in the Streamlit descriptions view.
+              const mins = Math.max(1, Math.round(words / 200))
+              return (
+                <div className="flex items-center gap-3 mb-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                  <span className="tabular-nums">{words.toLocaleString()} words</span>
+                  {paraCount > 0 && !stream.streaming && (
+                    <>
+                      <span aria-hidden style={{ opacity: 0.5 }}>·</span>
+                      <span className="tabular-nums">{paraCount} paragraph{paraCount === 1 ? "" : "s"}</span>
+                    </>
+                  )}
+                  <span aria-hidden style={{ opacity: 0.5 }}>·</span>
+                  <span className="tabular-nums">~{mins} min read</span>
+                  {stream.streaming && (
+                    <span style={{ opacity: 0.5, marginLeft: 4 }}>generating...</span>
+                  )}
+                </div>
+              )
+            })()}
             {/* Description body */}
             <div
               className="rounded mb-4 px-4 py-3"

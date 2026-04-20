@@ -648,11 +648,28 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
 
         {(stream.output || stream.streaming) && (
           <>
-            {/* Word count + copy button */}
+            {/* Editor metadata strip: words · beats · estimated read · copy */}
             <div className="flex items-center gap-3 mb-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-              {stream.output && (
-                <span className="tabular-nums">{stream.output.split(/\s+/).filter(Boolean).length} words</span>
-              )}
+              {stream.output && (() => {
+                const words = stream.output.split(/\s+/).filter(Boolean).length
+                const beats = Object.keys(sections).length
+                // ~150 words per spoken minute is a reasonable midpoint for
+                // dialog-driven scripts — matches Streamlit app's read estimate.
+                const mins = Math.max(1, Math.round(words / 150))
+                return (
+                  <>
+                    <span className="tabular-nums">{words.toLocaleString()} words</span>
+                    {beats > 0 && (
+                      <>
+                        <span aria-hidden style={{ opacity: 0.5 }}>·</span>
+                        <span className="tabular-nums">{beats} beat{beats === 1 ? "" : "s"}</span>
+                      </>
+                    )}
+                    <span aria-hidden style={{ opacity: 0.5 }}>·</span>
+                    <span className="tabular-nums">~{mins} min read</span>
+                  </>
+                )
+              })()}
               {stream.streaming && (
                 <span style={{ opacity: 0.5 }}>generating...</span>
               )}
