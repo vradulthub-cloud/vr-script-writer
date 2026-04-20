@@ -40,26 +40,26 @@ export function ResearchV2View({ models }: { models: Model[] }) {
       />
 
       {/* KPI stat cluster */}
-      <div className="ec-stat-cluster" style={{ marginBottom: 14 }}>
-        <div className="ec-stat">
-          <div className="l">ROSTER</div>
+      <div className="ec-stats">
+        <div className="s">
+          <div className="k">ROSTER</div>
           <div className="v">{rollup.total.toLocaleString()}</div>
-          <div className="s">tracked models</div>
+          <div className="d">tracked models</div>
         </div>
-        <div className="ec-stat">
-          <div className="l">GREAT</div>
-          <div className="v" data-ok>{rollup.great.toLocaleString()}</div>
-          <div className="s">top-rank models</div>
+        <div className="s">
+          <div className="k">GREAT</div>
+          <div className="v" style={{ color: "var(--color-ok)" }}>{rollup.great.toLocaleString()}</div>
+          <div className="d">top-rank models</div>
         </div>
-        <div className="ec-stat">
-          <div className="l">AVAILABLE</div>
+        <div className="s">
+          <div className="k">AVAILABLE</div>
           <div className="v">{rollup.available.toLocaleString()}</div>
-          <div className="s">per agency notes</div>
+          <div className="d">per agency notes</div>
         </div>
-        <div className="ec-stat">
-          <div className="l">AVG SCORE</div>
+        <div className="s">
+          <div className="k">AVG SCORE</div>
           <div className="v">{rollup.avgScore}</div>
-          <div className="s">opportunity index</div>
+          <div className="d">opportunity index</div>
         </div>
       </div>
     </div>
