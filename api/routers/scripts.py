@@ -304,14 +304,6 @@ async def validate_script(body: ValidateBody, user: CurrentUser):
 # Script title generation
 # ---------------------------------------------------------------------------
 
-_SCRIPT_TITLE_SYSTEMS = {
-    "VRHush": "You are a creative title writer for VRHush. Generate exactly ONE scene title: 2-3 words only, clever wordplay/innuendo, no performer names. Respond with ONLY the title.",
-    "FuckPassVR": "You are a creative title writer for FuckPassVR. Generate exactly ONE scene title: 2-5 words, travel themes when applicable, clever wordplay. Respond with ONLY the title.",
-    "VRAllure": "You are a creative title writer for VRAllure. Generate exactly ONE scene title: 2-3 words only, sensual/intimate tone, no performer names. Respond with ONLY the title.",
-    "NaughtyJOI": "You are a creative title writer for NaughtyJOI. Generate a PAIRED title using the performer's first name: '[Name] [soft action]' / '[Name] then [intense action]'. Respond with ONLY the two titles separated by a newline.",
-}
-
-
 class TitleGenBody(BaseModel):
     studio: str
     female: str = ""
@@ -321,15 +313,10 @@ class TitleGenBody(BaseModel):
 
 @router.post("/title-generate")
 async def generate_script_title(body: TitleGenBody, user: CurrentUser):
-    """Generate an AI title for a script using Claude."""
-    settings = get_settings()
-    sys_prompt = _SCRIPT_TITLE_SYSTEMS.get(body.studio, _SCRIPT_TITLE_SYSTEMS["VRHush"])
-    user_prompt = f"Generate a title:\n\nPerformer: {body.female}\nTheme: {body.theme}\nPlot: {body.plot[:500] if body.plot else 'N/A'}"
-
+    """Generate an AI title for a script (Claude with Ollama fallback)."""
     try:
-        from api.ollama_client import ollama_generate
-        title = ollama_generate("title", user_prompt, system=sys_prompt, max_tokens=60, temperature=0.7)
-        title = title.split("\n")[0].strip().strip('"').strip("'")
+        from api.prompts import generate_title_with_fallback
+        title = generate_title_with_fallback(body.studio, body.female, body.theme, body.plot)
         return {"title": title}
     except RuntimeError as exc:
         _log.error("Script title generation failed: %s", exc)
