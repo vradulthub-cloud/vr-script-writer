@@ -243,13 +243,36 @@ function SceneCard({ scene }: { scene: ModelProfile["slr_scenes"][0] }) {
 
 // ─── Profile view ─────────────────────────────────────────────────────────────
 
-function ProfileView({ model, profile, loading, profileError, onBack, onRefresh, onBrief, briefText, briefLoading }: {
+// ─── Sanity-flag scraped physical stats ──────────────────────────────────────
+
+function isSuspiciousStat(label: string, value: string): boolean {
+  if (label === "Height") {
+    const ftIn = value.match(/(\d+)['′]\s*(\d+)/)
+    const cm   = value.match(/(\d+)\s*cm/i)
+    let totalIn = 0
+    if (ftIn) totalIn = parseInt(ftIn[1]) * 12 + parseInt(ftIn[2])
+    else if (cm) totalIn = Math.round(parseInt(cm[1]) / 2.54)
+    return totalIn > 0 && (totalIn < 57 || totalIn > 73) // <4′9″ or >6′1″
+  }
+  if (label === "Weight") {
+    const lbs = value.match(/(\d+)\s*(lb|lbs|pound)/i)
+    const kg  = value.match(/(\d+)\s*kg/i)
+    let w = 0
+    if (lbs) w = parseInt(lbs[1])
+    else if (kg) w = Math.round(parseInt(kg[1]) * 2.205)
+    return w > 0 && (w < 88 || w > 180)
+  }
+  return false
+}
+
+function ProfileView({ model, profile, loading, profileError, onBack, onRefresh, onClearCache, onBrief, briefText, briefLoading }: {
   model: Model
   profile: ModelProfile | null
   loading: boolean
   profileError: string | null
   onBack: () => void
   onRefresh: () => void
+  onClearCache: () => void
   onBrief: (ctx: Record<string, string>) => void
   briefText: string
   briefLoading: boolean
@@ -263,10 +286,14 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
 
   const rankColor = RANK_COLOR[(model.rank || "").toLowerCase()] || "var(--color-text-faint)"
 
-  // Stats table rows
+  // Stats table rows — TKT-0086: clarify sheet vs scripts-table counts
+  const sheetCount = parseInt(model.bookings_count || "0") || 0
+  const scriptsCount = bh?.total ?? 0
+  const countMismatch = sheetCount > 0 && scriptsCount > 0 && sheetCount !== scriptsCount
+
   const bookingStats = [
     sd["avg rate"] && ["💰 Rate", sd["avg rate"]],
-    model.bookings_count && ["📋 Bookings", model.bookings_count],
+    model.bookings_count && ["📋 Bookings (sheet)", model.bookings_count],
     model.last_booked && ["📅 Last Booked", model.last_booked],
     model.location && ["📍 Location", model.location],
     sd["status"] && ["✅ Status", sd["status"]],
@@ -287,6 +314,7 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
     sd["instagram"] && ["📸 Instagram", sd["instagram"]],
   ].filter(Boolean) as [string, string][]
 
+  // TKT-0085: track whether each physical stat came from sheet or scrape
   const BIO_KEYS: [string | null, string | null, string][] = [
     [null,             "birthday",    "Born"],
     [null,             "birthplace",  "Birthplace"],
@@ -301,9 +329,13 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
     [null,             "years active","Years Active"],
   ]
   const physStats = BIO_KEYS.map(([bk, bk2, label]) => {
-    const val = (bk ? sd[bk] : "") || (bk2 ? bio[bk2] : "")
-    return val ? [label, val] as [string, string] : null
-  }).filter(Boolean) as [string, string][]
+    const sheetVal = bk ? sd[bk] : ""
+    const bioVal   = bk2 ? bio[bk2] : ""
+    const val      = sheetVal || bioVal
+    if (!val) return null
+    const source: "sheet" | "scraped" = sheetVal ? "sheet" : "scraped"
+    return [label, val, source] as [string, string, "sheet" | "scraped"]
+  }).filter(Boolean) as [string, string, "sheet" | "scraped"][]
 
   // Competitor activity
   const ourStudios = new Set(["fuckpassvr","vrhush","vrallure","blowjobnow","fpvr","vr hush","njoi","naughty joi"])
@@ -318,7 +350,11 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
   }
   Object.values(seenStud).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8).forEach(c => competitors.push(c))
 
-  function StatTable({ rows, title }: { rows: [string, string][]; title?: string }) {
+  function StatTable({ rows, title, showSource }: {
+    rows: [string, string, ("sheet" | "scraped")?][]
+    title?: string
+    showSource?: boolean
+  }) {
     if (!rows.length) return null
     return (
       <>
@@ -331,16 +367,33 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
         )}
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
           <tbody>
-            {rows.map(([label, value]) => (
-              <tr key={label}>
-                <td style={{ fontSize: 11, color: "var(--color-text-faint)", padding: "3px 10px 3px 0", whiteSpace: "nowrap" }}>
-                  {label}
-                </td>
-                <td style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text)" }}>
-                  {value}
-                </td>
-              </tr>
-            ))}
+            {rows.map(([label, value, source]) => {
+              const suspicious = showSource && isSuspiciousStat(label, value)
+              return (
+                <tr key={label}>
+                  <td style={{ fontSize: 11, color: "var(--color-text-faint)", padding: "3px 10px 3px 0", whiteSpace: "nowrap" }}>
+                    {label}
+                  </td>
+                  <td style={{ fontSize: 12, fontWeight: 600, color: suspicious ? "var(--color-warn)" : "var(--color-text)" }}>
+                    {suspicious ? "⚠ " : ""}{value}
+                    {showSource && source && (
+                      <span style={{
+                        marginLeft: 5, fontSize: 9, fontWeight: 500,
+                        color: source === "sheet" ? "var(--color-ok)" : "var(--color-text-faint)",
+                        background: source === "sheet"
+                          ? "color-mix(in srgb, var(--color-ok) 12%, transparent)"
+                          : "var(--color-elevated)",
+                        border: `1px solid ${source === "sheet" ? "color-mix(in srgb, var(--color-ok) 20%, transparent)" : "var(--color-border-subtle)"}`,
+                        borderRadius: 3, padding: "1px 4px",
+                        verticalAlign: "middle",
+                      }}>
+                        {source === "sheet" ? "sheet" : "scraped"}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </>
@@ -368,7 +421,7 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
 
   return (
     <div>
-      {/* ── Back + Refresh ───────────────────────────────────────────────────── */}
+      {/* ── Back + Refresh + Wrong person ────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <button
           onClick={onBack}
@@ -377,14 +430,26 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
         >
           ← Back to list
         </button>
-        <button
-          onClick={onRefresh}
-          disabled={loading}
-          style={{ fontSize: 11, color: loading ? "var(--color-text-faint)" : "var(--color-text-muted)",
-                   background: "none", border: "none", cursor: loading ? "default" : "pointer", padding: 0 }}
-        >
-          {loading ? "Refreshing…" : "🔄 Refresh"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {/* TKT-0088: clear scraped profile cache when wrong person is matched */}
+          <button
+            onClick={onClearCache}
+            disabled={loading}
+            title="Bust the 7-day profile cache — useful when a wrong performer was matched"
+            style={{ fontSize: 11, color: "var(--color-err)", background: "none", border: "none",
+                     cursor: loading ? "default" : "pointer", padding: 0, opacity: 0.7 }}
+          >
+            Wrong person?
+          </button>
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            style={{ fontSize: 11, color: loading ? "var(--color-text-faint)" : "var(--color-text-muted)",
+                     background: "none", border: "none", cursor: loading ? "default" : "pointer", padding: 0 }}
+          >
+            {loading ? "Refreshing…" : "🔄 Refresh"}
+          </button>
+        </div>
       </div>
 
       {/* ── Profile load error ──────────────────────────────────────────────── */}
@@ -629,6 +694,18 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
           {platformStats.length > 0 && <StatTable rows={platformStats} title="Platform" />}
           {socialStats.length > 0 && <StatTable rows={socialStats} title="Social" />}
 
+          {/* TKT-0086: warn on count mismatch between sheet and scripts table */}
+          {countMismatch && (
+            <div style={{
+              marginTop: 8, padding: "5px 9px", borderRadius: 4,
+              background: "color-mix(in srgb, var(--color-warn) 8%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--color-warn) 20%, transparent)",
+              fontSize: 10, color: "var(--color-warn)",
+            }}>
+              Sheet says {sheetCount}× booked · scripts table has {scriptsCount}× — one may be out of date
+            </div>
+          )}
+
           {physStats.length > 0 && (
             <>
               <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
@@ -636,7 +713,7 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
                             marginTop: 12, marginBottom: 3 }}>
                 Physical Stats
               </div>
-              <StatTable rows={physStats} />
+              <StatTable rows={physStats} showSource />
             </>
           )}
 
@@ -850,6 +927,16 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
     return map
   }, [trending])
 
+  const handleClearCache = useCallback(async () => {
+    if (!currentModel) return
+    try {
+      await client.models.clearCache(currentModel.name)
+    } catch {
+      // Non-critical — proceed to refresh anyway
+    }
+    openProfile(currentModel.name, true)
+  }, [currentModel, client, openProfile])
+
   // ── Profile view ───────────────────────────────────────────────────────────
   if (currentModel) {
     return (
@@ -860,6 +947,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
         profileError={profileError}
         onBack={() => { setCurrentModel(null); setProfile(null); setProfileError(null) }}
         onRefresh={() => openProfile(currentModel.name, true)}
+        onClearCache={handleClearCache}
         onBrief={handleBrief}
         briefText={briefText}
         briefLoading={briefLoading}

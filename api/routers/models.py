@@ -439,6 +439,18 @@ async def get_model(name: str, user: CurrentUser):
     return _row_to_model(dict(row))
 
 
+@router.delete("/{name}/profile-cache")
+async def delete_profile_cache(name: str, user: CurrentUser):
+    """Bust the 7-day scraped profile cache for a performer (wrong person fix)."""
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM model_profiles WHERE LOWER(name) = LOWER(?) AND name != '_trending_cache'",
+            (name,),
+        )
+    _log.info("Profile cache cleared for %r by %s", name, getattr(user, "email", "?"))
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # Booking history helper
 # ---------------------------------------------------------------------------
