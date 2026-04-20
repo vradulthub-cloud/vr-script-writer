@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useCallback, useRef } from "react"
+import React, { useState, useMemo, useCallback, useRef } from "react"
 import { api, ApiError, API_BASE_URL, type Model, type ModelProfile, type TrendingModel } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { PageHeader } from "@/components/ui/page-header"
@@ -243,7 +243,7 @@ function SceneCard({ scene }: { scene: ModelProfile["slr_scenes"][0] }) {
 
 // ─── Profile view ─────────────────────────────────────────────────────────────
 
-function ProfileView({ model, profile, loading, profileError, onBack, onRefresh, onBrief, briefText, briefLoading }: {
+function ProfileView({ model, profile, loading, profileError, onBack, onRefresh, onBrief, briefText, briefLoading, onInvalidateCache }: {
   model: Model
   profile: ModelProfile | null
   loading: boolean
@@ -253,9 +253,12 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
   onBrief: (ctx: Record<string, string>) => void
   briefText: string
   briefLoading: boolean
+  onInvalidateCache: () => Promise<unknown>
 }) {
   const [briefOpen, setBriefOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<"slr" | "vrp">("slr")
+  const [cacheClearing, setCacheClearing] = useState(false)
+  const [cacheClearedMsg, setCacheClearedMsg] = useState("")
 
   const sd = model.sheet_data
   const bio = profile?.bio ?? {}
@@ -264,15 +267,22 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
   const rankColor = RANK_COLOR[(model.rank || "").toLowerCase()] || "var(--color-text-faint)"
 
   // Stats table rows
-  const bookingStats = [
-    sd["avg rate"] && ["💰 Rate", sd["avg rate"]],
-    model.bookings_count && ["📋 Bookings", model.bookings_count],
-    model.last_booked && ["📅 Last Booked", model.last_booked],
-    model.location && ["📍 Location", model.location],
-    sd["status"] && ["✅ Status", sd["status"]],
-  ].filter(Boolean) as [string, string][]
+  // Show bookings mismatch hint when sheet count and scripts count diverge by > 2
+  const sheetBookingsNum = parseInt(model.bookings_count || "0", 10)
+  const bookingsMismatch = model.scripts_count > 0 && Math.abs(sheetBookingsNum - model.scripts_count) > 2
 
-  const platformStats = [
+  const bookingStats: [string, string | React.ReactNode][] = [
+    sd["avg rate"] ? ["💰 Rate", sd["avg rate"]] : null,
+    model.bookings_count ? ["📋 Sheet Bookings", model.bookings_count] : null,
+    model.scripts_count > 0 ? ["📝 Scripts Written", bookingsMismatch
+      ? <span>{model.scripts_count} <span style={{ fontSize: 10, color: "var(--color-warn)" }} title="Differs from sheet count">⚠ differs from sheet</span></span>
+      : String(model.scripts_count)] : null,
+    model.last_booked ? ["📅 Last Booked", model.last_booked] : null,
+    model.location ? ["📍 Location", model.location] : null,
+    sd["status"] ? ["✅ Status", sd["status"]] : null,
+  ].filter(Boolean) as [string, string | React.ReactNode][]
+
+  const platformStats: [string, string][] = [
     sd["slr followers"] && ["👥 SLR Followers", sd["slr followers"]],
     sd["slr scenes"]    && ["🎬 SLR Scenes",    sd["slr scenes"]],
     sd["slr views"]     && ["👁 SLR Views",      sd["slr views"]],
@@ -281,7 +291,7 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
     sd["povr views"]    && ["👁 POVR Views",      sd["povr views"]],
   ].filter(Boolean) as [string, string][]
 
-  const socialStats = [
+  const socialStats: [string, string][] = [
     sd["onlyfans"]  && ["🔞 OnlyFans",  sd["onlyfans"]],
     sd["twitter"]   && ["𝕏 Twitter",    sd["twitter"]],
     sd["instagram"] && ["📸 Instagram", sd["instagram"]],
@@ -300,10 +310,38 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
     ["eyes",           "eyes",        "Eyes"],
     [null,             "years active","Years Active"],
   ]
-  const physStats = BIO_KEYS.map(([bk, bk2, label]) => {
+
+  // Sanity ranges for scraped physical stats — flag values outside realistic bounds
+  function _sanityFlag(label: string, val: string): React.ReactNode | null {
+    const num = parseFloat(val.replace(/[^0-9.]/g, ""))
+    if (isNaN(num)) return null
+    const ranges: Record<string, [number, number]> = {
+      "Height": [145, 193],    // cm
+      "Weight": [38, 95],      // kg
+    }
+    const [lo, hi] = ranges[label] ?? [null, null] as unknown as [number, number]
+    if (lo !== null && (num < lo || num > hi)) {
+      return <span style={{ fontSize: 10, color: "var(--color-warn)", marginLeft: 4 }} title={`Expected ${lo}–${hi}`}>⚠</span>
+    }
+    // Measurements: e.g. "34-24-36" — flag bust >44 or waist <16 or >34
+    if (label === "Measurements") {
+      const parts = val.split("-").map(p => parseInt(p, 10))
+      if (parts.length === 3) {
+        const [bust, waist, hip] = parts
+        if (bust > 44 || waist < 16 || waist > 36 || hip < 28 || hip > 50) {
+          return <span style={{ fontSize: 10, color: "var(--color-warn)", marginLeft: 4 }} title="Value outside expected range">⚠</span>
+        }
+      }
+    }
+    return null
+  }
+
+  const physStats: [string, React.ReactNode][] = BIO_KEYS.map(([bk, bk2, label]) => {
     const val = (bk ? sd[bk] : "") || (bk2 ? bio[bk2] : "")
-    return val ? [label, val] as [string, string] : null
-  }).filter(Boolean) as [string, string][]
+    if (!val) return null
+    const flag = _sanityFlag(label, val)
+    return [label, flag ? <span>{val}{flag}</span> : val] as [string, React.ReactNode]
+  }).filter(Boolean) as [string, React.ReactNode][]
 
   // Competitor activity
   const ourStudios = new Set(["fuckpassvr","vrhush","vrallure","blowjobnow","fpvr","vr hush","njoi","naughty joi"])
@@ -318,21 +356,38 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
   }
   Object.values(seenStud).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8).forEach(c => competitors.push(c))
 
-  function StatTable({ rows, title }: { rows: [string, string][]; title?: string }) {
+  function StatTable({ rows, title, source }: { rows: [string, string | React.ReactNode][]; title?: string; source?: "SHEET" | "SCRAPED" }) {
     if (!rows.length) return null
     return (
       <>
         {title && (
-          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
-                        textTransform: "uppercase", color: "var(--color-text-faint)",
+          <div style={{ display: "flex", alignItems: "center", gap: 6,
                         marginTop: 10, marginBottom: 3 }}>
-            {title}
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
+                           textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+              {title}
+            </span>
+            {source && (
+              <span style={{
+                fontSize: 8, fontWeight: 700, letterSpacing: "0.06em",
+                textTransform: "uppercase", padding: "1px 5px", borderRadius: 3,
+                color: source === "SHEET" ? "var(--color-ok)" : "var(--color-text-faint)",
+                background: source === "SHEET"
+                  ? "color-mix(in srgb, var(--color-ok) 12%, transparent)"
+                  : "var(--color-elevated)",
+                border: `1px solid ${source === "SHEET"
+                  ? "color-mix(in srgb, var(--color-ok) 25%, transparent)"
+                  : "var(--color-border-subtle)"}`,
+              }}>
+                {source === "SHEET" ? "Sheet" : "Scraped"}
+              </span>
+            )}
           </div>
         )}
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
           <tbody>
             {rows.map(([label, value]) => (
-              <tr key={label}>
+              <tr key={label as string}>
                 <td style={{ fontSize: 11, color: "var(--color-text-faint)", padding: "3px 10px 3px 0", whiteSpace: "nowrap" }}>
                   {label}
                 </td>
@@ -368,7 +423,7 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
 
   return (
     <div>
-      {/* ── Back + Refresh ───────────────────────────────────────────────────── */}
+      {/* ── Back + Refresh + Wrong person ──────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <button
           onClick={onBack}
@@ -377,14 +432,40 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
         >
           ← Back to list
         </button>
-        <button
-          onClick={onRefresh}
-          disabled={loading}
-          style={{ fontSize: 11, color: loading ? "var(--color-text-faint)" : "var(--color-text-muted)",
-                   background: "none", border: "none", cursor: loading ? "default" : "pointer", padding: 0 }}
-        >
-          {loading ? "Refreshing…" : "🔄 Refresh"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {cacheClearedMsg ? (
+            <span style={{ fontSize: 11, color: "var(--color-ok)" }}>{cacheClearedMsg}</span>
+          ) : (
+            <button
+              onClick={async () => {
+                setCacheClearing(true)
+                try {
+                  await onInvalidateCache()
+                  setCacheClearedMsg("Cache cleared — refreshing…")
+                  setTimeout(() => { onRefresh(); setCacheClearedMsg("") }, 800)
+                } catch {
+                  setCacheClearedMsg("Clear failed")
+                  setTimeout(() => setCacheClearedMsg(""), 3000)
+                } finally {
+                  setCacheClearing(false)
+                }
+              }}
+              disabled={cacheClearing}
+              style={{ fontSize: 11, color: "var(--color-text-faint)", background: "none", border: "none",
+                       cursor: cacheClearing ? "default" : "pointer", padding: 0, opacity: 0.7 }}
+            >
+              {cacheClearing ? "Clearing…" : "✕ Wrong person?"}
+            </button>
+          )}
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            style={{ fontSize: 11, color: loading ? "var(--color-text-faint)" : "var(--color-text-muted)",
+                     background: "none", border: "none", cursor: loading ? "default" : "pointer", padding: 0 }}
+          >
+            {loading ? "Refreshing…" : "🔄 Refresh"}
+          </button>
+        </div>
       </div>
 
       {/* ── Profile load error ──────────────────────────────────────────────── */}
@@ -625,20 +706,10 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
 
         {/* ── Left: stats + bio ──────────────────────────────────────────────── */}
         <div>
-          <StatTable rows={bookingStats} />
-          {platformStats.length > 0 && <StatTable rows={platformStats} title="Platform" />}
-          {socialStats.length > 0 && <StatTable rows={socialStats} title="Social" />}
-
-          {physStats.length > 0 && (
-            <>
-              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
-                            textTransform: "uppercase", color: "var(--color-text-faint)",
-                            marginTop: 12, marginBottom: 3 }}>
-                Physical Stats
-              </div>
-              <StatTable rows={physStats} />
-            </>
-          )}
+          <StatTable rows={bookingStats} title="Booking" source="SHEET" />
+          {platformStats.length > 0 && <StatTable rows={platformStats} title="Platform" source="SHEET" />}
+          {socialStats.length > 0 && <StatTable rows={socialStats} title="Social" source="SHEET" />}
+          {physStats.length > 0 && <StatTable rows={physStats} title="Physical Stats" source="SCRAPED" />}
 
           {bio["about"] && (
             <p style={{
@@ -783,7 +854,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
   const openProfile = useCallback(async (name: string, refresh = false) => {
     const m = models.find(mo => mo.name.toLowerCase() === name.toLowerCase())
       ?? { name, agency: "", agency_link: "", rate: "", rank: "", notes: "",
-           info: "", age: "", last_booked: "", bookings_count: "", location: "",
+           info: "", age: "", last_booked: "", bookings_count: "", scripts_count: 0, location: "",
            opportunity_score: 0, sheet_data: {} }
 
     setCurrentModel(m)
@@ -863,6 +934,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
         onBrief={handleBrief}
         briefText={briefText}
         briefLoading={briefLoading}
+        onInvalidateCache={() => client.models.invalidateCache(currentModel.name)}
       />
     )
   }

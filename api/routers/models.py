@@ -83,7 +83,8 @@ class ModelResponse(BaseModel):
     info: str
     age: str
     last_booked: str
-    bookings_count: str
+    bookings_count: str    # from booking sheet "Bookings:" field
+    scripts_count: int = 0 # from local scripts DB (may differ from sheet)
     location: str
     opportunity_score: int
     # All sheet columns passed through (platform stats, social, SLR/VRP profile URLs)
@@ -437,6 +438,18 @@ async def get_model(name: str, user: CurrentUser):
     if not row:
         raise HTTPException(status_code=404, detail=f"Model '{name}' not found")
     return _row_to_model(dict(row))
+
+
+@router.post("/{name}/invalidate-cache")
+async def invalidate_profile_cache(name: str, user: CurrentUser):
+    """
+    Delete the cached profile for a performer so the next profile load
+    re-scrapes from SLR/Babepedia. Used when the wrong person was matched.
+    """
+    with get_db() as conn:
+        conn.execute("DELETE FROM model_profiles WHERE LOWER(name) = LOWER(?)", (name,))
+    _log.info("Profile cache cleared for %r by %s", name, user.email)
+    return {"ok": True, "name": name}
 
 
 # ---------------------------------------------------------------------------
@@ -990,6 +1003,7 @@ def _row_to_model(row: dict) -> ModelResponse:
     info = row.get("info", "") or ""
     parsed = _parse_info(info)
     rank = row.get("rank", "") or ""
+    name = row.get("name", "")
 
     try:
         sheet_data = json.loads(row.get("raw_json") or "{}")
@@ -1000,8 +1014,14 @@ def _row_to_model(row: dict) -> ModelResponse:
 
     score = _opportunity_score(rank, parsed["last_booked"], sheet_data)
 
+    with get_db() as conn:
+        scripts_row = conn.execute(
+            "SELECT COUNT(*) FROM scripts WHERE female LIKE ?", (f"%{name}%",)
+        ).fetchone()
+    scripts_count = scripts_row[0] if scripts_row else 0
+
     return ModelResponse(
-        name=row.get("name", ""),
+        name=name,
         agency=row.get("agency", ""),
         agency_link=row.get("agency_link", ""),
         rate=row.get("rate", ""),
@@ -1011,6 +1031,7 @@ def _row_to_model(row: dict) -> ModelResponse:
         age=parsed["age"],
         last_booked=parsed["last_booked"],
         bookings_count=parsed["bookings_count"],
+        scripts_count=scripts_count,
         location=parsed["location"],
         opportunity_score=score,
         sheet_data=sheet_data,

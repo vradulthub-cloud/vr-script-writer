@@ -238,6 +238,7 @@ export interface Model {
   age: string
   last_booked: string
   bookings_count: string
+  scripts_count: number   // count of script rows that include this performer
   location: string
   opportunity_score: number  // 0–100
   sheet_data: Record<string, string>  // all booking sheet columns
@@ -624,6 +625,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       },
       brief: (name: string, context: Record<string, string>) =>
         post<{ brief: string }>(`/models/${encodeURIComponent(name)}/brief`, { context }),
+      invalidateCache: (name: string) =>
+        post<{ ok: boolean; name: string }>(`/models/${encodeURIComponent(name)}/invalidate-cache`, {}),
     },
 
     approvals: {
