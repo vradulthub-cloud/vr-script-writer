@@ -503,12 +503,14 @@ function SeeAll({ href, label }: { href: string; label: string }) {
     <Link
       href={href}
       style={{
-        display: "block",
-        padding: "7px 14px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: 44,
+        padding: "0 14px",
         fontSize: 11,
         color: "var(--color-text-muted)",
         textDecoration: "none",
-        textAlign: "center",
       }}
       className="hover:bg-[--color-elevated]"
     >
