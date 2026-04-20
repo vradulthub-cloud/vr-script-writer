@@ -125,12 +125,16 @@ function ModelCard({ name, photoSrc, statLine, score, onView }: {
         <Photo src={photoSrc} fallbackSrc={modelPhotoUrl(name)} name={name} width="100%" height={180} radius={0} objectPos="50% 15%" />
 
         {score !== undefined && (
-          <div style={{
-            position: "absolute", top: 6, right: 6,
-            background: scoreColor(score), color: "#000",
-            borderRadius: 10, padding: "2px 7px",
-            fontSize: 10, fontWeight: 700, lineHeight: "16px",
-          }}>
+          <div
+            title={`Opportunity score: ${score}/100 — composite of booking recency, scene count, and agency tier`}
+            style={{
+              position: "absolute", top: 6, right: 6,
+              background: scoreColor(score), color: "#000",
+              borderRadius: 10, padding: "2px 7px",
+              fontSize: 10, fontWeight: 700, lineHeight: "16px",
+              cursor: "help",
+            }}
+          >
             {score}
           </div>
         )}
@@ -826,14 +830,15 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
   const [trending, setTrending]           = useState<TrendingModel[] | null>(null)
   const [trendingLoading, setTrendingLoading] = useState(false)
   const [trendingLoaded, setTrendingLoaded] = useState(false)
+  const [trendingCount, setTrendingCount] = useState(10)
   const [briefText, setBriefText]         = useState("")
   const [briefLoading, setBriefLoading]   = useState(false)
 
   // Load trending on first render
-  const loadTrending = useCallback(async (refresh = false) => {
+  const loadTrending = useCallback(async (refresh = false, count = trendingCount) => {
     setTrendingLoading(true)
     try {
-      const data = await client.models.trending(10, refresh)
+      const data = await client.models.trending(count, refresh)
       setTrending(data)
     } catch {
       setTrending([])
@@ -841,7 +846,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
       setTrendingLoading(false)
       setTrendingLoaded(true)
     }
-  }, [client])
+  }, [client, trendingCount])
 
   // Lazy-load trending when default view first renders
   const hasFetchedTrending = useRef(false)
@@ -973,7 +978,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
             <button
               type="submit"
               style={{
-                padding: "7px 16px", borderRadius: 4, fontSize: 13, fontWeight: 600,
+                padding: "7px 14px", borderRadius: 4, fontSize: 12, fontWeight: 600,
                 background: "var(--color-lime)", color: "#000", border: "none", cursor: "pointer",
               }}
             >
@@ -1016,18 +1021,36 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
       )}
 
       {trending && trending.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-6">
-          {trending.slice(0, 10).map(t => (
-            <ModelCard
-              key={t.name}
-              name={t.name}
-              photoSrc={t.photo_url}
-              statLine={[t.platform, t.scenes ? `${t.scenes} scenes` : "", t.followers].filter(Boolean).join(" · ")}
-              score={scoreFor(t.name)}
-              onView={() => openProfile(t.name)}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-2">
+            {trending.map(t => (
+              <ModelCard
+                key={t.name}
+                name={t.name}
+                photoSrc={t.photo_url}
+                statLine={[t.platform, t.scenes ? `${t.scenes} scenes` : "", t.followers].filter(Boolean).join(" · ")}
+                score={scoreFor(t.name)}
+                onView={() => openProfile(t.name)}
+              />
+            ))}
+          </div>
+          {trending.length >= trendingCount && (
+            <button
+              onClick={() => {
+                const next = trendingCount + 10
+                setTrendingCount(next)
+                void loadTrending(false, next)
+              }}
+              disabled={trendingLoading}
+              style={{
+                fontSize: 11, color: "var(--color-text-muted)", background: "none", border: "none",
+                cursor: trendingLoading ? "default" : "pointer", marginBottom: 16, padding: "4px 0",
+              }}
+            >
+              {trendingLoading ? "Loading…" : `Show more ↓`}
+            </button>
+          )}
+        </>
       )}
 
       {trendingLoaded && (!trending || trending.length === 0) && (
