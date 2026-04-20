@@ -573,9 +573,9 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
               style={{
                 padding: "5px 10px",
                 fontSize: 11,
-                background: "var(--color-base)",
-                color: "var(--color-text-muted)",
-                border: "1px solid var(--color-border)",
+                background: "color-mix(in srgb, var(--color-warn) 10%, transparent)",
+                color: "var(--color-warn)",
+                border: "1px solid color-mix(in srgb, var(--color-warn) 30%, transparent)",
                 opacity: folderCreating ? 0.5 : 1,
                 alignSelf: "flex-start",
               }}

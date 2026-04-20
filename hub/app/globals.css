@@ -19,6 +19,9 @@
   /* Primary action — lime green, use sparingly */
   --color-lime:      #bed62f;
   --color-lime-dim:  #8fa820;
+  /* Semantic aliases — separate intent from raw color */
+  --color-cta:        var(--color-lime);   /* write-action buttons: Generate, Approve, Submit */
+  --color-nav-active: var(--color-lime);   /* sidebar active-item icon tint */
 
   /* Studio identity */
   --color-fpvr:  #3b82f6;

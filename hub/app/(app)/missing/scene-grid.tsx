@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useDeferredValue, useEffect, memo } from "react"
 import { flushSync } from "react-dom"
 import { useSearchParams } from "next/navigation"
+import { RefreshCw, LayoutGrid, LayoutList } from "lucide-react"
 import { FilterTabs } from "@/components/ui/filter-tabs"
 import { PageHeader } from "@/components/ui/page-header"
 import { RetryError } from "@/components/ui/retry-error"
@@ -71,6 +72,8 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
   const [search, setSearch] = useState("")
   const [megaRefreshing, setMegaRefreshing] = useState(false)
   const [megaMsg, setMegaMsg] = useState<string | null>(null)
+  const [megaLastRefreshed, setMegaLastRefreshed] = useState<Date | null>(null)
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null)
   const [error, setError] = useState(initialError)
   const [perStudio, setPerStudio] = useState<PerStudio>(5)
@@ -175,6 +178,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
       })
       const data = await res.json()
       setMegaMsg(res.ok ? "Scan requested — results will sync in ~5 min" : (data.detail ?? "Request failed"))
+      if (res.ok) setMegaLastRefreshed(new Date())
     } catch {
       setMegaMsg("Could not reach API")
     } finally {
@@ -269,23 +273,54 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
               </select>
               {loadingMore && <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>loading…</span>}
             </label>
+            {/* View toggle */}
+            <div style={{ display: "flex", border: "1px solid var(--color-border)", borderRadius: 4, overflow: "hidden" }}>
+              {(["grid", "list"] as const).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  title={mode === "grid" ? "Grid view" : "List view"}
+                  style={{
+                    padding: "4px 7px", cursor: "pointer",
+                    background: viewMode === mode ? "var(--color-elevated)" : "transparent",
+                    color: viewMode === mode ? "var(--color-text)" : "var(--color-text-faint)",
+                    border: "none",
+                  }}
+                >
+                  {mode === "grid" ? <LayoutGrid size={12} /> : <LayoutList size={12} />}
+                </button>
+              ))}
+            </div>
             {megaMsg && (
               <span style={{ fontSize: 11, color: megaMsg.includes("Scan") ? "var(--color-ok)" : "var(--color-err)" }}>
                 {megaMsg}
               </span>
             )}
-            <button
-              onClick={triggerMegaRefresh}
-              disabled={megaRefreshing}
-              title="Scan MEGA for new files — results will sync in ~5 minutes"
-              style={{
-                padding: "4px 10px", borderRadius: 4, fontSize: 11, cursor: megaRefreshing ? "wait" : "pointer",
-                background: "transparent", border: "1px solid var(--color-border)",
-                color: megaRefreshing ? "var(--color-text-faint)" : "var(--color-text-muted)",
-              }}
-            >
-              {megaRefreshing ? "Requesting…" : "Refresh MEGA"}
-            </button>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+              <button
+                onClick={triggerMegaRefresh}
+                disabled={megaRefreshing}
+                title="Scan MEGA for new files — results will sync in ~5 minutes"
+                style={{
+                  display: "flex", alignItems: "center", gap: 4,
+                  padding: "4px 10px", borderRadius: 4, fontSize: 11, cursor: megaRefreshing ? "wait" : "pointer",
+                  background: "transparent", border: "1px solid var(--color-border)",
+                  color: megaRefreshing ? "var(--color-text-faint)" : "var(--color-text-muted)",
+                }}
+              >
+                <RefreshCw
+                  size={11}
+                  aria-hidden="true"
+                  style={{ animation: megaRefreshing ? "spin 0.8s linear infinite" : undefined }}
+                />
+                {megaRefreshing ? "Requesting…" : "Refresh MEGA"}
+              </button>
+              {megaLastRefreshed && !megaRefreshing && (
+                <span style={{ fontSize: 9, color: "var(--color-text-faint)", letterSpacing: "0.02em" }}>
+                  requested {megaLastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
+            </div>
           </>
         }
       />
@@ -329,17 +364,13 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
 
                   {isAllClear ? (
                     <AllClearCard color={color} />
-                  ) : selectedScene ? (
-                    // Panel-open mode: dense list rows. 3-4 cards in the narrow
-                    // remaining space show less information than N list rows, so
-                    // we swap to rows for triage throughput while the panel is
-                    // doing the detail work.
+                  ) : viewMode === "list" ? (
                     <div style={{ display: "flex", flexDirection: "column", borderRadius: 6, border: "1px solid var(--color-border)", overflow: "hidden" }}>
                       {studioScenes.map((scene, i) => (
                         <SceneRow
                           key={scene.id}
                           scene={scene}
-                          selected={selectedScene.id === scene.id}
+                          selected={selectedScene?.id === scene.id}
                           isLast={i === studioScenes.length - 1}
                           onClick={() => morphTo(() => setSelectedScene(scene))}
                         />
@@ -351,7 +382,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
                         <SceneCard
                           key={scene.id}
                           scene={scene}
-                          selected={false}
+                          selected={selectedScene?.id === scene.id}
                           onClick={() => morphTo(() => setSelectedScene(scene))}
                         />
                       ))}

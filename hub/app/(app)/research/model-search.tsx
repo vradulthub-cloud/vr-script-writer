@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback, useRef } from "react"
 import { api, ApiError, API_BASE_URL, type Model, type ModelProfile, type TrendingModel } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { PageHeader } from "@/components/ui/page-header"
+import { TableSkeleton } from "@/components/ui/skeleton"
 
 // ─── Priority outreach (hardcoded) ───────────────────────────────────────────
 
@@ -675,15 +676,7 @@ function ProfileView({ model, profile, loading, profileError, onBack, onRefresh,
 
       {/* ── Two-column body ──────────────────────────────────────────────────── */}
       {loading && !profile && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
-          <div style={{
-            width: 12, height: 12, borderRadius: "50%",
-            border: "2px solid var(--color-lime)",
-            borderTopColor: "transparent",
-            animation: "spin 0.7s linear infinite",
-          }} />
-          <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>Fetching profile data…</span>
-        </div>
+        <TableSkeleton rows={5} cols={3} />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-[5fr_7fr] gap-4 md:gap-6 items-start">
@@ -996,7 +989,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
           fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
           textTransform: "uppercase", color: "var(--color-njoi)",
         }}>
-          🔥 Trending Now
+          Trending Now
         </span>
         <button
           onClick={() => loadTrending(true)}
@@ -1049,7 +1042,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
           fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
           textTransform: "uppercase", color: "var(--color-ok)",
         }}>
-          ⭐ Priority Outreach
+          Priority Outreach
         </span>
       </div>
 

@@ -1067,9 +1067,9 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
                                   borderRadius: 3,
                                   fontSize: 11,
                                   cursor: "pointer",
-                                  background: "transparent",
-                                  color: "var(--color-text-muted)",
-                                  border: "1px solid var(--color-border)",
+                                  background: "color-mix(in srgb, var(--color-err) 8%, transparent)",
+                                  color: "var(--color-err)",
+                                  border: "1px solid color-mix(in srgb, var(--color-err) 22%, transparent)",
                                 }}
                               >
                                 Reject…
@@ -1170,9 +1170,9 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
                   fontSize: 12,
                   fontWeight: 500,
                   cursor: "pointer",
-                  background: "transparent",
-                  color: "var(--color-text-muted)",
-                  border: "1px solid var(--color-border)",
+                  background: "color-mix(in srgb, var(--color-err) 8%, transparent)",
+                  color: "var(--color-err)",
+                  border: "1px solid color-mix(in srgb, var(--color-err) 22%, transparent)",
                 }}
               >
                 Reject {bulkSelected.size}
