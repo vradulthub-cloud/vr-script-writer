@@ -448,15 +448,19 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
 
         {!successResults.length && !loading && (
           <div
-            className="rounded flex items-center justify-center"
+            className="rounded flex flex-col items-center justify-center gap-2"
             style={{
               height: 240,
               border: "1px dashed var(--color-border)",
               color: "var(--color-text-faint)",
               fontSize: 12,
+              textAlign: "center",
+              padding: "0 24px",
             }}
           >
-            Your title cards will render here — cloud or local, your call.
+            <span style={{ fontSize: 18, opacity: 0.4 }}>◈</span>
+            <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>No title card generated</span>
+            <span>Enter a title, choose a style, and Generate — cloud or local.</span>
           </div>
         )}
 
@@ -518,10 +522,12 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
           </div>
         )}
         {engine === "local" && !localLoading && localResults.length === 0 && !localError && (
-          <div className="rounded flex items-center justify-center"
-            style={{ height: 240, border: "1px dashed var(--color-border)", color: "var(--color-text-faint)", fontSize: 12 }}
+          <div className="rounded flex flex-col items-center justify-center gap-2"
+            style={{ height: 240, border: "1px dashed var(--color-border)", color: "var(--color-text-faint)", fontSize: 12, textAlign: "center", padding: "0 24px" }}
           >
-            Local title cards will appear here
+            <span style={{ fontSize: 18, opacity: 0.4 }}>◈</span>
+            <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>No treatments rendered</span>
+            <span>Choose a treatment count and Generate — 690+ styles available locally.</span>
           </div>
         )}
         {engine === "local" && localResults.length > 0 && !localLoading && (

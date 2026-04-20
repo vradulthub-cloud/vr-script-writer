@@ -18,6 +18,13 @@ const nextConfig: NextConfig = {
   // with Turbopack; no effect on modern lucide-react (already ESM + per-icon
   // exports) but harmless. Anthropic/Claude sessions trying `modularizeImports`
   // on lucide-react 1.x will hit default-export errors — use this instead.
+  async redirects() {
+    return [
+      { source: "/prototype", destination: "/prototype/index.html", permanent: false },
+      { source: "/prototype/", destination: "/prototype/index.html", permanent: false },
+    ]
+  },
+
   experimental: {
     optimizePackageImports: ["lucide-react"],
   },

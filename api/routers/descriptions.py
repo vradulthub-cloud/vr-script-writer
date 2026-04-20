@@ -137,8 +137,14 @@ async def generate_seo_tags(body: SeoGenRequest, user: CurrentUser):
     system_prompt = (
         "You are an SEO specialist for adult VR content. Given a scene description, "
         "generate two fields and return ONLY valid JSON — no markdown, no commentary:\n"
-        "- meta_title: A keyword-rich title under 60 characters. Include studio name and key performer/act.\n"
-        "- meta_description: Under 155 characters. Punchy, includes performer name, key act, light CTA.\n"
+        "- meta_title: Keyword-rich, under 60 characters. Include studio + performer + key act. "
+        "No ALL CAPS. Examples by studio:\n"
+        '  VRHush: "Kenzie Anne Deepthroat & Creampie VR Porn - VRHush"\n'
+        '  FuckPassVR: "Lana Roy POV Sex in Prague VR Porn - FuckPassVR"\n'
+        '  VRAllure: "Eliza Ibarra Solo Masturbation VR - VRAllure"\n'
+        '  NaughtyJOI: "Lulu Chu JOI Countdown VR Experience - NJOI"\n'
+        "- meta_description: Under 155 characters. Performer name + key acts + light VR CTA. "
+        "Example: \"Watch Kenzie Anne take you deep in this 8K VR porn scene — blowjob, cowgirl, and creampie finish. Exclusive on VRHush.\"\n"
         "Return exactly: {\"meta_title\": \"...\", \"meta_description\": \"...\"}"
     )
 

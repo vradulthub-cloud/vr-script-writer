@@ -93,6 +93,32 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
     return `${days}d ago`
   }
 
+  // TKT-0119: group notifications by Today / Yesterday / Older
+  function dateGroup(timestamp: string): string {
+    const d = new Date(timestamp + "Z")
+    const now = new Date()
+    const todayStr = now.toDateString()
+    const yestStr = new Date(now.getTime() - 86_400_000).toDateString()
+    if (d.toDateString() === todayStr) return "Today"
+    if (d.toDateString() === yestStr) return "Yesterday"
+    return "Older"
+  }
+
+  const groupedNotifications = useMemo(() => {
+    const groups: { label: string; items: Notification[] }[] = []
+    const seen = new Map<string, Notification[]>()
+    const order = ["Today", "Yesterday", "Older"]
+    for (const n of notifications) {
+      const g = dateGroup(n.timestamp)
+      if (!seen.has(g)) seen.set(g, [])
+      seen.get(g)!.push(n)
+    }
+    for (const label of order) {
+      if (seen.has(label)) groups.push({ label, items: seen.get(label)! })
+    }
+    return groups
+  }, [notifications])
+
   return (
     <div className="relative" ref={panelRef}>
       {/* Bell button */}
@@ -189,7 +215,18 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
                 No notifications
               </div>
             )}
-            {!loading && notifications.map((n) => (
+            {!loading && groupedNotifications.map(({ label, items }) => (
+              <div key={label}>
+                <div style={{
+                  padding: "6px 12px 3px",
+                  fontSize: 9, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase",
+                  color: "var(--color-text-faint)",
+                  background: "var(--color-elevated)",
+                  borderBottom: "1px solid var(--color-border-subtle, var(--color-border))",
+                }}>
+                  {label}
+                </div>
+                {items.map((n) => (
               <div
                 key={n.notif_id}
                 className="px-3 py-2 transition-colors hover:bg-[--color-elevated]"
@@ -232,6 +269,8 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
                     />
                   )}
                 </div>
+              </div>
+                ))}
               </div>
             ))}
           </div>

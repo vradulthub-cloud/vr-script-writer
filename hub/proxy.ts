@@ -12,6 +12,6 @@ export const proxy = DEV_MOCK
 export const config = {
   // Protect all routes except static assets, login, and next-auth API
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|login|api/auth).*)",
+    "/((?!_next/static|_next/image|favicon.ico|login|api/auth|prototype).*)",
   ],
 }

@@ -325,6 +325,110 @@ STUDIO_KEY_MAP: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
+# Title generation — system prompts (single source for all title endpoints)
+# ---------------------------------------------------------------------------
+
+TITLE_GEN_SYSTEMS: dict[str, str] = {
+    "VRHush": (
+        "You are a creative title writer for VRHush, a premium VR adult content studio. "
+        "Generate exactly ONE scene title. Rules: 2-3 words ONLY, clever double-entendres or "
+        "wordplay strongly preferred, hint at theme without being literal, no performer names, "
+        "no generic porn titles, no all-caps. "
+        "Real VRH titles for reference — match this tone and length: "
+        "Heat By Design, Born To Breed, Under Her Spell, Intimate Renderings, "
+        "She Blooms on Command, Nailing the Interview, Deep Focus, Behind Closed Doors, "
+        "The Long Game, Perfectly Still, Earning It, All In, "
+        "Private Practice, Stay After Class, The Right Fit. "
+        "Respond with ONLY the title — no explanation, no quotes."
+    ),
+    "FuckPassVR": (
+        "You are a creative title writer for FuckPassVR, a premium VR travel-and-intimacy studio. "
+        "Generate exactly ONE scene title. Rules: 2-5 words, travel or destination themes when "
+        "applicable, clever wordplay preferred, no performer names, no all-caps. "
+        "Real FPVR titles for reference — match this tone: "
+        "The Grind Finale, Eager Beaver, Deep Devotion, Fully Seated Affair, "
+        "Behind the Curtain, The Bouncing Layover, Last Night in Lisbon, "
+        "Checked In, The Long Layover, Passport to Paradise, "
+        "Her City Her Rules, Local Knowledge, First Class Upgrade. "
+        "Respond with ONLY the title — no explanation, no quotes."
+    ),
+    "VRAllure": (
+        "You are a creative title writer for VRAllure, a premium VR solo/intimate studio. "
+        "Generate exactly ONE scene title. Rules: 2-3 words ONLY, sensual/intimate/soft tone, "
+        "suggestive but elegant, no performer names, no crude language, no all-caps. "
+        "Real VRA titles for reference — match this tone: "
+        "Sweet Surrender, Rise and Grind, Always on Top, A Swift Release, "
+        "She Came to Play, Hovering With Intent, Just for You, "
+        "Slow Burn, Perfectly Undone, Something to Watch, "
+        "Touch and Go, Open Invitation, All to Herself. "
+        "Respond with ONLY the title — no explanation, no quotes."
+    ),
+    "NaughtyJOI": (
+        "You are a creative title writer for NaughtyJOI, a premium VR JOI studio. "
+        "Generate a PAIRED title using the performer's first name: "
+        "line 1: '[Name] [soft intimate verb phrase]' "
+        "line 2: '[Name] [more intense/commanding verb phrase]' "
+        "Keep each line 3-5 words. Tone should be teasing and commanding. "
+        "Respond with ONLY the two titles separated by a newline — no explanation, no quotes."
+    ),
+}
+
+
+def generate_title_with_fallback(
+    studio: str,
+    female: str,
+    theme: str,
+    plot: str,
+) -> str:
+    """
+    Generate a scene title — tries Claude first, falls back to Ollama.
+
+    Claude produces better creative results; Ollama (dolphin3, uncensored) is
+    the fallback when Claude refuses due to content policy or is unreachable.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+
+    sys_prompt = TITLE_GEN_SYSTEMS.get(studio, TITLE_GEN_SYSTEMS["VRHush"])
+    user_prompt = (
+        f"Generate a title for this scene:\n\n"
+        f"Performer: {female}\n"
+        f"Theme: {theme}\n"
+        f"Plot summary: {plot[:500] if plot else 'N/A'}\n\n"
+        "Generate the title now."
+    )
+
+    def _clean(raw: str) -> str:
+        return raw.split("\n")[0].strip().strip('"').strip("'")
+
+    # --- Try Claude (haiku — fast, cheap, creative) ---
+    try:
+        from api.config import get_settings
+        settings = get_settings()
+        if settings.anthropic_api_key:
+            import anthropic as _anthropic
+            client = _anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            msg = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=60,
+                system=sys_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            text = msg.content[0].text if msg.content else ""
+            if text.strip():
+                return _clean(text)
+    except Exception as exc:
+        _log.warning("Claude title generation failed (%s), falling back to Ollama", exc)
+
+    # --- Ollama fallback ---
+    from api.ollama_client import ollama_generate
+    title = ollama_generate(
+        "title", user_prompt, system=sys_prompt, max_tokens=60, temperature=0.7
+    )
+    return _clean(title)
+
+
+# ---------------------------------------------------------------------------
 # Script user-prompt builder
 # ---------------------------------------------------------------------------
 

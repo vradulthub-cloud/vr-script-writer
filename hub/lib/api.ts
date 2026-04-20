@@ -504,6 +504,7 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
   // For endpoints that legitimately return 204 No Content.
   const postVoid = (path: string, body: unknown) =>
     apiFetch<void>(path, token, { method: "POST", body: JSON.stringify(body), expectEmpty: true })
+  const del = <T>(path: string) => apiFetch<T>(path, token, { method: "DELETE" })
 
   return {
     health: () => get<{ status: string; version: string; syncs: Record<string, unknown> }>("/health"),
@@ -624,6 +625,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       },
       brief: (name: string, context: Record<string, string>) =>
         post<{ brief: string }>(`/models/${encodeURIComponent(name)}/brief`, { context }),
+      clearCache: (name: string) =>
+        del<{ ok: boolean }>(`/models/${encodeURIComponent(name)}/profile-cache`),
     },
 
     approvals: {
