@@ -311,12 +311,7 @@ async def update_scene_tags(scene_id: str, body: SceneFieldUpdate, user: Current
 # AI title generation
 # ---------------------------------------------------------------------------
 
-_TITLE_GEN_SYSTEMS = {
-    "VRHush": "You are a creative title writer for VRHush, a premium VR adult content studio. Generate exactly ONE scene title. Rules: 2-3 words ONLY, clever double-entendres/wordplay preferred, hint at theme without being literal, no performer names, no generic titles. Recent VRH titles: Heat By Design, Born To Breed, Under Her Spell, Intimate Renderings, She Blooms on Command, Nailing the Interview. Respond with ONLY the title.",
-    "FuckPassVR": "You are a creative title writer for FuckPassVR, a premium VR travel/adventure studio. Generate exactly ONE scene title. Rules: 2-5 words, travel/destination themes when applicable, clever wordplay preferred, no performer names. Recent FPVR titles: The Grind Finale, Eager Beaver, Deep Devotion, Fully Seated Affair, Behind the Curtain, The Bouncing Layover. Respond with ONLY the title.",
-    "VRAllure": "You are a creative title writer for VRAllure, a premium VR solo/intimate studio. Generate exactly ONE scene title. Rules: 2-3 words ONLY, sensual/intimate/soft tone, suggestive but elegant, no performer names. Recent VRA titles: Sweet Surrender, Rise and Grind, Always on Top, A Swift Release, She Came to Play, Hovering With Intent. Respond with ONLY the title.",
-    "NaughtyJOI": "You are a creative title writer for NaughtyJOI, a premium VR JOI studio. Generate a PAIRED title: '[Name] [soft action]' then '[Name] then [intense action]'. Use the performer's first name only. Respond with ONLY the two titles separated by a newline.",
-}
+from api.title_prompts import TITLE_SYSTEMS as _TITLE_GEN_SYSTEMS
 
 
 class TitleGenerateBody(BaseModel):
@@ -325,9 +320,18 @@ class TitleGenerateBody(BaseModel):
     plot: str = ""
 
 
+def _clean_title(raw: str) -> str:
+    """Strip quotes and take first non-empty line."""
+    for line in raw.split("\n"):
+        line = line.strip().strip('"').strip("'")
+        if line:
+            return line
+    return raw.strip()
+
+
 @router.post("/{scene_id}/generate-title")
 async def generate_scene_title(scene_id: str, body: TitleGenerateBody, user: CurrentUser):
-    """Generate an AI title suggestion for a scene using Claude."""
+    """Generate an AI title suggestion for a scene (Claude first, Ollama fallback)."""
     with get_db() as conn:
         row = conn.execute("SELECT * FROM scenes WHERE id = ?", (scene_id,)).fetchone()
         if not row:
@@ -340,17 +344,27 @@ async def generate_scene_title(scene_id: str, body: TitleGenerateBody, user: Cur
     plot = body.plot or scene.get("plot", "")
 
     sys_prompt = _TITLE_GEN_SYSTEMS.get(studio, _TITLE_GEN_SYSTEMS["VRHush"])
-    user_prompt = f"Generate a title for this scene:\n\nPerformer: {female}\nTheme: {theme}\nPlot summary: {plot[:500] if plot else 'N/A'}\n\nGenerate the title now."
+    user_prompt = (
+        f"Generate a title for this scene:\n\n"
+        f"Performer: {female}\nTheme: {theme}\n"
+        f"Plot summary: {plot[:500] if plot else 'N/A'}\n\nGenerate the title now."
+    )
 
     try:
-        from api.ollama_client import ollama_generate
-        title = ollama_generate("title", user_prompt, system=sys_prompt, max_tokens=60, temperature=0.7)
-        # Strip quotes and take just the first line (Ollama sometimes adds explanation)
-        title = title.split("\n")[0].strip().strip('"').strip("'")
-        return {"title": title}
-    except RuntimeError as exc:
-        _log.error("Title generation failed: %s", exc)
-        raise HTTPException(status_code=503, detail=f"Title generation failed: {exc}")
+        from api.claude_client import claude_generate
+        raw = claude_generate(user_prompt, system=sys_prompt, max_tokens=60, temperature=0.8)
+        _log.debug("Title via Claude: %r", raw)
+    except RuntimeError as claude_err:
+        _log.warning("Claude unavailable (%s), falling back to Ollama", claude_err)
+        try:
+            from api.ollama_client import ollama_generate
+            raw = ollama_generate("title", user_prompt, system=sys_prompt, max_tokens=60, temperature=0.7)
+            _log.debug("Title via Ollama: %r", raw)
+        except RuntimeError as exc:
+            _log.error("Title generation failed: %s", exc)
+            raise HTTPException(status_code=503, detail=f"Title generation failed: {exc}")
+
+    return {"title": _clean_title(raw)}
 
 
 # ---------------------------------------------------------------------------
