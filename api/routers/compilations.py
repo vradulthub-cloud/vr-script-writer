@@ -238,7 +238,17 @@ async def generate_compilation_ideas(body: IdeasRequest, user: CurrentUser):
         "CONCEPT: [one sentence]\n"
         "TALENT: [comma-separated names]\n\n"
         "Generate exactly 5 ideas. Be creative — themes can include: body type, nationality, "
-        "act type, era/nostalgic angle, performer archetype, season/holiday, etc."
+        "act type, era/nostalgic angle, performer archetype, season/holiday, etc.\n\n"
+        "Example output (use as format reference only — do not copy):\n"
+        "TITLE: Best American Blondes Vol. 1\n"
+        "CONCEPT: Sun-kissed US blondes delivering the definitive American VR experience.\n"
+        "TALENT: Kenzie Anne, Haley Reed, Alex Blake\n\n"
+        "TITLE: Petite Powerhouses\n"
+        "CONCEPT: Small frames, maximum intensity — compact performers who command every scene.\n"
+        "TALENT: Lulu Chu, Freya Parker, Lily Larimar\n\n"
+        "TITLE: European Tour\n"
+        "CONCEPT: A passport-stamping best-of from FuckPassVR's European city shoots.\n"
+        "TALENT: Anissa Kate, Tina Kay, Rebecca Volpetti"
     )
 
     user_parts = [f"Studio: {body.studio}"]

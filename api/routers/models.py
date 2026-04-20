@@ -410,13 +410,29 @@ async def generate_booking_brief(
         if v:
             ctx_lines.append(f"{k}: {v}")
 
+    # Build studio context from ctx if provided
+    studio_name = body.context.get("Studio", "")
+    studio_descriptions = {
+        "VRHush":     "VRHush — premium intimate/fantasy VR content, 45-min BG/BGCP scenes, intimate tone",
+        "FuckPassVR": "FuckPassVR — travel-themed adventure VR content, location-anchored plots, passport stamp ending",
+        "VRAllure":   "VRAllure — solo/sensual VR content, intimate masturbation scenes, soft intimate tone",
+        "NaughtyJOI": "NaughtyJOI — JOI-focused VR content, performer addresses viewer directly, count-down structure",
+    }
+    studio_line = studio_descriptions.get(studio_name, "")
+    if not studio_line:
+        studio_line = (
+            "Eclatech — four VR studios: VRHush (intimate BG/BGCP), FuckPassVR (travel-themed), "
+            "VRAllure (solo/sensual), NaughtyJOI (JOI)"
+        )
+
     prompt = (
-        "You are a talent booking advisor for a VR adult content studio. "
+        f"You are a talent booking advisor for {studio_line}. "
         "Based on the data below, write a concise 3-sentence booking brief. "
         "Cover: (1) her current market standing and platform performance, "
-        "(2) your studio's history with her and what that means, "
+        "(2) your studio's history with her and what that implies for the next booking, "
         "(3) a clear recommendation — Book Now / Re-book / Monitor / Pass — "
-        "with one-line reason. Output only the three sentences, no preamble.\n\n"
+        "with one-line reason that references the studio's content style. "
+        "Output only the three sentences, no preamble.\n\n"
         + "\n".join(ctx_lines)
     )
 
