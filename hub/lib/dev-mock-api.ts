@@ -101,6 +101,7 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
 
   // ── Models ────────────────────────────────────────────────────────────
   if (base === "/models/") return wait(MOCK_MODELS as unknown as T)
+  if (base.startsWith("/models/") && base.endsWith("/invalidate-cache")) return wait({ ok: true } as unknown as T)
 
   // ── Call sheets ───────────────────────────────────────────────────────
   if (base === "/call-sheets/tabs")   return wait(MOCK_CALLSHEET_TABS as unknown as T)
