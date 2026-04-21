@@ -255,12 +255,19 @@ def main():
             # Check subfolder statuses
             has_videos = any(p.startswith("Videos/") and not p.endswith("/") for p in file_paths)
             has_thumbnail = any(p.startswith("Video Thumbnail/") and not p.endswith("/") for p in file_paths)
-            # Fallback: MEGA API bug drops files inside Video Thumbnail/ but keeps the dir entry.
-            # If the directory exists, assume a thumbnail is present.
-            if not has_thumbnail:
-                has_thumbnail = any(p == "Video Thumbnail/" for p in file_paths)
             has_photos = any(p.startswith("Photos/") and not p.endswith("/") for p in file_paths)
             has_storyboard = any(p.startswith("Storyboard/") and not p.endswith("/") for p in file_paths)
+            # NOTE: there used to be a "dir-existence" fallback here that
+            # flipped has_thumbnail=True whenever the Video Thumbnail/
+            # folder appeared in the lsf output, on the theory that a
+            # MEGA API bug was dropping files inside. Ground-truth probes
+            # via `rclone ls` on the specific folder showed those folders
+            # were genuinely empty — the fallback was producing ~hundreds
+            # of false positives (every scene had a pre-provisioned empty
+            # Video Thumbnail/ shell). Don't add it back without evidence
+            # the files are there; has_thumbnail=True with no filename is
+            # useless anyway because the thumbnail proxy needs the
+            # filename to serve the image.
 
             # Count files per subfolder
             video_count = sum(1 for p in file_paths if p.startswith("Videos/") and not p.endswith("/"))
