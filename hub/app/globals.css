@@ -857,22 +857,9 @@ button[style*="color-lime"]:hover:not(:disabled) {
   }
 }
 
-/* Hybrid shoots layout: hide the legacy ShootBoard's own PageHeader when it
-   is embedded below the V2 overview (ShootsV2View already owns the page title
-   + eyebrow). Adds a subtle section label so the transition reads clearly. */
+/* V2 shoots: hide the legacy ShootBoard's own PageHeader (ShootsV2View
+   owns the page title). Roster rows below are driven by ShootRowV2. */
 [data-eclatech="v2"] .ec-embed-board > div > .page-header,
 [data-eclatech="v2"] .ec-embed-board .page-header {
   display: none;
-}
-[data-eclatech="v2"] .ec-embed-board::before {
-  content: "Asset grid";
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-  padding-bottom: 10px;
-  margin-bottom: 14px;
-  border-bottom: 1px solid var(--color-border);
 }

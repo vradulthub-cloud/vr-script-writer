@@ -114,15 +114,27 @@ interface Props {
   initialShoots: Shoot[]
   error: string | null
   idToken: string | undefined
+  /** Eclatech v2 layout: clean roster rows (talent / progress / status),
+   *  per-asset cell matrix hidden behind a click-to-expand. Default "v1"
+   *  renders the legacy always-visible-cells layout. */
+  variant?: "v1" | "v2"
 }
 
-export function ShootBoard({ initialShoots, error: initialError, idToken: serverToken }: Props) {
+export function ShootBoard({ initialShoots, error: initialError, idToken: serverToken, variant = "v1" }: Props) {
   const idToken = useIdToken(serverToken)
   const client = useMemo(() => api(idToken ?? null), [idToken])
 
   const [shoots, setShoots] = useState<Shoot[]>(initialShoots)
   const [error, setError] = useState<string | null>(initialError)
   const [studioFilter, setStudioFilter] = useState<string>("All")
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const toggleExpanded = useCallback((shootId: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(shootId)) next.delete(shootId); else next.add(shootId)
+      return next
+    })
+  }, [])
   // Month filter key: "" = default window (current + next month), or a
   // specific month in YYYY-MM form for a custom 1-month view.
   const [monthFilter, setMonthFilter] = useState<string>("")
@@ -281,21 +293,38 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
               display: "flex", flexDirection: "column", gap: 8,
               paddingBottom: 4,
             }}>
-            <AssetLegend />
+            {variant === "v1" && <AssetLegend />}
             {filtered.map(shoot => (
-              <ShootRow
-                key={shoot.shoot_id}
-                shoot={shoot}
-                selected={shoot.shoot_id === selectedShootId}
-                onSelect={() => setSelectedShootId(shoot.shoot_id)}
-                onCellClick={(sceneIdx, assetType) =>
-                  setPopoverCell({
-                    shootId: shoot.shoot_id,
-                    position: shoot.scenes[sceneIdx].position,
-                    assetType,
-                  })
-                }
-              />
+              variant === "v2" ? (
+                <ShootRowV2
+                  key={shoot.shoot_id}
+                  shoot={shoot}
+                  expanded={expanded.has(shoot.shoot_id)}
+                  onToggle={() => toggleExpanded(shoot.shoot_id)}
+                  onOpenDetails={() => setSelectedShootId(shoot.shoot_id)}
+                  onCellClick={(sceneIdx, assetType) =>
+                    setPopoverCell({
+                      shootId: shoot.shoot_id,
+                      position: shoot.scenes[sceneIdx].position,
+                      assetType,
+                    })
+                  }
+                />
+              ) : (
+                <ShootRow
+                  key={shoot.shoot_id}
+                  shoot={shoot}
+                  selected={shoot.shoot_id === selectedShootId}
+                  onSelect={() => setSelectedShootId(shoot.shoot_id)}
+                  onCellClick={(sceneIdx, assetType) =>
+                    setPopoverCell({
+                      shootId: shoot.shoot_id,
+                      position: shoot.scenes[sceneIdx].position,
+                      assetType,
+                    })
+                  }
+                />
+              )
             ))}
             </div>
             {/* Right-fade scroll affordance */}
@@ -460,6 +489,172 @@ function ShootRow({ shoot, selected, onSelect, onCellClick }: ShootRowProps) {
         ))}
       </div>
     </button>
+  )
+}
+
+// ── Shoot row (v2 — clean roster, cells behind click-to-expand) ──────
+interface ShootRowV2Props {
+  shoot: Shoot
+  expanded: boolean
+  onToggle: () => void
+  onOpenDetails: () => void
+  onCellClick: (sceneIdx: number, assetType: AssetType) => void
+}
+
+function ShootRowV2({ shoot, expanded, onToggle, onOpenDetails, onCellClick }: ShootRowV2Props) {
+  const primaryStudio = shoot.scenes[0]?.studio ?? "FuckPassVR"
+  const accent = studioColor(primaryStudio)
+  const alert = isAlert(shoot)
+  const { validated, total } = shootCompleteness(shoot)
+  const progress = total > 0 ? Math.round((validated / total) * 100) : 0
+  const abbr = (shoot.scenes[0]?.grail_tab || primaryStudio.slice(0, 4)).toUpperCase()
+  const statusKey = progress === 100 ? "ok" : alert ? "err" : progress > 0 ? "progress" : "warn"
+  const statusLabel = progress === 100 ? "WRAPPED" : alert ? "OVERDUE" : progress > 0 ? "ACTIVE" : "PREP"
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${expanded ? "var(--color-border)" : "var(--color-border-subtle)"}`,
+        borderLeft: `3px solid ${alert ? "var(--color-err)" : accent}`,
+        background: expanded ? "var(--color-elevated)" : "var(--color-surface)",
+        transition: "background 120ms ease",
+      }}
+    >
+      {/* Clickable summary row */}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        style={{
+          width: "100%",
+          display: "grid",
+          gridTemplateColumns: "72px 140px minmax(0, 1fr) 160px 110px 80px 20px",
+          columnGap: 14,
+          alignItems: "center",
+          padding: "12px 14px",
+          background: "transparent",
+          border: "none",
+          textAlign: "left",
+          cursor: "pointer",
+          color: "inherit",
+        }}
+      >
+        {/* Studio chip */}
+        <span className={`ec-studio-chip ${abbr.toLowerCase()}`} style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: accent,
+        }}>
+          {abbr}
+        </span>
+
+        {/* Date */}
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)", fontVariantNumeric: "tabular-nums" }}>
+          {formatShootDate(shoot.shoot_date)}
+        </div>
+
+        {/* Talent (flex column) */}
+        <div style={{ minWidth: 0 }}>
+          <div style={{
+            fontSize: 13, color: "var(--color-text)", overflow: "hidden",
+            textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {shoot.female_talent || "—"}
+            {shoot.male_talent && <span style={{ color: "var(--color-text-muted)" }}> / {shoot.male_talent}</span>}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 2 }}>
+            {shoot.scenes.length} scene{shoot.scenes.length === 1 ? "" : "s"} · {relativeFromHours(shoot.aging_hours)}
+          </div>
+        </div>
+
+        {/* Progress bar + count */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{
+            fontSize: 12, fontVariantNumeric: "tabular-nums",
+            color: "var(--color-text)", minWidth: 48, textAlign: "right",
+          }}>
+            {validated}/{total}
+          </span>
+          <div style={{
+            flex: 1, height: 4, borderRadius: 2,
+            background: "var(--color-border-subtle)", overflow: "hidden",
+          }}>
+            <div style={{
+              width: `${progress}%`,
+              height: "100%",
+              background: alert ? "var(--color-err)" : accent,
+              transition: "width 180ms ease",
+            }} />
+          </div>
+          <span style={{
+            fontSize: 11, fontVariantNumeric: "tabular-nums",
+            color: "var(--color-text-muted)", minWidth: 34, textAlign: "right",
+          }}>
+            {progress}%
+          </span>
+        </div>
+
+        {/* Status pill */}
+        <span className="ec-pill" data-s={statusKey} style={{ justifySelf: "start" }}>
+          <span className="d" />
+          {statusLabel}
+        </span>
+
+        {/* Aging */}
+        {alert ? (
+          <span className="ec-age" data-hot style={{ justifySelf: "start" }}>
+            {Math.floor(shoot.aging_hours / 24)}d
+          </span>
+        ) : (
+          <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+            {shoot.aging_hours > 0 ? `${Math.floor(shoot.aging_hours / 24)}d` : "fresh"}
+          </span>
+        )}
+
+        {/* Expand chevron */}
+        <span aria-hidden="true" style={{
+          fontSize: 10, color: "var(--color-text-muted)",
+          transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+          transition: "transform 120ms ease",
+          justifySelf: "center",
+        }}>
+          ▶
+        </span>
+      </button>
+
+      {/* Expanded: per-asset cells (one strip per scene) + details link */}
+      {expanded && (
+        <div style={{
+          padding: "10px 14px 14px 14px",
+          borderTop: "1px solid var(--color-border-subtle)",
+          display: "flex", flexDirection: "column", gap: 8,
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            fontSize: 9, letterSpacing: "0.14em", color: "var(--color-text-faint)",
+            textTransform: "uppercase",
+          }}>
+            <span>Asset phases · click a cell to revalidate</span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onOpenDetails() }}
+              style={{
+                background: "transparent", border: "none", cursor: "pointer",
+                fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase",
+                color: "var(--color-lime)", padding: 0,
+              }}
+            >
+              Open details →
+            </button>
+          </div>
+          {shoot.scenes.map((scene, idx) => (
+            <AssetStrip
+              key={scene.position}
+              scene={scene}
+              onCellClick={(at) => onCellClick(idx, at)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

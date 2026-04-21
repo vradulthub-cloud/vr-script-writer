@@ -27,28 +27,16 @@ export default async function ShootsPage() {
   }
 
   if (v2) {
-    // Hybrid: calendar + roster overview at top, full asset-edit grid below.
+    // v2: calendar overview on top; ShootBoard is the single shoot-row surface.
     return (
       <div>
         <style dangerouslySetInnerHTML={{ __html: `
           .ec-embed-board > div > .page-header,
           .ec-embed-board .page-header { display: none !important; }
-          .ec-embed-board::before {
-            content: "Asset grid";
-            display: block;
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.18em;
-            text-transform: uppercase;
-            color: var(--color-text-muted);
-            padding-bottom: 10px;
-            margin-bottom: 14px;
-            border-bottom: 1px solid var(--color-border);
-          }
         `}} />
         <ShootsV2View initialShoots={shoots} />
-        <div className="ec-embed-board" style={{ marginTop: 32 }}>
-          <ShootBoard initialShoots={shoots} error={error} idToken={idToken} />
+        <div className="ec-embed-board">
+          <ShootBoard initialShoots={shoots} error={error} idToken={idToken} variant="v2" />
         </div>
       </div>
     )
