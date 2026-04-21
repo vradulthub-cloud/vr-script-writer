@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useCallback, useRef } from "react"
+import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import { api, ApiError, API_BASE_URL, type Model, type ModelProfile, type TrendingModel } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { PageHeader } from "@/components/ui/page-header"
@@ -71,7 +71,8 @@ function Photo({
 }) {
   const [srcIdx, setSrcIdx] = useState(0)
   const ini = initials(name)
-  const srcs = [src, fallbackSrc].filter(Boolean) as string[]
+  // De-duplicate src + fallbackSrc so a broken URL doesn't waste a slot.
+  const srcs = Array.from(new Set([src, fallbackSrc].filter(Boolean))) as string[]
   const activeSrc = srcs[srcIdx]
 
   if (!activeSrc) {
@@ -862,10 +863,13 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
 
   // Lazy-load trending when default view first renders
   const hasFetchedTrending = useRef(false)
-  if (!hasFetchedTrending.current && !currentModel) {
+  useEffect(() => {
+    if (hasFetchedTrending.current || currentModel) return
     hasFetchedTrending.current = true
     loadTrending()
-  }
+    // loadTrending depends on client/count — intentionally fire once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const openProfile = useCallback(async (name: string, refresh = false) => {
     const m = models.find(mo => mo.name.toLowerCase() === name.toLowerCase())

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { type Approval, type Ticket, type UserProfile } from "@/lib/api"
 import { ApprovalList } from "../approvals/approval-list"
 import { ApprovalSubmit } from "../approvals/approval-submit"
@@ -246,7 +246,6 @@ function V2Layout({
       </div>
 
       <div className="ec-col">
-        <QueueHealth approvals={approvals} tickets={tickets} />
         <div className="ec-block">
           <header><h2>Submit Ticket</h2></header>
           <div style={{ padding: 14 }}>
@@ -256,111 +255,4 @@ function V2Layout({
       </div>
     </div>
   )
-}
-
-/* ─── Queue Health panel (derived from local arrays; TODO: real API) ───────── */
-function QueueHealth({ approvals, tickets }: { approvals: Approval[]; tickets: Ticket[] }) {
-  const stats = useMemo(() => {
-    const now = Date.now()
-    const WEEK = 7 * 24 * 60 * 60 * 1000
-
-    const last7 = approvals.filter(a => {
-      const t = Date.parse(a.submitted_at || "")
-      return Number.isFinite(t) && now - t < WEEK
-    })
-
-    // Avg time-to-decision for decided approvals in the last 30 days
-    const decided = approvals.filter(a => {
-      const sub = Date.parse(a.submitted_at || "")
-      const dec = Date.parse(a.decided_at || "")
-      return Number.isFinite(sub) && Number.isFinite(dec) && dec >= sub
-    })
-    const avgMs = decided.length
-      ? decided.reduce((s, a) => s + (Date.parse(a.decided_at) - Date.parse(a.submitted_at)), 0) / decided.length
-      : 0
-
-    // Approval rate over all decided items in the last 7 days
-    const decided7 = decided.filter(a => now - Date.parse(a.decided_at) < WEEK)
-    const approved7 = decided7.filter(a => a.status === "Approved").length
-    const rate = decided7.length ? Math.round((approved7 / decided7.length) * 100) : null
-
-    return {
-      avgResponse: formatDuration(avgMs),
-      approvalRate: rate,
-      weekCount: last7.length,
-    }
-  }, [approvals, tickets])
-
-  return (
-    <div className="ec-block ec-inverted">
-      <header><h2>Queue Health</h2></header>
-      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-        <HealthStat
-          label="Avg Response"
-          value={stats.avgResponse ?? "—"}
-          hint={stats.avgResponse ? undefined : "no decisions yet"}
-        />
-        <HealthStat
-          label="Approval Rate · 7d"
-          value={stats.approvalRate == null ? "—" : `${stats.approvalRate}%`}
-          hint={stats.approvalRate == null ? "no decisions this week" : undefined}
-        />
-        <HealthStat label="Submissions · Week" value={String(stats.weekCount)} />
-      </div>
-    </div>
-  )
-}
-
-function HealthStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  const isEmpty = value === "—"
-  return (
-    <div>
-      <div
-        style={{
-          fontSize: 9,
-          fontWeight: 700,
-          letterSpacing: "0.18em",
-          textTransform: "uppercase",
-          color: "rgba(255,255,255,0.45)",
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          marginTop: 4,
-          fontWeight: 800,
-          fontSize: isEmpty ? 28 : 36,
-          letterSpacing: "-0.03em",
-          fontFamily: "var(--font-display-hero)",
-          color: isEmpty ? "rgba(255,255,255,0.45)" : undefined,
-        }}
-      >
-        {value}
-      </div>
-      {hint && (
-        <div
-          style={{
-            marginTop: 4,
-            fontSize: 10,
-            color: "rgba(255,255,255,0.35)",
-            letterSpacing: "0.02em",
-          }}
-        >
-          {hint}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function formatDuration(ms: number): string | null {
-  if (!ms || !Number.isFinite(ms)) return null
-  const hours = Math.floor(ms / 3600000)
-  const mins = Math.floor((ms % 3600000) / 60000)
-  if (hours >= 24) {
-    const days = Math.floor(hours / 24)
-    return `${days}d ${hours % 24}h`
-  }
-  return `${hours}h ${String(mins).padStart(2, "0")}m`
 }

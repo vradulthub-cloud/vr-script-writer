@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo, useRef, useEffect } from "react"
+import { Wand2 } from "lucide-react"
 import { useStream } from "@/lib/sse"
 import { api, API_BASE_URL, type Scene } from "@/lib/api"
 import { formatApiError } from "@/lib/errors"
@@ -168,6 +169,13 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   // Scene picker for saving
   const [selectedSceneId, setSelectedSceneId] = useState("")
 
+  // Inline scene-title generator — wired to the selected scene so editors
+  // can rename a scene without leaving the Descriptions view.
+  const [genTitle, setGenTitle] = useState("")
+  const [genTitleLoading, setGenTitleLoading] = useState(false)
+  const [genTitleErr, setGenTitleErr] = useState<string | null>(null)
+  const [genTitleSaving, setGenTitleSaving] = useState(false)
+
   const stream = useStream()
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
@@ -231,6 +239,48 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
     if (scene.title && !metaTitle) {
       // Pre-seed the SEO meta title with the scene title (user can override)
       setMetaTitle(scene.title)
+    }
+  }
+
+  const selectedScene = useMemo(
+    () => scenes.find(s => s.id === selectedSceneId) ?? null,
+    [scenes, selectedSceneId],
+  )
+
+  async function generateSceneTitle() {
+    if (!selectedScene) return
+    setGenTitleLoading(true)
+    setGenTitleErr(null)
+    try {
+      const { title } = await client.scenes.generateTitle(selectedScene.id, {
+        female: selectedScene.female,
+        male: selectedScene.male,
+        theme: selectedScene.theme,
+        plot: selectedScene.plot,
+        // Editor-in-progress wardrobe wins over any stale scene row value
+        wardrobe_f: wardrobe || undefined,
+      })
+      setGenTitle(title)
+    } catch (e) {
+      setGenTitleErr(formatApiError(e, "Title"))
+    } finally {
+      setGenTitleLoading(false)
+    }
+  }
+
+  async function applySceneTitle() {
+    if (!genTitle || !selectedScene) return
+    setGenTitleSaving(true)
+    setGenTitleErr(null)
+    try {
+      await client.scenes.updateTitle(selectedScene.id, genTitle)
+      setGenTitle("")
+      setSaveMsg("Title saved.")
+      setTimeout(() => setSaveMsg(null), 1500)
+    } catch (e) {
+      setGenTitleErr(formatApiError(e, "Save"))
+    } finally {
+      setGenTitleSaving(false)
     }
   }
 
@@ -447,6 +497,85 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
         )}
 
         <div className="flex flex-col gap-3">
+
+          {/* Selected scene — title generator */}
+          {selectedScene && (
+            <div
+              className="rounded px-2.5 py-2"
+              style={{
+                background: "var(--color-surface)",
+                border: `1px solid color-mix(in srgb, ${studioColor} 25%, var(--color-border))`,
+              }}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-mono" style={{ fontSize: 10, color: studioColor }}>
+                  {selectedScene.id}
+                </span>
+                <button
+                  onClick={generateSceneTitle}
+                  disabled={genTitleLoading}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded transition-colors"
+                  style={{
+                    fontSize: 10,
+                    background: "transparent",
+                    color: genTitleLoading ? "var(--color-text-faint)" : studioColor,
+                    border: `1px solid ${genTitleLoading ? "var(--color-border)" : `color-mix(in srgb, ${studioColor} 35%, transparent)`}`,
+                    cursor: genTitleLoading ? "wait" : "pointer",
+                  }}
+                  title="Generate a title from the scene's script"
+                >
+                  <Wand2 size={10} aria-hidden="true" />
+                  {genTitleLoading ? "…" : "Title"}
+                </button>
+              </div>
+              <p style={{ fontSize: 12, color: "var(--color-text)", lineHeight: 1.35 }}>
+                {selectedScene.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}
+              </p>
+              {genTitleErr && (
+                <p style={{ fontSize: 10, color: "var(--color-err)", marginTop: 4 }}>{genTitleErr}</p>
+              )}
+              {genTitle && (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <span
+                    className="flex-1 truncate"
+                    style={{
+                      fontSize: 11,
+                      color: "var(--color-text)",
+                      fontWeight: 600,
+                    }}
+                    title={genTitle}
+                  >
+                    {genTitle}
+                  </span>
+                  <button
+                    onClick={applySceneTitle}
+                    disabled={genTitleSaving}
+                    className="px-2 py-0.5 rounded"
+                    style={{
+                      fontSize: 10,
+                      background: "var(--color-lime)",
+                      color: "#0d0d0d",
+                      fontWeight: 600,
+                      cursor: genTitleSaving ? "wait" : "pointer",
+                    }}
+                  >
+                    {genTitleSaving ? "…" : "Apply"}
+                  </button>
+                  <button
+                    onClick={() => setGenTitle("")}
+                    className="px-1.5 py-0.5 rounded"
+                    style={{
+                      fontSize: 10,
+                      color: "var(--color-text-faint)",
+                      border: "1px solid var(--color-border)",
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Studio */}
           <div>
