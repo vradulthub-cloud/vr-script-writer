@@ -11,6 +11,7 @@ import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
 import { PageHeader } from "@/components/ui/page-header"
+import { ApprovedTagsReference } from "@/components/ui/approved-tags-reference"
 
 // ---------------------------------------------------------------------------
 // Per-studio category lists — grouped for visual structure
@@ -60,14 +61,19 @@ function EditableParagraph({
   index,
   studioColor,
   onSave,
+  onRegenerate,
 }: {
   text: string
   index: number
   studioColor: string
   onSave: (index: number, newText: string) => void
+  onRegenerate?: (index: number, feedback: string) => Promise<string | null>
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(text)
+  const [feedback, setFeedback] = useState("")
+  const [regenerating, setRegenerating] = useState(false)
+  const [regenError, setRegenError] = useState<string | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -81,6 +87,26 @@ function EditableParagraph({
       taRef.current.style.height = taRef.current.scrollHeight + "px"
     }
   }, [editing])
+
+  async function handleRegenerate() {
+    if (!onRegenerate) return
+    setRegenerating(true)
+    setRegenError(null)
+    try {
+      const next = await onRegenerate(index, feedback.trim())
+      if (next != null) {
+        setDraft(next)
+        if (taRef.current) {
+          taRef.current.style.height = "auto"
+          taRef.current.style.height = taRef.current.scrollHeight + "px"
+        }
+      }
+    } catch (e) {
+      setRegenError(e instanceof Error ? e.message : "Regeneration failed")
+    } finally {
+      setRegenerating(false)
+    }
+  }
 
   if (editing) {
     return (
@@ -102,16 +128,53 @@ function EditableParagraph({
             minHeight: 60,
           }}
         />
-        <div className="flex gap-2 mt-1.5">
+        {onRegenerate && (
+          <div className="mt-1.5">
+            <input
+              type="text"
+              value={feedback}
+              onChange={e => setFeedback(e.target.value)}
+              placeholder="Optional nudge for regenerate (e.g. 'more tension, less dialogue')"
+              className="w-full px-2.5 py-1 rounded text-xs outline-none"
+              style={{
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text)",
+              }}
+            />
+          </div>
+        )}
+        {regenError && (
+          <p style={{ fontSize: 10, color: "var(--color-err)", marginTop: 4 }}>{regenError}</p>
+        )}
+        <div className="flex gap-2 mt-1.5 flex-wrap">
           <button
-            onClick={() => { onSave(index, draft); setEditing(false) }}
+            onClick={() => { onSave(index, draft); setEditing(false); setFeedback("") }}
+            disabled={regenerating}
             className="px-2.5 py-1 rounded text-xs font-semibold"
-            style={{ background: "var(--color-lime)", color: "#0d0d0d" }}
+            style={{ background: "var(--color-lime)", color: "#0d0d0d", opacity: regenerating ? 0.5 : 1 }}
           >
             Save
           </button>
+          {onRegenerate && (
+            <button
+              onClick={handleRegenerate}
+              disabled={regenerating}
+              className="px-2.5 py-1 rounded text-xs"
+              style={{
+                color: "var(--color-text)",
+                background: "var(--color-elevated)",
+                border: "1px solid var(--color-border)",
+                cursor: regenerating ? "wait" : "pointer",
+              }}
+              title="Ask Claude to rewrite just this paragraph"
+            >
+              {regenerating ? "Regenerating…" : "↻ Regenerate"}
+            </button>
+          )}
           <button
-            onClick={() => { setDraft(text); setEditing(false) }}
+            onClick={() => { setDraft(text); setEditing(false); setFeedback(""); setRegenError(null) }}
+            disabled={regenerating}
             className="px-2.5 py-1 rounded text-xs"
             style={{ color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
           >
@@ -687,17 +750,22 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
 
           {/* Categories — grouped chips */}
           <div>
-            <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-              Categories
-              {selectedCats.length > 0 && (
-                <button
-                  onClick={() => setSelectedCats([])}
-                  style={{ marginLeft: 6, color: "var(--color-text-faint)", fontSize: 10 }}
-                >
-                  clear
-                </button>
-              )}
-            </label>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+              <label style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                Categories
+                {selectedCats.length > 0 && (
+                  <button
+                    onClick={() => setSelectedCats([])}
+                    style={{ marginLeft: 6, color: "var(--color-text-faint)", fontSize: 10 }}
+                  >
+                    clear
+                  </button>
+                )}
+              </label>
+            </div>
+            <div style={{ marginBottom: 6 }}>
+              <ApprovedTagsReference studio={studio} />
+            </div>
             <div className="grid grid-cols-2 gap-2">
               {(STUDIO_CATEGORY_GROUPS[studio] ?? []).map(({ label, cats }) => (
                 <div key={label}>
@@ -898,6 +966,23 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                       onSave={(idx, newText) =>
                         setEditedParagraphs(prev => ({ ...prev, [idx]: newText }))
                       }
+                      onRegenerate={async (idx, feedbackText) => {
+                        const res = await client.descriptions.regenerateParagraph({
+                          studio,
+                          paragraph: para,
+                          paragraph_index: idx,
+                          performer: performers || selectedScene?.female || "",
+                          title: selectedScene?.title ?? "",
+                          plot: selectedScene?.theme ?? "",
+                          feedback: feedbackText,
+                        })
+                        const next = res.paragraph?.trim() ?? ""
+                        if (next) {
+                          setEditedParagraphs(prev => ({ ...prev, [idx]: next }))
+                          return next
+                        }
+                        return null
+                      }}
                     />
                   ))}
                 </>

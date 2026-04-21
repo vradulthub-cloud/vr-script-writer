@@ -11,6 +11,7 @@ import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
 import { PageHeader } from "@/components/ui/page-header"
+import { BatchPanel } from "./batch-panel"
 const SCENE_TYPES = ["BG", "BGCP"]
 
 // Parse structured sections from generated output
@@ -41,6 +42,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
   const isAdmin = userRole === "admin"
 
   const [mode, setMode] = useState<"manual" | "sheet">("manual")
+  const [batchMode, setBatchMode] = useState(false)
 
   // Manual mode fields
   const [studio, setStudio] = useState("FuckPassVR")
@@ -376,9 +378,23 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
             {tabsError && (
               <p style={{ fontSize: 12, color: "var(--color-err)", marginBottom: 8 }}>{tabsError}</p>
             )}
-            {/* Tab selector */}
+            {/* Tab selector + batch toggle */}
             <div className="mb-3">
-              <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Month tab</label>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <label style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Month tab</label>
+                <label
+                  title="Pick N rows, generate them all, then review Accept/Skip one at a time"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, color: "var(--color-text-muted)", cursor: "pointer" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={batchMode}
+                    onChange={e => setBatchMode(e.target.checked)}
+                    style={{ accentColor: "var(--color-lime)" }}
+                  />
+                  Batch
+                </label>
+              </div>
               <select
                 value={selectedTab}
                 onChange={e => { setSelectedTab(e.target.value); setSelectedRow(null) }}
@@ -449,7 +465,12 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
             {!sheetLoading && !sheetError && sheetRows.length === 0 && (
               <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No rows need scripts.</p>
             )}
-            {!sheetLoading && sheetRows.length > 0 && (
+            {!sheetLoading && sheetRows.length > 0 && batchMode && (
+              <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 6 }}>
+                {sheetRows.length} row{sheetRows.length === 1 ? "" : "s"} — pick in the batch panel →
+              </p>
+            )}
+            {!sheetLoading && sheetRows.length > 0 && !batchMode && (
               <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
                 {sheetRows.map((row, i) => (
                   <button
@@ -625,6 +646,14 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
 
       {/* Right panel — output */}
       <div style={{ flex: 1, minWidth: 0 }}>
+        {mode === "sheet" && batchMode ? (
+          <BatchPanel
+            rows={sheetRows}
+            idToken={idToken}
+            isAdmin={isAdmin}
+          />
+        ) : (
+        <>
         {/* Stream error */}
         {stream.error && <ErrorAlert className="mb-3">{stream.error}</ErrorAlert>}
 
@@ -910,6 +939,8 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
               </div>
             )}
           </>
+        )}
+        </>
         )}
       </div>
     </div>

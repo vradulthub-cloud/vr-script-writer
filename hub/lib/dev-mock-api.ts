@@ -104,6 +104,18 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
 
   // ── Scripts ───────────────────────────────────────────────────────────
   if (base === "/scripts/tabs") return wait(MOCK_SCRIPT_TABS as unknown as T)
+  if (base === "/scripts/validate") {
+    // Parity mock: flag the same classic "slop" phrases the real validator
+    // catches so the UI rule-panel has something to render.
+    const input = (_options?.body ?? "") as string
+    const text = typeof input === "string" ? input : ""
+    const violations: string[] = []
+    if (/\bimpossibly\b/i.test(text)) violations.push("Drop vague intensifier: 'impossibly'")
+    if (/\belectric\s+charge\b/i.test(text)) violations.push("Cliché metaphor: 'electric charge'")
+    if (/\btension\s+in\s+the\s+air\b/i.test(text)) violations.push("Cliché: 'tension in the air'")
+    return wait({ violations, passed: violations.length === 0 } as unknown as T)
+  }
+  if (base === "/scripts/save") return wait({ id: 1, status: "saved" } as unknown as T)
   if (base === "/scripts/") {
     const needs = params.get("needs_script") === "true"
     return wait((needs ? MOCK_SCRIPTS : MOCK_SCRIPTS) as unknown as T)
@@ -135,6 +147,23 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
   }
 
   // ── Call sheets ───────────────────────────────────────────────────────
+  // ── Titles — Model Name PNG ───────────────────────────────────────
+  if (base === "/titles/model-name") {
+    // 1x1 transparent PNG — enough for the UI to render without the
+    // real PIL renderer, which needs local fonts.
+    const pixel =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+    return wait({ data_url: `data:image/png;base64,${pixel}` } as unknown as T)
+  }
+
+  // ── Descriptions regen ────────────────────────────────────────────
+  if (base === "/descriptions/regenerate-paragraph") {
+    return wait({
+      paragraph:
+        "Her gaze finds yours through the dim light — deliberate, unhurried — and every thought you arrived with evaporates the moment she steps closer.",
+    } as unknown as T)
+  }
+
   if (base === "/call-sheets/tabs")   return wait(MOCK_CALLSHEET_TABS as unknown as T)
   if (base === "/call-sheets/dates")  return wait(MOCK_SHOOT_DATES as unknown as T)
   if (base === "/call-sheets/generate") {
