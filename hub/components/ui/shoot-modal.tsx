@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useMemo } from "react"
+import { createPortal } from "react-dom"
 import Link from "next/link"
 import { X, ChevronDown, ChevronUp, FileText } from "lucide-react"
 import { api, type Shoot, type Script } from "@/lib/api"
@@ -9,6 +10,14 @@ import { studioAbbr, studioColor } from "@/lib/studio-colors"
 
 /** Detail modal shared by the week and month calendars. */
 export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => void }) {
+  // We portal to <body> because the hub's page-entrance `fadeIn` animation
+  // leaves a lingering transform on an ancestor of <main>, which creates a
+  // containing block for position:fixed — that's why this modal rendered
+  // with its top below the viewport edge when left in-place. Portalling
+  // escapes the transformed parent so `inset: 0` means "viewport" again.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
     document.addEventListener("keydown", onKey)
@@ -79,7 +88,9 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
   const pct = total > 0 ? Math.round((validated / total) * 100) : 0
   const days = Math.floor(shoot.aging_hours / 24)
 
-  return (
+  if (!mounted) return null
+
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -102,14 +113,16 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
         onClick={e => e.stopPropagation()}
         style={{
           width: "min(640px, 100%)",
-          maxHeight: "85vh",
-          overflow: "auto",
+          maxHeight: "min(85vh, 100dvh - 40px)",
+          display: "flex",
+          flexDirection: "column",
           background: "var(--color-surface)",
           border: `1px solid var(--color-border)`,
           boxShadow: "0 24px 60px rgba(0,0,0,0.5)",
+          minHeight: 0,
         }}
       >
-        {/* Header */}
+        {/* Header — pinned so talent name + close stay visible while body scrolls */}
         <div
           style={{
             display: "flex",
@@ -118,6 +131,7 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
             gap: 16,
             padding: "20px 24px 16px",
             borderBottom: "1px solid var(--color-border)",
+            flexShrink: 0,
           }}
         >
           <div style={{ minWidth: 0 }}>
@@ -172,8 +186,8 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
           </button>
         </div>
 
-        {/* Body */}
-        <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
+        {/* Body — the only scrolling region; header + footer stay pinned */}
+        <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 18, overflowY: "auto", flex: "1 1 auto", minHeight: 0 }}>
           {/* Quick-access for director + PA — call sheet and scripts are the
               two docs most often opened mid-shoot. */}
           <div
@@ -241,6 +255,88 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
               </span>
               Jump to shoot →
             </Link>
+          </div>
+
+          {/* Script(s) — sits right under the two quick-access links so the
+              director can skim theme/plot before deciding whether to open the
+              full script view. Collapsed-by-default teaser; expand inline. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <SectionLabel>Script</SectionLabel>
+              {!scriptsLoading && scripts.length > 0 && hasScriptContent && (
+                <button
+                  type="button"
+                  onClick={() => setScriptsExpanded(v => !v)}
+                  aria-expanded={scriptsExpanded}
+                  aria-controls="shoot-modal-script-body"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "2px 8px",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    background: "transparent",
+                    color: "var(--color-text-muted)",
+                    border: "1px solid var(--color-border)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {scriptsExpanded ? "Collapse" : "Expand"}
+                  {scriptsExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                </button>
+              )}
+            </div>
+            {scriptsLoading ? (
+              <div style={{
+                padding: "10px 12px",
+                fontSize: 11,
+                color: "var(--color-text-faint)",
+                background: "var(--color-elevated)",
+                border: "1px solid var(--color-border)",
+              }}>
+                Loading script…
+              </div>
+            ) : scripts.length === 0 || !hasScriptContent ? (
+              <div style={{
+                padding: "10px 12px",
+                fontSize: 11,
+                color: "var(--color-text-faint)",
+                background: "var(--color-elevated)",
+                border: "1px solid var(--color-border)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}>
+                <FileText size={12} aria-hidden="true" />
+                <span>
+                  {scripts.length === 0 ? "No script on file for this shoot yet." : "Script placeholder exists — theme and plot are still empty."}
+                </span>
+                <Link
+                  href={scriptsHref}
+                  style={{ marginLeft: "auto", color: "var(--color-text-muted)", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", textDecoration: "none" }}
+                >
+                  Write →
+                </Link>
+              </div>
+            ) : (
+              <div
+                id="shoot-modal-script-body"
+                style={{ display: "flex", flexDirection: "column", gap: 10 }}
+              >
+                {scripts.map((s, i) => (
+                  <ScriptCard
+                    key={s.id}
+                    script={s}
+                    expanded={scriptsExpanded}
+                    accent={studioColor(s.studio)}
+                    isLast={i === scripts.length - 1}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
@@ -329,91 +425,9 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
               </div>
             </div>
           )}
-
-          {/* Script(s) — collapsed by default since on-set use is "glance + open
-              if needed". Shows theme as a teaser when collapsed so directors
-              can skim without expanding. */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <SectionLabel>Script</SectionLabel>
-              {!scriptsLoading && scripts.length > 0 && hasScriptContent && (
-                <button
-                  type="button"
-                  onClick={() => setScriptsExpanded(v => !v)}
-                  aria-expanded={scriptsExpanded}
-                  aria-controls="shoot-modal-script-body"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "2px 8px",
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: "0.1em",
-                    textTransform: "uppercase",
-                    background: "transparent",
-                    color: "var(--color-text-muted)",
-                    border: "1px solid var(--color-border)",
-                    cursor: "pointer",
-                  }}
-                >
-                  {scriptsExpanded ? "Collapse" : "Expand"}
-                  {scriptsExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                </button>
-              )}
-            </div>
-            {scriptsLoading ? (
-              <div style={{
-                padding: "10px 12px",
-                fontSize: 11,
-                color: "var(--color-text-faint)",
-                background: "var(--color-elevated)",
-                border: "1px solid var(--color-border)",
-              }}>
-                Loading script…
-              </div>
-            ) : scripts.length === 0 || !hasScriptContent ? (
-              <div style={{
-                padding: "10px 12px",
-                fontSize: 11,
-                color: "var(--color-text-faint)",
-                background: "var(--color-elevated)",
-                border: "1px solid var(--color-border)",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}>
-                <FileText size={12} aria-hidden="true" />
-                <span>
-                  {scripts.length === 0 ? "No script on file for this shoot yet." : "Script placeholder exists — theme and plot are still empty."}
-                </span>
-                <Link
-                  href={scriptsHref}
-                  style={{ marginLeft: "auto", color: "var(--color-text-muted)", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", textDecoration: "none" }}
-                >
-                  Write →
-                </Link>
-              </div>
-            ) : (
-              <div
-                id="shoot-modal-script-body"
-                style={{ display: "flex", flexDirection: "column", gap: 10 }}
-              >
-                {scripts.map((s, i) => (
-                  <ScriptCard
-                    key={s.id}
-                    script={s}
-                    expanded={scriptsExpanded}
-                    accent={studioColor(s.studio)}
-                    isLast={i === scripts.length - 1}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
         </div>
 
-        {/* Footer */}
+        {/* Footer — pinned so Close / Open in Shoots stay reachable regardless of body scroll */}
         <div
           style={{
             padding: "14px 24px",
@@ -421,6 +435,8 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
             display: "flex",
             justifyContent: "flex-end",
             gap: 8,
+            flexShrink: 0,
+            background: "var(--color-surface)",
           }}
         >
           <button
@@ -458,7 +474,8 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
           </Link>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
