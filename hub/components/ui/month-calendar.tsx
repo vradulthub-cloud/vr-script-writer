@@ -197,17 +197,29 @@ export function MonthCalendar({
                     marginBottom: 2,
                   }}
                 >
-                  <span
+                  {/* Tappable day number — primary trigger to open the day
+                      popover on touch devices. Desktop users can still use
+                      the hover-only "+" affordance to the right. */}
+                  <button
+                    type="button"
+                    onClick={() => inMonth && setOverflowDate(key)}
+                    aria-label={`Open ${key}`}
+                    disabled={!inMonth}
                     style={{
                       fontFamily: "var(--font-display-hero)",
                       fontWeight: 700,
                       fontSize: 14,
                       color: isToday ? "var(--color-lime)" : "var(--color-text)",
                       letterSpacing: "-0.02em",
+                      background: "transparent",
+                      border: 0,
+                      padding: "0 2px",
+                      cursor: inMonth ? "pointer" : "default",
+                      lineHeight: 1,
                     }}
                   >
                     {d.getDate()}
-                  </span>
+                  </button>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {holiday && (
                       <span
