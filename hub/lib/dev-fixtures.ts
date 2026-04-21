@@ -242,6 +242,45 @@ export const MOCK_SCRIPTS: Script[] = [
     female: "Jade Lane", male: "Daniel Cole",
     theme: "", plot: "", title: "", script_status: "needs_script",
   },
+  // Populated scripts that match the shoots on 2026-04-16 and 2026-04-20 —
+  // lets the ShootModal's Script section render real theme/plot content in
+  // dev-mock mode. Real prod scripts come from the backing Sheet.
+  {
+    id: 3, tab_name: "VRH - Apr", sheet_row: 4,
+    studio: "VRHush", shoot_date: "2026-04-16",
+    female: "Harley Love", male: "Mike Mancini",
+    theme: "Rainy afternoon — apartment alone, the boyfriend's roommate gets locked out on the balcony.",
+    plot: "Harley is home studying when Mike knocks on the balcony door soaked from the rain. She lets him in, hands him a towel, and realizes he's her boyfriend's new roommate. The tension builds as he changes in the living room; she pretends not to look. One glance too long and they're both committed. Cut to morning — she's in his hoodie, texting the boyfriend that she 'made it home safe'.",
+    title: "Harley Unbound",
+    script_status: "validated",
+  },
+  {
+    id: 4, tab_name: "VRA - Apr", sheet_row: 8,
+    studio: "VRAllure", shoot_date: "2026-04-16",
+    female: "Harley Love", male: "",
+    theme: "Solo spotlight — Harley unwinds after a long shoot, talking directly to the viewer.",
+    plot: "Soft golden-hour lighting through sheer curtains. Harley speaks quietly to the camera, explaining how the day went. She loosens her jewelry one piece at a time, pausing between each. The pacing is deliberate — no rush, no cut-aways. Ends on a close whispered 'goodnight' that breaks the fourth wall on purpose.",
+    title: "Low Light",
+    script_status: "validated",
+  },
+  {
+    id: 5, tab_name: "FPVR - Apr", sheet_row: 9,
+    studio: "FuckPassVR", shoot_date: "2026-04-20",
+    female: "Sophia Locke", male: "",
+    theme: "Locked out of her own house, Sophia waits for the locksmith — passes the time with the viewer.",
+    plot: "Sophia is sitting on the front porch in a sundress, locksmith is 45 minutes late. She decides to make the wait entertaining. Playful, knowing energy — aware she's being watched. Several costume adjustments that are very clearly for the camera's benefit. Breaks when the locksmith's van pulls into the drive.",
+    title: "Front Porch",
+    script_status: "validated",
+  },
+  {
+    id: 6, tab_name: "NNJOI - Apr", sheet_row: 5,
+    studio: "NaughtyJOI", shoot_date: "2026-04-20",
+    female: "Sophia Locke", male: "",
+    theme: "Late-night JOI — Sophia can't sleep, decides to help the viewer settle in too.",
+    plot: "Dim bedroom, one bedside lamp. Sophia sits cross-legged on the bed holding a glass of red wine. Her instructions are slow and conversational — matches the viewer's breathing, then guides the pace up steadily. Ends with the lamp clicking off and a whispered 'sweet dreams'.",
+    title: "Wine & Wind Down",
+    script_status: "validated",
+  },
 ]
 
 export const MOCK_NOTIFICATIONS: Notification[] = [

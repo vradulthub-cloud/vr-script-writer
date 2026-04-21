@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState, useMemo } from "react"
 import Link from "next/link"
-import { X } from "lucide-react"
-import type { Shoot } from "@/lib/api"
+import { X, ChevronDown, ChevronUp, FileText } from "lucide-react"
+import { api, type Shoot, type Script } from "@/lib/api"
+import { useIdToken } from "@/hooks/use-id-token"
 import { studioAbbr, studioColor } from "@/lib/studio-colors"
 
 /** Detail modal shared by the week and month calendars. */
@@ -18,6 +19,47 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
       document.body.style.overflow = prev
     }
   }, [onClose])
+
+  // Pull the script(s) backing this shoot. Scripts live per (studio + date +
+  // talent) tuple, so a multi-scene shoot can return 1–N scripts depending on
+  // how the day was split. We fetch per-studio to avoid blasting the whole
+  // sheet, then match locally by date + talent.
+  const idToken = useIdToken(undefined)
+  const [scripts, setScripts] = useState<Script[]>([])
+  const [scriptsLoading, setScriptsLoading] = useState(true)
+  const [scriptsExpanded, setScriptsExpanded] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setScriptsLoading(true)
+    const client = api(idToken ?? null)
+    const studios = Array.from(new Set(shoot.scenes.map(sc => sc.studio).filter(Boolean)))
+    const targetDate = (shoot.shoot_date || "").slice(0, 10)
+    Promise.all(studios.map(studio => client.scripts.list({ studio }).catch(() => [] as Script[])))
+      .then(lists => {
+        if (cancelled) return
+        // Dedupe by id — the dev-mock endpoint ignores the studio filter, and
+        // even in prod a script can surface under two studios when scenes span
+        // tabs. Last write wins (both rows are the same).
+        const byId = new Map<number, Script>()
+        for (const s of lists.flat()) byId.set(s.id, s)
+        const matched = Array.from(byId.values()).filter(s =>
+          (s.shoot_date || "").slice(0, 10) === targetDate &&
+          (!shoot.female_talent || s.female === shoot.female_talent) &&
+          (!shoot.male_talent || !s.male || s.male === shoot.male_talent),
+        )
+        // Stable order — by tab_name then id
+        matched.sort((a, b) => a.tab_name.localeCompare(b.tab_name) || a.id - b.id)
+        setScripts(matched)
+      })
+      .finally(() => { if (!cancelled) setScriptsLoading(false) })
+    return () => { cancelled = true }
+  }, [idToken, shoot.shoot_date, shoot.female_talent, shoot.male_talent, shoot.scenes])
+
+  const hasScriptContent = useMemo(
+    () => scripts.some(s => (s.theme?.trim() || s.plot?.trim())),
+    [scripts],
+  )
 
   const primaryStudio = shoot.scenes[0]?.studio ?? ""
   const accent = primaryStudio ? studioColor(primaryStudio) : "var(--color-text-muted)"
@@ -287,6 +329,88 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
               </div>
             </div>
           )}
+
+          {/* Script(s) — collapsed by default since on-set use is "glance + open
+              if needed". Shows theme as a teaser when collapsed so directors
+              can skim without expanding. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <SectionLabel>Script</SectionLabel>
+              {!scriptsLoading && scripts.length > 0 && hasScriptContent && (
+                <button
+                  type="button"
+                  onClick={() => setScriptsExpanded(v => !v)}
+                  aria-expanded={scriptsExpanded}
+                  aria-controls="shoot-modal-script-body"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "2px 8px",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    background: "transparent",
+                    color: "var(--color-text-muted)",
+                    border: "1px solid var(--color-border)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {scriptsExpanded ? "Collapse" : "Expand"}
+                  {scriptsExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                </button>
+              )}
+            </div>
+            {scriptsLoading ? (
+              <div style={{
+                padding: "10px 12px",
+                fontSize: 11,
+                color: "var(--color-text-faint)",
+                background: "var(--color-elevated)",
+                border: "1px solid var(--color-border)",
+              }}>
+                Loading script…
+              </div>
+            ) : scripts.length === 0 || !hasScriptContent ? (
+              <div style={{
+                padding: "10px 12px",
+                fontSize: 11,
+                color: "var(--color-text-faint)",
+                background: "var(--color-elevated)",
+                border: "1px solid var(--color-border)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}>
+                <FileText size={12} aria-hidden="true" />
+                <span>
+                  {scripts.length === 0 ? "No script on file for this shoot yet." : "Script placeholder exists — theme and plot are still empty."}
+                </span>
+                <Link
+                  href={scriptsHref}
+                  style={{ marginLeft: "auto", color: "var(--color-text-muted)", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", textDecoration: "none" }}
+                >
+                  Write →
+                </Link>
+              </div>
+            ) : (
+              <div
+                id="shoot-modal-script-body"
+                style={{ display: "flex", flexDirection: "column", gap: 10 }}
+              >
+                {scripts.map((s, i) => (
+                  <ScriptCard
+                    key={s.id}
+                    script={s}
+                    expanded={scriptsExpanded}
+                    accent={studioColor(s.studio)}
+                    isLast={i === scripts.length - 1}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer */}
@@ -361,6 +485,100 @@ function ModalStat({ label, value, sub }: { label: string; value: string; sub?: 
           {sub}
         </div>
       )}
+    </div>
+  )
+}
+
+function ScriptCard({
+  script,
+  expanded,
+  accent,
+  isLast,
+}: {
+  script: Script
+  expanded: boolean
+  accent: string
+  isLast: boolean
+}) {
+  const teaser = (script.theme?.trim() || script.plot?.trim() || "").slice(0, 180)
+  return (
+    <div
+      style={{
+        padding: "10px 12px",
+        background: "var(--color-elevated)",
+        border: "1px solid var(--color-border)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        marginBottom: isLast ? 0 : 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 9,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            fontWeight: 700,
+            color: accent,
+          }}
+        >
+          {script.tab_name}
+        </span>
+        {script.title && (
+          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--color-text)", letterSpacing: "-0.01em" }}>
+            {script.title}
+          </span>
+        )}
+      </div>
+      {expanded ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {script.theme?.trim() && (
+            <ScriptField label="Theme" value={script.theme} />
+          )}
+          {script.plot?.trim() && (
+            <ScriptField label="Plot" value={script.plot} />
+          )}
+        </div>
+      ) : (
+        <div
+          style={{
+            fontSize: 12,
+            lineHeight: 1.55,
+            color: "var(--color-text-muted)",
+            display: "-webkit-box",
+            WebkitBoxOrient: "vertical",
+            WebkitLineClamp: 2,
+            overflow: "hidden",
+          }}
+        >
+          {teaser}
+          {teaser.length >= 180 && "…"}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ScriptField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 9,
+          fontWeight: 700,
+          letterSpacing: "0.16em",
+          textTransform: "uppercase",
+          color: "var(--color-text-faint)",
+          marginBottom: 4,
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--color-text)", whiteSpace: "pre-wrap" }}>
+        {value}
+      </div>
     </div>
   )
 }
