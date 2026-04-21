@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
+import { createPortal } from "react-dom"
 import type { Shoot } from "@/lib/api"
 import { studioAbbr, studioColor } from "@/lib/studio-colors"
 
@@ -23,6 +24,7 @@ export function MonthCalendar({
   viewMode?: "month" | "week"
 }) {
   const [hoverDate, setHoverDate] = useState<string | null>(null)
+  const [overflowDate, setOverflowDate] = useState<string | null>(null)
 
   const gridStart = useMemo(() => {
     const d = new Date(monthStart)
@@ -75,7 +77,20 @@ export function MonthCalendar({
   const todayKey = new Date().toISOString().slice(0, 10)
   const monthIdx = monthStart.getMonth()
 
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
+  const overflowShoots = overflowDate ? shootsByDate[overflowDate] ?? [] : []
+  const overflowLabel = overflowDate
+    ? new Date(overflowDate + "T00:00:00").toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      })
+    : ""
+
   return (
+    <>
     <div
       style={{
         border: "1px solid var(--color-border)",
@@ -229,7 +244,7 @@ export function MonthCalendar({
                 {cellShoots.length > 2 && (
                   <button
                     type="button"
-                    onClick={() => onSelect(cellShoots[2])}
+                    onClick={() => setOverflowDate(key)}
                     style={{
                       background: "transparent",
                       border: 0,
@@ -240,7 +255,7 @@ export function MonthCalendar({
                       letterSpacing: "0.04em",
                       cursor: "pointer",
                     }}
-                    title={`${cellShoots.length - 2} more shoot${cellShoots.length - 2 === 1 ? "" : "s"} on this day`}
+                    title={`Show all ${cellShoots.length} shoots on this day`}
                   >
                     +{cellShoots.length - 2} more
                   </button>
@@ -251,5 +266,116 @@ export function MonthCalendar({
         </div>
       ))}
     </div>
+    {mounted && overflowDate && createPortal(
+      <div
+        role="dialog"
+        aria-label={`Shoots on ${overflowLabel}`}
+        onClick={() => setOverflowDate(null)}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.55)",
+          zIndex: 1100,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 16,
+        }}
+      >
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            width: "min(380px, 100%)",
+            maxHeight: "min(70vh, 100dvh - 60px)",
+            background: "var(--color-surface)",
+            border: "1px solid var(--color-border)",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          <header
+            style={{
+              padding: "12px 14px",
+              borderBottom: "1px solid var(--color-border)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>
+                {overflowShoots.length} Shoots
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text)" }}>
+                {overflowLabel}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOverflowDate(null)}
+              aria-label="Close"
+              style={{
+                background: "transparent",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text-muted)",
+                fontSize: 14,
+                lineHeight: 1,
+                padding: "4px 8px",
+                cursor: "pointer",
+              }}
+            >
+              ✕
+            </button>
+          </header>
+          <div style={{ overflowY: "auto", flex: "1 1 auto", minHeight: 0 }}>
+            {overflowShoots.map(s => {
+              const studio = s.scenes[0]?.studio ?? ""
+              const color = studioColor(studio)
+              const abbr = studioAbbr(studio) || "—"
+              const talent = [s.female_talent, s.male_talent].filter(Boolean).join(" / ") || s.shoot_id
+              return (
+                <button
+                  key={s.shoot_id}
+                  type="button"
+                  onClick={() => { setOverflowDate(null); onSelect(s) }}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "auto 1fr",
+                    alignItems: "center",
+                    gap: 10,
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "10px 14px",
+                    background: "transparent",
+                    border: 0,
+                    borderBottom: "1px solid var(--color-border-subtle)",
+                    cursor: "pointer",
+                    color: "var(--color-text)",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 800,
+                      letterSpacing: "0.08em",
+                      color,
+                      padding: "3px 6px",
+                      background: `color-mix(in srgb, ${color} 18%, transparent)`,
+                    }}
+                  >
+                    {abbr}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>{talent}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>,
+      document.body,
+    )}
+    </>
   )
 }
