@@ -203,16 +203,25 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
     [scenes, studio]
   )
 
-  // Scenes missing descriptions — sorted by readiness
-  const missingDescScenes = useMemo(() => {
-    return studioScenes
+  // Scenes missing descriptions, sorted newest-first (by scene id). We show
+  // the latest 10 by default — editors almost always want to write the
+  // newest scene. For older ones they use the search box below (grail id or
+  // performer), which lifts the cap.
+  const missingAllDesc = useMemo(
+    () => studioScenes
       .filter(s => !s.has_description)
-      .sort((a, b) => {
-        const readyA = (a.title ? 1 : 0) + (a.performers ? 1 : 0) + (a.plot ? 1 : 0) + (a.categories ? 1 : 0)
-        const readyB = (b.title ? 1 : 0) + (b.performers ? 1 : 0) + (b.plot ? 1 : 0) + (b.categories ? 1 : 0)
-        return readyB - readyA // Most ready first
-      })
-  }, [studioScenes])
+      .sort((a, b) => b.id.localeCompare(a.id)),
+    [studioScenes],
+  )
+
+  const [queueSearch, setQueueSearch] = useState("")
+  const missingDescScenes = useMemo(() => {
+    if (!queueSearch.trim()) return missingAllDesc.slice(0, 10)
+    const q = queueSearch.trim().toLowerCase()
+    return missingAllDesc.filter(
+      s => s.id.toLowerCase().includes(q) || (s.performers ?? "").toLowerCase().includes(q),
+    )
+  }, [missingAllDesc, queueSearch])
 
   const [showQueue, setShowQueue] = useState(true)
   const [grailSaving, setGrailSaving] = useState(false)
@@ -451,26 +460,52 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
         {/* ── Left — inputs ── */}
         <div style={{ width: 300, flexShrink: 0 }}>
 
-        {/* Missing descriptions queue */}
-        {missingDescScenes.length > 0 && (
+        {/* Missing descriptions queue — latest 10 by default; search to expand. */}
+        {missingAllDesc.length > 0 && (
           <div className="mb-4">
             <button
               onClick={() => setShowQueue(v => !v)}
               className="flex items-center justify-between w-full mb-2"
               style={{ fontSize: 11, color: "var(--color-text-muted)", fontWeight: 600 }}
             >
-              <span>Missing Descriptions ({missingDescScenes.length})</span>
+              <span>
+                Missing Descriptions
+                <span style={{ color: "var(--color-text-faint)", fontWeight: 400, marginLeft: 4 }}>
+                  {queueSearch.trim()
+                    ? `${missingDescScenes.length} match${missingDescScenes.length === 1 ? "" : "es"}`
+                    : `latest ${Math.min(10, missingAllDesc.length)} of ${missingAllDesc.length}`}
+                </span>
+              </span>
               <span style={{ fontSize: 10 }}>{showQueue ? "▾" : "▸"}</span>
             </button>
             {showQueue && (
-              <div
-                className="rounded overflow-y-auto"
-                style={{
-                  border: "1px solid var(--color-border)",
-                  maxHeight: 200,
-                }}
-              >
-                {missingDescScenes.slice(0, 30).map((s, i) => {
+              <>
+                <input
+                  type="search"
+                  value={queueSearch}
+                  onChange={e => setQueueSearch(e.target.value)}
+                  placeholder="Search by scene id or performer…"
+                  className="w-full px-2.5 py-1.5 rounded mb-1.5 outline-none"
+                  style={{
+                    fontSize: 11,
+                    background: "var(--color-surface)",
+                    border: "1px solid var(--color-border)",
+                    color: "var(--color-text)",
+                  }}
+                />
+                <div
+                  className="rounded overflow-y-auto"
+                  style={{
+                    border: "1px solid var(--color-border)",
+                    maxHeight: 200,
+                  }}
+                >
+                  {missingDescScenes.length === 0 && queueSearch.trim() && (
+                    <div style={{ padding: "10px 12px", fontSize: 11, color: "var(--color-text-faint)", textAlign: "center" }}>
+                      No matches — try a scene id (e.g. VRA0523) or a performer.
+                    </div>
+                  )}
+                  {missingDescScenes.map((s, i) => {
                   const readiness = (s.title ? 1 : 0) + (s.performers ? 1 : 0) + (s.plot ? 1 : 0) + (s.categories ? 1 : 0)
                   const dot = readiness >= 3 ? "var(--color-ok)" : readiness >= 1 ? "var(--color-warn)" : "var(--color-err)"
                   return (
@@ -491,7 +526,8 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                     </button>
                   )
                 })}
-              </div>
+                </div>
+              </>
             )}
           </div>
         )}
