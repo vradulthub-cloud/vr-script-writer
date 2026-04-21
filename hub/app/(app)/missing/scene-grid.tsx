@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useDeferredValue, useEffect, memo } from "react"
 import { flushSync } from "react-dom"
 import { useSearchParams } from "next/navigation"
-import { RefreshCw, LayoutGrid, LayoutList } from "lucide-react"
+import { RefreshCw, LayoutGrid, LayoutList, Wand2, Check, X as XIcon } from "lucide-react"
 import { FilterTabs } from "@/components/ui/filter-tabs"
 import { PageHeader } from "@/components/ui/page-header"
 import { RetryError } from "@/components/ui/retry-error"
@@ -384,6 +384,8 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
                           scene={scene}
                           selected={selectedScene?.id === scene.id}
                           onClick={() => morphTo(() => setSelectedScene(scene))}
+                          idToken={idToken}
+                          onSceneUpdate={handleSceneUpdate}
                         />
                       ))}
                     </div>
@@ -484,8 +486,14 @@ function AllClearCard({ color }: { color: string }) {
 // React.memo prevents re-renders for unchanged scenes when filters or search
 // state change elsewhere in the grid.
 const SceneCard = memo(function SceneCard({
-  scene, selected, onClick,
-}: { scene: Scene; selected: boolean; onClick: () => void }) {
+  scene, selected, onClick, idToken, onSceneUpdate,
+}: {
+  scene: Scene
+  selected: boolean
+  onClick: () => void
+  idToken?: string
+  onSceneUpdate: (updated: Scene) => void
+}) {
   const missing = missingAssets(scene)
   const pct = completionPct(scene)
   const pctColor = pct === 100 ? "var(--color-ok)" : pct >= 60 ? "var(--color-warn)" : "var(--color-err)"
@@ -496,6 +504,50 @@ const SceneCard = memo(function SceneCard({
 
   const color = studioColor(scene.studio)
 
+  const [genTitle, setGenTitle] = useState("")
+  const [genBusy, setGenBusy] = useState<"idle" | "loading" | "saving">("idle")
+  const [genErr, setGenErr] = useState<string | null>(null)
+
+  async function runGenerate(e: React.MouseEvent | React.KeyboardEvent) {
+    e.stopPropagation()
+    setGenBusy("loading")
+    setGenErr(null)
+    try {
+      const { title } = await api(idToken ?? null).scenes.generateTitle(scene.id, {
+        female: scene.female,
+        male: scene.male,
+        theme: scene.theme,
+        plot: scene.plot,
+      })
+      setGenTitle(title)
+    } catch {
+      setGenErr("Failed")
+    } finally {
+      setGenBusy("idle")
+    }
+  }
+
+  async function runApply(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!genTitle) return
+    setGenBusy("saving")
+    try {
+      await api(idToken ?? null).scenes.updateTitle(scene.id, genTitle)
+      onSceneUpdate({ ...scene, title: genTitle })
+      setGenTitle("")
+    } catch {
+      setGenErr("Save failed")
+    } finally {
+      setGenBusy("idle")
+    }
+  }
+
+  function discard(e: React.MouseEvent) {
+    e.stopPropagation()
+    setGenTitle("")
+    setGenErr(null)
+  }
+
   // Unique view-transition-name tied to scene.id so the browser pairs
   // this card with the corresponding element in scene-detail.tsx when the
   // user clicks in or opens the panel. CSS-safe: scene IDs use [A-Z0-9-].
@@ -503,8 +555,11 @@ const SceneCard = memo(function SceneCard({
   const codeName  = `scene-code-${scene.id}`
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick() } }}
       aria-pressed={selected}
       style={{
         background: selected
@@ -538,9 +593,106 @@ const SceneCard = memo(function SceneCard({
         {scene.performers || "TBD"}
       </div>
 
-      <div style={{ fontSize: 11, color: "var(--color-text-muted)", fontStyle: "italic", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginBottom: 10 }}>
-        {titleDisplay}
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 10 }}>
+        <span style={{ flex: 1, fontSize: 11, color: "var(--color-text-muted)", fontStyle: "italic", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {titleDisplay}
+        </span>
+        <button
+          type="button"
+          onClick={runGenerate}
+          disabled={genBusy !== "idle"}
+          aria-label="Generate title from script"
+          title={genBusy === "loading" ? "Generating…" : "Generate title from script"}
+          style={{
+            flexShrink: 0,
+            width: 20,
+            height: 20,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: 3,
+            background: "transparent",
+            color: genBusy === "loading" ? "var(--color-text-faint)" : color,
+            border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`,
+            cursor: genBusy === "loading" ? "wait" : "pointer",
+            padding: 0,
+          }}
+        >
+          <Wand2 size={11} aria-hidden="true" />
+        </button>
       </div>
+
+      {(genTitle || genErr) && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            marginBottom: 8,
+            padding: "4px 6px",
+            borderRadius: 3,
+            background: "var(--color-elevated)",
+            border: `1px solid color-mix(in srgb, ${color} 25%, var(--color-border))`,
+          }}
+        >
+          {genErr ? (
+            <>
+              <span style={{ flex: 1, fontSize: 10, color: "var(--color-err)" }}>{genErr}</span>
+              <button
+                type="button"
+                onClick={discard}
+                aria-label="Dismiss"
+                style={{
+                  width: 16, height: 16, padding: 0,
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  background: "transparent", color: "var(--color-text-faint)",
+                  border: "none", cursor: "pointer",
+                }}
+              >
+                <XIcon size={10} aria-hidden="true" />
+              </button>
+            </>
+          ) : (
+            <>
+              <span
+                style={{ flex: 1, fontSize: 11, fontWeight: 600, color: "var(--color-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                title={genTitle}
+              >
+                {genTitle}
+              </span>
+              <button
+                type="button"
+                onClick={runApply}
+                disabled={genBusy === "saving"}
+                aria-label="Apply generated title"
+                title="Apply"
+                style={{
+                  width: 18, height: 18, padding: 0,
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  borderRadius: 3, background: "var(--color-lime)", color: "#0d0d0d",
+                  border: "none", cursor: genBusy === "saving" ? "wait" : "pointer",
+                }}
+              >
+                <Check size={11} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={discard}
+                aria-label="Discard"
+                title="Discard"
+                style={{
+                  width: 18, height: 18, padding: 0,
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  borderRadius: 3, background: "transparent", color: "var(--color-text-faint)",
+                  border: "1px solid var(--color-border)", cursor: "pointer",
+                }}
+              >
+                <XIcon size={11} aria-hidden="true" />
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
         <div style={{ flex: 1, height: 3, background: "var(--color-border)", borderRadius: 2, overflow: "hidden" }}>
@@ -555,7 +707,7 @@ const SceneCard = memo(function SceneCard({
           status: scene[a.key] ? "ok" : "missing",
         }))}
       />
-    </button>
+    </div>
   )
 })
 

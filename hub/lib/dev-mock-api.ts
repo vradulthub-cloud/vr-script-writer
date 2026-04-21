@@ -67,6 +67,27 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
   if (namingMatch) {
     return wait({ scene_id: namingMatch[1], issues: [], ok: true } as unknown as T)
   }
+  const generateTitleMatch = base.match(/^\/scenes\/([^/]+)\/generate-title$/)
+  if (generateTitleMatch) {
+    // Deterministic-feeling mock — the point is to exercise the UI flow, not
+    // actually be creative. Hash the scene id into one of a dozen canned titles.
+    const sid = generateTitleMatch[1]
+    const pool = [
+      "Under Her Spell", "Stay After Class", "The Long Game", "Behind Closed Doors",
+      "Private Practice", "Perfectly Still", "Heat By Design", "Earning It",
+      "Deep Focus", "The Right Fit", "All In", "Nailing the Interview",
+    ]
+    let h = 0
+    for (const ch of sid) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+    return wait({ title: pool[h % pool.length] } as unknown as T)
+  }
+  const updateTitleMatch = base.match(/^\/scenes\/([^/]+)\/title$/)
+  if (updateTitleMatch) {
+    return wait({ ok: true } as unknown as T)
+  }
+  if (base === "/scripts/title-generate") {
+    return wait({ title: "Checked In" } as unknown as T)
+  }
 
   // ── Approvals ─────────────────────────────────────────────────────────
   if (base === "/approvals/") {
@@ -116,6 +137,12 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
   // ── Call sheets ───────────────────────────────────────────────────────
   if (base === "/call-sheets/tabs")   return wait(MOCK_CALLSHEET_TABS as unknown as T)
   if (base === "/call-sheets/dates")  return wait(MOCK_SHOOT_DATES as unknown as T)
+  if (base === "/call-sheets/generate") {
+    return wait({
+      doc_url: "https://docs.google.com/document/d/mock-call-sheet",
+      title: "Mock Call Sheet",
+    } as unknown as T)
+  }
 
   // ── Compilations ──────────────────────────────────────────────────────
   if (base === "/compilations/scenes") return wait(MOCK_SCENES as unknown as T)

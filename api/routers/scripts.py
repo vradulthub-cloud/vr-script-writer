@@ -307,8 +307,13 @@ async def validate_script(body: ValidateBody, user: CurrentUser):
 class TitleGenBody(BaseModel):
     studio: str
     female: str = ""
+    male: str = ""
     theme: str = ""
     plot: str = ""
+    wardrobe_f: str = ""
+    wardrobe_m: str = ""
+    location: str = ""
+    props: str = ""
 
 
 @router.post("/title-generate")
@@ -316,7 +321,14 @@ async def generate_script_title(body: TitleGenBody, user: CurrentUser):
     """Generate an AI title for a script (Claude with Ollama fallback)."""
     try:
         from api.prompts import generate_title_with_fallback
-        title = generate_title_with_fallback(body.studio, body.female, body.theme, body.plot)
+        title = generate_title_with_fallback(
+            body.studio, body.female, body.theme, body.plot,
+            male=body.male,
+            wardrobe_f=body.wardrobe_f,
+            wardrobe_m=body.wardrobe_m,
+            location=body.location,
+            props=body.props,
+        )
         return {"title": title}
     except RuntimeError as exc:
         _log.error("Script title generation failed: %s", exc)

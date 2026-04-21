@@ -565,7 +565,19 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         patch<{ ok: boolean }>(`/scenes/${id}/categories`, { value }),
       updateTags: (id: string, value: string) =>
         patch<{ ok: boolean }>(`/scenes/${id}/tags`, { value }),
-      generateTitle: (id: string, body: { female?: string; theme?: string; plot?: string }) =>
+      generateTitle: (
+        id: string,
+        body: {
+          female?: string
+          male?: string
+          theme?: string
+          plot?: string
+          wardrobe_f?: string
+          wardrobe_m?: string
+          location?: string
+          props?: string
+        },
+      ) =>
         post<{ title: string }>(`/scenes/${id}/generate-title`, body),
       namingIssues: (id: string) =>
         get<{ scene_id: string; issues: NamingIssue[]; ok: boolean }>(`/scenes/${id}/naming-issues`),
@@ -588,7 +600,17 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<{ id: number; status: string }>("/scripts/save", body),
       validate: (body: { theme: string; plot: string; wardrobe_f: string; wardrobe_m?: string; shoot_location: string; female?: string; male?: string }) =>
         post<{ violations: string[]; passed: boolean }>("/scripts/validate", body),
-      generateTitle: (body: { studio: string; female?: string; theme?: string; plot?: string }) =>
+      generateTitle: (body: {
+        studio: string
+        female?: string
+        male?: string
+        theme?: string
+        plot?: string
+        wardrobe_f?: string
+        wardrobe_m?: string
+        location?: string
+        props?: string
+      }) =>
         post<{ title: string }>("/scripts/title-generate", body),
     },
 

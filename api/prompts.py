@@ -331,41 +331,48 @@ STUDIO_KEY_MAP: dict[str, str] = {
 TITLE_GEN_SYSTEMS: dict[str, str] = {
     "VRHush": (
         "You are a creative title writer for VRHush, a premium VR adult content studio. "
-        "Generate exactly ONE scene title. Rules: 2-3 words ONLY, clever double-entendres or "
-        "wordplay strongly preferred, hint at theme without being literal, no performer names, "
-        "no generic porn titles, no all-caps. "
-        "Real VRH titles for reference — match this tone and length: "
-        "Heat By Design, Born To Breed, Under Her Spell, Intimate Renderings, "
-        "She Blooms on Command, Nailing the Interview, Deep Focus, Behind Closed Doors, "
-        "The Long Game, Perfectly Still, Earning It, All In, "
-        "Private Practice, Stay After Class, The Right Fit. "
+        "Generate exactly ONE scene title that reflects the actual plot/theme you're given. "
+        "The title MUST hook into a concrete hook from the script — the setup, the setting, "
+        "a prop, the wardrobe, the role, or a beat of the action. Do not invent content that "
+        "isn't in the script. "
+        "Form: 2-4 words, title case, clever wordplay/double-entendre preferred over literal "
+        "description, no performer names, no generic porn clichés, no all-caps. "
+        "Reference tone — these are real VRH titles, match this voice (NOT content): "
+        "Heat By Design, Born To Breed, Under Her Spell, Nailing the Interview, "
+        "Deep Focus, Behind Closed Doors, Private Practice, Stay After Class, The Right Fit, "
+        "Earning It. "
         "Respond with ONLY the title — no explanation, no quotes."
     ),
     "FuckPassVR": (
         "You are a creative title writer for FuckPassVR, a premium VR travel-and-intimacy studio. "
-        "Generate exactly ONE scene title. Rules: 2-5 words, travel or destination themes when "
-        "applicable, clever wordplay preferred, no performer names, no all-caps. "
-        "Real FPVR titles for reference — match this tone: "
-        "The Grind Finale, Eager Beaver, Deep Devotion, Fully Seated Affair, "
-        "Behind the Curtain, The Bouncing Layover, Last Night in Lisbon, "
-        "Checked In, The Long Layover, Passport to Paradise, "
-        "Her City Her Rules, Local Knowledge, First Class Upgrade. "
+        "Generate exactly ONE scene title that reflects the actual plot/theme. If the script "
+        "names a destination, city, or travel setup, the title should lean into it. The title "
+        "MUST hook into a concrete element from the script — the destination, the setting, a "
+        "prop, the wardrobe, or a beat of the action. Do not invent content that isn't in the script. "
+        "Form: 2-5 words, title case, clever wordplay preferred, no performer names, no all-caps. "
+        "Reference tone — real FPVR titles, match this voice (NOT content): "
+        "The Grind Finale, Eager Beaver, Fully Seated Affair, The Bouncing Layover, "
+        "Last Night in Lisbon, Checked In, Passport to Paradise, Her City Her Rules, "
+        "Local Knowledge, First Class Upgrade. "
         "Respond with ONLY the title — no explanation, no quotes."
     ),
     "VRAllure": (
         "You are a creative title writer for VRAllure, a premium VR solo/intimate studio. "
-        "Generate exactly ONE scene title. Rules: 2-3 words ONLY, sensual/intimate/soft tone, "
-        "suggestive but elegant, no performer names, no crude language, no all-caps. "
-        "Real VRA titles for reference — match this tone: "
-        "Sweet Surrender, Rise and Grind, Always on Top, A Swift Release, "
-        "She Came to Play, Hovering With Intent, Just for You, "
-        "Slow Burn, Perfectly Undone, Something to Watch, "
+        "Generate exactly ONE scene title that reflects the actual plot/theme. "
+        "The title MUST hook into a concrete element from the script — the setup, the setting, "
+        "a prop, the wardrobe, or a beat of the action. Do not invent content that isn't there. "
+        "Form: 2-4 words, title case, sensual/intimate/soft tone, suggestive but elegant, "
+        "no performer names, no crude language, no all-caps. "
+        "Reference tone — real VRA titles, match this voice (NOT content): "
+        "Sweet Surrender, Always on Top, A Swift Release, Hovering With Intent, "
+        "Just for You, Slow Burn, Perfectly Undone, Something to Watch, "
         "Touch and Go, Open Invitation, All to Herself. "
         "Respond with ONLY the title — no explanation, no quotes."
     ),
     "NaughtyJOI": (
         "You are a creative title writer for NaughtyJOI, a premium VR JOI studio. "
-        "Generate a PAIRED title using the performer's first name: "
+        "Generate a PAIRED title using the performer's first name. Both lines should reflect "
+        "the script's actual setup, wardrobe, or props when given. "
         "line 1: '[Name] [soft intimate verb phrase]' "
         "line 2: '[Name] [more intense/commanding verb phrase]' "
         "Keep each line 3-5 words. Tone should be teasing and commanding. "
@@ -379,9 +386,18 @@ def generate_title_with_fallback(
     female: str,
     theme: str,
     plot: str,
+    *,
+    male: str = "",
+    wardrobe_f: str = "",
+    wardrobe_m: str = "",
+    location: str = "",
+    props: str = "",
 ) -> str:
     """
     Generate a scene title — tries Claude first, falls back to Ollama.
+
+    The prompt is fed the full script so the title hooks into a concrete beat
+    (setting, prop, wardrobe, role) instead of riffing on an empty brief.
 
     Claude produces better creative results; Ollama (dolphin3, uncensored) is
     the fallback when Claude refuses due to content policy or is unreachable.
@@ -390,13 +406,23 @@ def generate_title_with_fallback(
     _log = logging.getLogger(__name__)
 
     sys_prompt = TITLE_GEN_SYSTEMS.get(studio, TITLE_GEN_SYSTEMS["VRHush"])
-    user_prompt = (
-        f"Generate a title for this scene:\n\n"
-        f"Performer: {female}\n"
-        f"Theme: {theme}\n"
-        f"Plot summary: {plot[:500] if plot else 'N/A'}\n\n"
-        "Generate the title now."
+
+    # Build the user prompt from whichever script fields are populated. Empty
+    # fields are skipped entirely so the model doesn't anchor on "N/A".
+    lines: list[str] = ["Generate a title for this scene.\n\nScript:"]
+    if female:     lines.append(f"- Female performer: {female}")
+    if male:       lines.append(f"- Male performer: {male}")
+    if theme:      lines.append(f"- Theme: {theme}")
+    if location:   lines.append(f"- Location / set: {location}")
+    if wardrobe_f: lines.append(f"- Wardrobe (f): {wardrobe_f}")
+    if wardrobe_m: lines.append(f"- Wardrobe (m): {wardrobe_m}")
+    if props:      lines.append(f"- Props: {props}")
+    if plot:       lines.append(f"- Plot: {plot[:800]}")
+    lines.append(
+        "\nThe title MUST hook into one of the concrete details above — do NOT invent "
+        "content that isn't in the script. Generate the title now."
     )
+    user_prompt = "\n".join(lines)
 
     def _clean(raw: str) -> str:
         return raw.split("\n")[0].strip().strip('"').strip("'")

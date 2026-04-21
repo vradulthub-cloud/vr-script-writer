@@ -313,27 +313,59 @@ async def update_scene_tags(scene_id: str, body: SceneFieldUpdate, user: Current
 
 class TitleGenerateBody(BaseModel):
     female: str = ""
+    male: str = ""
     theme: str = ""
     plot: str = ""
+    wardrobe_f: str = ""
+    wardrobe_m: str = ""
+    location: str = ""
+    props: str = ""
 
 
 @router.post("/{scene_id}/generate-title")
 async def generate_scene_title(scene_id: str, body: TitleGenerateBody, user: CurrentUser):
-    """Generate an AI title suggestion for a scene (Claude with Ollama fallback)."""
+    """Generate an AI title suggestion for a scene (Claude with Ollama fallback).
+
+    Pulls the full script context from the scenes row, then falls back to any
+    matching row in the scripts table for location/props (fields the scenes
+    row doesn't carry). Client-supplied fields on the body win — lets the
+    Descriptions editor pass its in-progress values without re-saving first.
+    """
     with get_db() as conn:
         row = conn.execute("SELECT * FROM scenes WHERE id = ?", (scene_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Scene not found")
         scene = dict(row)
 
+        # Best-effort match to scripts row for location + props. Key on studio
+        # + female name; ranks newest tab first so re-shoots prefer the latest.
+        script_extras = {"location": "", "props": ""}
+        female_for_match = body.female or scene.get("female", "")
+        if female_for_match:
+            srow = conn.execute(
+                "SELECT location, props FROM scripts "
+                "WHERE studio = ? AND LOWER(female) = LOWER(?) "
+                "ORDER BY tab_name DESC LIMIT 1",
+                (scene.get("studio", ""), female_for_match),
+            ).fetchone()
+            if srow:
+                script_extras = dict(srow)
+
     studio = scene.get("studio", "VRHush")
-    female = body.female or scene.get("female", "")
-    theme = body.theme or scene.get("theme", "")
-    plot = body.plot or scene.get("plot", "")
 
     try:
         from api.prompts import generate_title_with_fallback
-        title = generate_title_with_fallback(studio, female, theme, plot)
+        title = generate_title_with_fallback(
+            studio,
+            body.female or scene.get("female", ""),
+            body.theme or scene.get("theme", ""),
+            body.plot or scene.get("plot", ""),
+            male=body.male or scene.get("male", ""),
+            wardrobe_f=body.wardrobe_f or scene.get("wardrobe_f", ""),
+            wardrobe_m=body.wardrobe_m or scene.get("wardrobe_m", ""),
+            location=body.location or script_extras.get("location", ""),
+            props=body.props or script_extras.get("props", ""),
+        )
         return {"title": title}
     except RuntimeError as exc:
         _log.error("Title generation failed: %s", exc)
