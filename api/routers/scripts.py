@@ -194,7 +194,21 @@ async def save_script(body: ScriptSaveBody, user: CurrentUser):
 
     If script_id is provided, updates that row.
     Otherwise creates a new row.
+
+    Runs the slop filter (see api.slop_filter) across every user-visible
+    field at save time so the model's raw output streams live but the
+    copy that lands in Sheets is post-processed.
     """
+    from api.slop_filter import post_process
+
+    body = body.model_copy(update={
+        "theme": post_process(body.theme or ""),
+        "plot": post_process(body.plot or ""),
+        "wardrobe_f": post_process(body.wardrobe_f or ""),
+        "wardrobe_m": post_process(body.wardrobe_m or ""),
+        "shoot_location": post_process(body.shoot_location or ""),
+        "props": post_process(body.props or ""),
+    })
     now = datetime.now(timezone.utc).isoformat()
 
     with get_db() as conn:
@@ -296,6 +310,16 @@ async def validate_script(body: ValidateBody, user: CurrentUser):
         first_name = body.male.split()[0].lower()
         if first_name in body.plot.lower():
             violations.append(f"Male talent first name '{first_name}' appears in plot — should use 'you' instead")
+
+    # Slop phrase detection — mirrors the Streamlit substitution list so
+    # editors can see exactly which lines the save-time filter will rewrite.
+    try:
+        from api.slop_filter import find_slop
+        violations.extend(find_slop(body.plot))
+        violations.extend(find_slop(body.theme))
+    except Exception:
+        # Non-fatal — slop list is a nice-to-have, not a save-gate.
+        pass
 
     return {"violations": violations, "passed": len(violations) == 0}
 
