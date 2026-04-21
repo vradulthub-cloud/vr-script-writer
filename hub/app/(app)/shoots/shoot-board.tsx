@@ -650,6 +650,7 @@ function ShootRowV2({ shoot, expanded, onToggle, onOpenDetails, onCellClick }: S
               key={scene.position}
               scene={scene}
               onCellClick={(at) => onCellClick(idx, at)}
+              showLabels
             />
           ))}
         </div>
@@ -787,9 +788,28 @@ function AssetLegend() {
 interface AssetStripProps {
   scene: BoardShootScene
   onCellClick: (assetType: AssetType) => void
+  /** V2 mode: render a short 2–3 char asset code below each cell so users
+   *  don't have to click to learn what a cell represents. */
+  showLabels?: boolean
 }
 
-function AssetStrip({ scene, onCellClick }: AssetStripProps) {
+/** Short, reader-glanceable labels for each asset cell when rendered below
+ *  the 16px square. 2–3 chars fits without truncation. */
+const ASSET_SHORT: Record<AssetType, string> = {
+  script_done:          "SCR",
+  call_sheet_sent:      "CS",
+  legal_run:            "LEG",
+  grail_run:            "GR",
+  bg_edit_uploaded:     "BG",
+  solo_uploaded:        "SOLO",
+  title_done:           "TTL",
+  encoded_uploaded:     "ENC",
+  photoset_uploaded:    "PHO",
+  storyboard_uploaded:  "STB",
+  legal_docs_uploaded:  "DOC",
+}
+
+function AssetStrip({ scene, onCellClick, showLabels = false }: AssetStripProps) {
   const assetsByType = new Map(scene.assets.map(a => [a.asset_type, a]))
   const accent = studioColor(scene.studio)
 
@@ -824,29 +844,29 @@ function AssetStrip({ scene, onCellClick }: AssetStripProps) {
               const hasWarn = !!a && a.validity.some(v => v.status === "warn")
               const color = statusColor(status, hasWarn)
               const applies = cellApplies(at, scene.scene_type)
-              // Irrelevant cells: dashed placeholder, no click, muted — keeps
-              // the 11-cell grid aligned with the legend but signals N/A.
-              if (!applies) {
-                return (
-                  <span
-                    key={at}
-                    aria-label={`${SHOOT_ASSET_LABELS[at]} (not applicable for ${scene.scene_type})`}
-                    title={`${SHOOT_ASSET_LABELS[at]} — N/A for ${scene.scene_type}`}
-                    style={{
-                      width: 16,
-                      height: 16,
-                      borderRadius: 3,
-                      border: "1px dashed var(--color-border)",
-                      background: "transparent",
-                      opacity: 0.3,
-                      flexShrink: 0,
-                    }}
-                  />
-                )
-              }
-              return (
+              const shortLabel = ASSET_SHORT[at]
+              // Wrap the cell in a vertical column when labels are shown so the
+              // short code sits directly under its cell. Width grows to 28px so
+              // 3–4 char codes ("SOLO") don't truncate.
+              const wrapperStyle: React.CSSProperties = showLabels
+                ? { display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: 28, flexShrink: 0 }
+                : { display: "contents" }
+              const cellNode = !applies ? (
                 <span
-                  key={at}
+                  aria-label={`${SHOOT_ASSET_LABELS[at]} (not applicable for ${scene.scene_type})`}
+                  title={`${SHOOT_ASSET_LABELS[at]} — N/A for ${scene.scene_type}`}
+                  style={{
+                    width: 16,
+                    height: 16,
+                    borderRadius: 3,
+                    border: "1px dashed var(--color-border)",
+                    background: "transparent",
+                    opacity: 0.3,
+                    flexShrink: 0,
+                  }}
+                />
+              ) : (
+                <span
                   role="button"
                   tabIndex={0}
                   onClick={(e) => { e.stopPropagation(); onCellClick(at) }}
@@ -873,6 +893,26 @@ function AssetStrip({ scene, onCellClick }: AssetStripProps) {
                 >
                   {statusIcon(status, hasWarn)}
                 </span>
+              )
+              if (!showLabels) return <span key={at} style={{ display: "contents" }}>{cellNode}</span>
+              return (
+                <div key={at} style={wrapperStyle}>
+                  {cellNode}
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      fontSize: 8,
+                      lineHeight: 1,
+                      letterSpacing: "0.06em",
+                      fontWeight: 600,
+                      color: applies ? "var(--color-text-muted)" : "var(--color-text-faint)",
+                      textTransform: "uppercase",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {shortLabel}
+                  </span>
+                </div>
               )
             })}
           </div>
