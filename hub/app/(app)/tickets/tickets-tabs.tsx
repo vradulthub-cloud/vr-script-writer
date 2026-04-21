@@ -295,15 +295,24 @@ function QueueHealth({ approvals, tickets }: { approvals: Approval[]; tickets: T
     <div className="ec-block ec-inverted">
       <header><h2>Queue Health</h2></header>
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-        <HealthStat label="Avg Response" value={stats.avgResponse ?? "—"} />
-        <HealthStat label="Approval Rate · 7d" value={stats.approvalRate == null ? "—" : `${stats.approvalRate}%`} />
+        <HealthStat
+          label="Avg Response"
+          value={stats.avgResponse ?? "—"}
+          hint={stats.avgResponse ? undefined : "no decisions yet"}
+        />
+        <HealthStat
+          label="Approval Rate · 7d"
+          value={stats.approvalRate == null ? "—" : `${stats.approvalRate}%`}
+          hint={stats.approvalRate == null ? "no decisions this week" : undefined}
+        />
         <HealthStat label="Submissions · Week" value={String(stats.weekCount)} />
       </div>
     </div>
   )
 }
 
-function HealthStat({ label, value }: { label: string; value: string }) {
+function HealthStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  const isEmpty = value === "—"
   return (
     <div>
       <div
@@ -321,13 +330,26 @@ function HealthStat({ label, value }: { label: string; value: string }) {
         style={{
           marginTop: 4,
           fontWeight: 800,
-          fontSize: 36,
+          fontSize: isEmpty ? 28 : 36,
           letterSpacing: "-0.03em",
           fontFamily: "var(--font-display-hero)",
+          color: isEmpty ? "rgba(255,255,255,0.45)" : undefined,
         }}
       >
         {value}
       </div>
+      {hint && (
+        <div
+          style={{
+            marginTop: 4,
+            fontSize: 10,
+            color: "rgba(255,255,255,0.35)",
+            letterSpacing: "0.02em",
+          }}
+        >
+          {hint}
+        </div>
+      )}
     </div>
   )
 }
