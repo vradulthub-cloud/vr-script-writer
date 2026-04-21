@@ -845,17 +845,13 @@ button[style*="color-lime"]:hover:not(:disabled) {
    collides with wrapped action rows. Give the title a floor via 2fr / 3fr
    proportional split and let actions wrap inside their column instead of
    stealing from the title. */
-[data-eclatech="v2"] .page-header {
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) !important;
-}
-[data-eclatech="v2"] .page-header > div:last-child {
-  justify-content: flex-end !important;
-}
-@media (max-width: 900px) {
-  [data-eclatech="v2"] .page-header {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
-}
+/* v2 page-headers: let the PageHeader component's own inline grid columns
+   (2px accent / 1fr title / auto actions) drive layout. Earlier we forced
+   a 2fr/3fr split to stop long action rows from squishing the title, but
+   that broke pages without actions AND pages with the accent rule because
+   it dropped the accent column. If action-wrap becomes an issue again,
+   restore a rule scoped to { has accent AND has actions } with a 3-col
+   grid (2px Nfr Mfr) rather than a 2-col grid. */
 
 /* V2 shoots: hide the legacy ShootBoard's own PageHeader (ShootsV2View
    owns the page title). Roster rows below are driven by ShootRowV2. */
