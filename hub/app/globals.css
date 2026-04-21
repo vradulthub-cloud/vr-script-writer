@@ -853,11 +853,16 @@ button[style*="color-lime"]:hover:not(:disabled) {
    restore a rule scoped to { has accent AND has actions } with a 3-col
    grid (2px Nfr Mfr) rather than a 2-col grid. */
 
-/* V2 shoots: hide the legacy ShootBoard's own PageHeader (ShootsV2View
-   owns the page title). Roster rows below are driven by ShootRowV2. */
-[data-eclatech="v2"] .ec-embed-board > div > .page-header,
-[data-eclatech="v2"] .ec-embed-board .page-header {
+/* V2 shoots: hide ONLY the title block of ShootBoard's PageHeader (ShootsV2View
+   owns the hero title above). Keep the actions slot so the studio filter
+   tabs, month filter, and refresh button remain accessible. */
+[data-eclatech="v2"] .ec-embed-board .page-header > div:first-of-type {
   display: none;
+}
+[data-eclatech="v2"] .ec-embed-board .page-header {
+  grid-template-columns: minmax(0, 1fr) !important;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 /* V2 missing: hide ONLY the title block of SceneGrid's embedded PageHeader
