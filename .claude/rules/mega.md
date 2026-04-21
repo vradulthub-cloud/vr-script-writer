@@ -22,7 +22,8 @@ paths:
 - `sync_mega_staging.py` — pulls staging from Windows, uploads to MEGA, cron `*/2 * * * *`
 - `mega_scan.json` on Mac may be stale — the live copy is on Windows
 
-## Known Bug
-rclone MEGA bug: "Entry doesn't belong in directory (too short)" drops files from Video Thumbnail/
-- scan_mega.py has a directory-existence fallback to handle this
-- Do NOT remove this fallback
+## Empty Shell Folders
+Scene folders are commonly pre-provisioned with empty subfolders (Videos/, Photos/, Video Thumbnail/, etc.) before any assets are uploaded. Dir-existence means NOTHING on its own — `has_*` flags must require an actual file.
+
+## Previously-suspected Bug (now refuted)
+There was a theory that rclone/MEGA's "Entry doesn't belong in directory (too short)" warning dropped files from Video Thumbnail/ during recursive listings, and scan_mega.py had a directory-existence fallback to compensate. Removed 2026-04-21 — ground-truth `rclone ls` probes on every scene that triggered the fallback confirmed those folders were genuinely empty shells. The fallback was producing hundreds of false positives. Do NOT re-add it without concrete evidence files are being dropped; has_thumbnail=True with no filename is useless anyway because the thumbnail proxy needs the filename to serve the image.
