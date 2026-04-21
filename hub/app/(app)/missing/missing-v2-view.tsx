@@ -1,14 +1,15 @@
 "use client"
 
 import type { SceneStats } from "@/lib/api"
-import { PageHeader } from "@/components/ui/page-header"
 import { studioAbbr, studioColor } from "@/lib/studio-colors"
 
 const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"] as const
 
 /** Prototype-style overview for Missing Assets. Shows a stat cluster + studio
- *  strip; the legacy SceneGrid (filters, cards, view-transitions) renders
- *  inline below. Only rendered when Eclatech V2 flag is on. */
+ *  strip; the legacy SceneGrid (title, filters, cards, view-transitions)
+ *  renders inline below — keeping its PageHeader so the studio filter tabs
+ *  and "Missing only" toggle stay available. Only rendered when Eclatech V2
+ *  flag is on. */
 export function MissingV2View({ stats }: { stats: SceneStats }) {
   const totalMissing = stats.missing_any
   const complete = stats.complete
@@ -16,13 +17,7 @@ export function MissingV2View({ stats }: { stats: SceneStats }) {
   const completePct = total > 0 ? Math.round((complete / total) * 100) : 0
 
   return (
-    <div>
-      <PageHeader
-        title="Studio Catalog"
-        eyebrow={`MISSING ASSETS · ${totalMissing} OF ${total.toLocaleString()} SCENES`}
-        subtitle={`${complete.toLocaleString()} complete · ${totalMissing.toLocaleString()} missing at least one asset · ${completePct}% complete`}
-      />
-
+    <div style={{ marginBottom: 20 }}>
       {/* KPI stat cluster */}
       <div className="ec-stats">
         <div className="s">

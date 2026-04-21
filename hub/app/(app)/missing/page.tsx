@@ -35,14 +35,8 @@ export default async function MissingPage() {
   if (v2) {
     return (
       <div>
-        <style dangerouslySetInnerHTML={{ __html: `
-          .ec-embed-grid > div > .page-header,
-          .ec-embed-grid .page-header { display: none !important; }
-        `}} />
         <MissingV2View stats={stats} />
-        <div className="ec-embed-grid">
-          <SceneGrid scenes={scenes} stats={stats} error={error} idToken={idToken} />
-        </div>
+        <SceneGrid scenes={scenes} stats={stats} error={error} idToken={idToken} />
       </div>
     )
   }

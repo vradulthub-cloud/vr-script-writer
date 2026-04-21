@@ -28,14 +28,8 @@ export default async function ResearchPage() {
   if (v2) {
     return (
       <div>
-        <style dangerouslySetInnerHTML={{ __html: `
-          .ec-embed-search > div > .page-header,
-          .ec-embed-search .page-header { display: none !important; }
-        `}} />
         <ResearchV2View models={models} />
-        <div className="ec-embed-search">
-          <ModelSearch models={models} error={error} idToken={idToken} />
-        </div>
+        <ModelSearch models={models} error={error} idToken={idToken} />
       </div>
     )
   }

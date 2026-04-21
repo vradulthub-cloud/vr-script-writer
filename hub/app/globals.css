@@ -863,3 +863,7 @@ button[style*="color-lime"]:hover:not(:disabled) {
 [data-eclatech="v2"] .ec-embed-board .page-header {
   display: none;
 }
+
+/* V2 missing + research: DO NOT hide the embedded PageHeader — it hosts
+   the filter tabs ("All", "Missing only", search, etc.) that users need.
+   The v2 stat cluster/strip rendered above is additive overview only. */

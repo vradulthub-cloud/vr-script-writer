@@ -2,11 +2,10 @@
 
 import { useMemo } from "react"
 import type { Model } from "@/lib/api"
-import { PageHeader } from "@/components/ui/page-header"
 
-/** Prototype-style overview for Model Research. Shows a roster summary
- *  (rank/rate/last-booked KPIs) above the existing ModelSearch surface.
- *  Only rendered when Eclatech V2 flag is on. */
+/** Prototype-style overview for Model Research: stat cluster of roster
+ *  health (rank breakdown + opportunity score). Renders above ModelSearch
+ *  which keeps its own PageHeader + Trending / Priority Outreach lists. */
 export function ResearchV2View({ models }: { models: Model[] }) {
   const rollup = useMemo(() => {
     let great = 0, good = 0, moderate = 0, poor = 0, avail = 0
@@ -32,13 +31,7 @@ export function ResearchV2View({ models }: { models: Model[] }) {
   }, [models])
 
   return (
-    <div>
-      <PageHeader
-        title="Model Research"
-        eyebrow={`ROSTER · ${rollup.total.toLocaleString()} MODELS · AVG SCORE ${rollup.avgScore}`}
-        subtitle={`${rollup.great} great · ${rollup.good} good · ${rollup.moderate} moderate · ${rollup.poor} poor · ${rollup.available} listed as available`}
-      />
-
+    <div style={{ marginBottom: 20 }}>
       {/* KPI stat cluster */}
       <div className="ec-stats">
         <div className="s">
