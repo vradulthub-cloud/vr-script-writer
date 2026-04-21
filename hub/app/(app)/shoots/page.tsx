@@ -27,16 +27,10 @@ export default async function ShootsPage() {
   }
 
   if (v2) {
-    // v2: calendar overview on top; ShootBoard is the single shoot-row surface.
-    // Title-block hiding + filter-actions preservation is handled in globals.css
-    // under [data-eclatech="v2"] .ec-embed-board .page-header.
+    // v2: ShootsV2View owns the filter state and renders both the calendar
+    // AND the roster below it, so one studio pick filters both surfaces.
     return (
-      <div>
-        <ShootsV2View initialShoots={shoots} />
-        <div className="ec-embed-board">
-          <ShootBoard initialShoots={shoots} error={error} idToken={idToken} variant="v2" />
-        </div>
-      </div>
+      <ShootsV2View initialShoots={shoots} idToken={idToken} boardError={error} />
     )
   }
 

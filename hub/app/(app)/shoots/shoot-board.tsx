@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { CheckCircle2, AlertTriangle, Circle, Clock, X, RefreshCcw, Film, Wand2, Check } from "lucide-react"
 import {
   api,
@@ -16,7 +17,6 @@ import { studioColor } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { PageHeader } from "@/components/ui/page-header"
-import { ShootModal } from "@/components/ui/shoot-modal"
 import { formatApiError } from "@/lib/errors"
 
 // ── Config ────────────────────────────────────────────────────────────
@@ -119,15 +119,30 @@ interface Props {
    *  per-asset cell matrix hidden behind a click-to-expand. Default "v1"
    *  renders the legacy always-visible-cells layout. */
   variant?: "v1" | "v2"
+  /** When the board is embedded under ShootsV2View, the page owns the
+   *  studio filter so one pick drives both the calendar and the roster.
+   *  When this prop is set the local filter state is ignored. */
+  studioFilter?: string
+  /** Hide the PageHeader when the parent already renders one. */
+  hideHeader?: boolean
 }
 
-export function ShootBoard({ initialShoots, error: initialError, idToken: serverToken, variant = "v1" }: Props) {
+export function ShootBoard({
+  initialShoots,
+  error: initialError,
+  idToken: serverToken,
+  variant = "v1",
+  studioFilter: externalStudioFilter,
+  hideHeader,
+}: Props) {
   const idToken = useIdToken(serverToken)
   const client = useMemo(() => api(idToken ?? null), [idToken])
 
   const [shoots, setShoots] = useState<Shoot[]>(initialShoots)
   const [error, setError] = useState<string | null>(initialError)
-  const [studioFilter, setStudioFilter] = useState<string>("All")
+  const [internalStudioFilter, setInternalStudioFilter] = useState<string>("All")
+  const studioFilter = externalStudioFilter ?? internalStudioFilter
+  const setStudioFilter = externalStudioFilter !== undefined ? () => {} : setInternalStudioFilter
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const toggleExpanded = useCallback((shootId: string) => {
     setExpanded(prev => {
@@ -219,68 +234,70 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
 
   return (
     <div>
-      <PageHeader
-        title="Shoot Tracker"
-        eyebrow={`${filtered.length} in window · ${refreshing ? "refreshing" : "auto-refresh 30s"}`}
-        studioAccent={studioFilter !== "All" ? studioFilter : undefined}
-        actions={
-          <>
-            <div
-              className="flex items-center gap-1 rounded-md"
-              style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "3px" }}
-            >
-              {(["All", ...STUDIOS] as const).map(st => {
-                const active = studioFilter === st
-                const color = st === "All" ? "var(--color-lime)" : studioColor(st)
-                return (
-                  <button
-                    key={st}
-                    onClick={() => setStudioFilter(st)}
-                    aria-pressed={active}
-                    className="rounded px-2 py-1 transition-colors"
-                    style={{
-                      fontSize: 11,
-                      fontWeight: active ? 600 : 400,
-                      background: active ? "var(--color-elevated)" : "transparent",
-                      color: active ? color : "var(--color-text-muted)",
-                      border: "none",
-                    }}
-                  >
-                    {st} <span className="tabular-nums" style={{ opacity: 0.7 }}>{counts[st] ?? 0}</span>
-                  </button>
-                )
-              })}
-            </div>
-            <MonthFilter value={monthFilter} onChange={setMonthFilter} />
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-              <button
-                onClick={() => { void refresh() }}
-                disabled={refreshing}
-                className="px-2.5 py-1 rounded text-xs transition-colors"
-                style={{
-                  display: "flex", alignItems: "center", gap: 4,
-                  background: "transparent",
-                  color: "var(--color-text-muted)",
-                  border: "1px solid var(--color-border)",
-                  cursor: refreshing ? "not-allowed" : "pointer",
-                }}
+      {!hideHeader && (
+        <PageHeader
+          title="Shoot Tracker"
+          eyebrow={`${filtered.length} in window · ${refreshing ? "refreshing" : "auto-refresh 30s"}`}
+          studioAccent={studioFilter !== "All" ? studioFilter : undefined}
+          actions={
+            <>
+              <div
+                className="flex items-center gap-1 rounded-md"
+                style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "3px" }}
               >
-                <RefreshCcw
-                  size={11}
-                  aria-hidden="true"
-                  style={{ animation: refreshing ? "spin 0.8s linear infinite" : undefined }}
-                />
-                {refreshing ? "Refreshing…" : "Refresh"}
-              </button>
-              {lastRefreshed && !refreshing && (
-                <span style={{ fontSize: 9, color: "var(--color-text-faint)", letterSpacing: "0.02em" }}>
-                  updated {lastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                </span>
-              )}
-            </div>
-          </>
-        }
-      />
+                {(["All", ...STUDIOS] as const).map(st => {
+                  const active = studioFilter === st
+                  const color = st === "All" ? "var(--color-lime)" : studioColor(st)
+                  return (
+                    <button
+                      key={st}
+                      onClick={() => setStudioFilter(st)}
+                      aria-pressed={active}
+                      className="rounded px-2 py-1 transition-colors"
+                      style={{
+                        fontSize: 11,
+                        fontWeight: active ? 600 : 400,
+                        background: active ? "var(--color-elevated)" : "transparent",
+                        color: active ? color : "var(--color-text-muted)",
+                        border: "none",
+                      }}
+                    >
+                      {st} <span className="tabular-nums" style={{ opacity: 0.7 }}>{counts[st] ?? 0}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <MonthFilter value={monthFilter} onChange={setMonthFilter} />
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                <button
+                  onClick={() => { void refresh() }}
+                  disabled={refreshing}
+                  className="px-2.5 py-1 rounded text-xs transition-colors"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 4,
+                    background: "transparent",
+                    color: "var(--color-text-muted)",
+                    border: "1px solid var(--color-border)",
+                    cursor: refreshing ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <RefreshCcw
+                    size={11}
+                    aria-hidden="true"
+                    style={{ animation: refreshing ? "spin 0.8s linear infinite" : undefined }}
+                  />
+                  {refreshing ? "Refreshing…" : "Refresh"}
+                </button>
+                {lastRefreshed && !refreshing && (
+                  <span style={{ fontSize: 9, color: "var(--color-text-faint)", letterSpacing: "0.02em" }}>
+                    updated {lastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                )}
+              </div>
+            </>
+          }
+        />
+      )}
 
       {error && <ErrorAlert className="mb-3">{error}</ErrorAlert>}
 
@@ -391,7 +408,34 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
       )}
 
       {modalShoot && (
-        <ShootModal shoot={modalShoot} onClose={() => setModalShootId(null)} />
+        <ShootDetailsModal
+          shoot={modalShoot}
+          idToken={idToken}
+          onClose={() => setModalShootId(null)}
+          onRevalidate={async (position, assetType) => {
+            if (!idToken) return
+            const key = `${modalShoot.shoot_id}|${position}|${assetType}`
+            if (inFlightRef.current.has(key)) return
+            inFlightRef.current.add(key)
+            try {
+              const newState = await client.shoots.revalidate(modalShoot.shoot_id, position, assetType)
+              setShoots(prev => prev.map(s => {
+                if (s.shoot_id !== modalShoot.shoot_id) return s
+                return {
+                  ...s,
+                  scenes: s.scenes.map(sc => sc.position !== position ? sc : {
+                    ...sc,
+                    assets: sc.assets.map(a => a.asset_type === assetType ? newState : a),
+                  }),
+                }
+              }))
+            } catch (e) {
+              setError(formatApiError(e, "Revalidate"))
+            } finally {
+              inFlightRef.current.delete(key)
+            }
+          }}
+        />
       )}
 
       {popoverCell && (
@@ -1081,6 +1125,83 @@ function ValidityPopover({ shoot, position, assetType, onClose, onRevalidate }: 
         </div>
       </div>
     </div>
+  )
+}
+
+// ── Shoot details modal ───────────────────────────────────────────────
+// Wraps the same ShootDetail content used by the v1 slide-in panel in a
+// centered modal shell. Triggered by "Open details →" on v2 roster rows.
+// Portals to <body> to escape main's transformed ancestor (page fadeIn)
+// and pins the header while the body scrolls.
+function ShootDetailsModal({
+  shoot,
+  idToken,
+  onClose,
+  onRevalidate,
+}: {
+  shoot: Shoot
+  idToken?: string
+  onClose: () => void
+  onRevalidate: (position: number, assetType: AssetType) => Promise<void>
+}) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    document.addEventListener("keydown", onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.body.style.overflow = prev
+    }
+  }, [onClose])
+
+  if (!mounted) return null
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Shoot ${shoot.shoot_id} details`}
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 100,
+        background: "rgba(0, 0, 0, 0.72)",
+        backdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+        animation: "fadeIn var(--duration-base) var(--ease-out-expo) both",
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: "min(820px, 100%)",
+          maxHeight: "min(85vh, 100dvh - 40px)",
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+          boxShadow: "0 24px 60px rgba(0,0,0,0.5)",
+        }}
+      >
+        {/* Re-using ShootDetail — it already handles scenes, asset grid, and
+            title regeneration. We swap its outer container style so it fits
+            the modal rather than the slide-in panel. */}
+        <ShootDetail
+          shoot={shoot}
+          idToken={idToken}
+          onClose={onClose}
+          onRevalidate={onRevalidate}
+        />
+      </div>
+    </div>,
+    document.body,
   )
 }
 

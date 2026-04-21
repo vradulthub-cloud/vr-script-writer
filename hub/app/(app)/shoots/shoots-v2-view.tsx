@@ -1,19 +1,53 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import nextDynamic from "next/dynamic"
 import type { Shoot } from "@/lib/api"
 import { PageHeader } from "@/components/ui/page-header"
 import { MonthCalendar } from "@/components/ui/month-calendar"
 import { ShootModal } from "@/components/ui/shoot-modal"
+import { studioColor } from "@/lib/studio-colors"
+
+const ShootBoard = nextDynamic(() => import("./shoot-board").then(m => m.ShootBoard))
 
 const AGING_OVERDUE_HOURS = 72
+const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"] as const
+type StudioFilter = "All" | (typeof STUDIOS)[number]
 
-/** Prototype-style shoots overview. The top block is a month grid so editors
- *  can see every active shoot in the month before diving into per-asset
- *  validation. The asset board below owns per-shoot detail. */
-export function ShootsV2View({ initialShoots }: { initialShoots: Shoot[] }) {
+/** Prototype-style shoots overview. The studio filter lives at the top of
+ *  the page and drives BOTH the calendar and the roster below — one pick,
+ *  both views update.
+ */
+export function ShootsV2View({
+  initialShoots,
+  idToken,
+  boardError,
+}: {
+  initialShoots: Shoot[]
+  idToken?: string
+  boardError: string | null
+}) {
   const [monthOffset, setMonthOffset] = useState(0)
   const [selected, setSelected] = useState<Shoot | null>(null)
+  const [studioFilter, setStudioFilter] = useState<StudioFilter>("All")
+
+  // Viewport-aware view mode. The 7×5 month grid is unreadable on a narrow
+  // phone — each cell becomes a ~50px postage stamp. On mobile we default
+  // to a single-week row (the current week), with an override toggle for
+  // users who want the full month anyway.
+  const [viewMode, setViewMode] = useState<"month" | "week">("month")
+  const [userOverrodeView, setUserOverrodeView] = useState(false)
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const mq = window.matchMedia("(max-width: 640px)")
+    const apply = () => {
+      if (userOverrodeView) return
+      setViewMode(mq.matches ? "week" : "month")
+    }
+    apply()
+    mq.addEventListener("change", apply)
+    return () => mq.removeEventListener("change", apply)
+  }, [userOverrodeView])
 
   const monthStart = useMemo(() => {
     const now = new Date()
@@ -26,10 +60,10 @@ export function ShootsV2View({ initialShoots }: { initialShoots: Shoot[] }) {
 
   const monthLabel = monthStart.toLocaleDateString("en-US", { month: "long", year: "numeric" }).toUpperCase()
 
-  // Shoots active in this month. A shoot is "active" if its date falls within
-  // the month OR it's still open (<100% assets validated) at the end of the
-  // month — catches lingering post-production.
-  const activeShoots = useMemo(() => {
+  // Shoots active in this month AND matching the current studio filter. The
+  // calendar and the roster below both read from this — a single filter
+  // controls the whole page.
+  const monthShoots = useMemo(() => {
     return initialShoots.filter(s => {
       const t = Date.parse(s.shoot_date || "")
       if (!Number.isFinite(t)) return false
@@ -37,23 +71,67 @@ export function ShootsV2View({ initialShoots }: { initialShoots: Shoot[] }) {
     })
   }, [initialShoots, monthStart, monthEnd])
 
+  const calendarShoots = useMemo(() => {
+    if (studioFilter === "All") return monthShoots
+    return monthShoots.filter(s => s.scenes.some(sc => sc.studio === studioFilter))
+  }, [monthShoots, studioFilter])
+
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { All: monthShoots.length }
+    for (const st of STUDIOS) {
+      c[st] = monthShoots.filter(s => s.scenes.some(sc => sc.studio === st)).length
+    }
+    return c
+  }, [monthShoots])
+
   const statusCounts = useMemo(() => {
     let inProgress = 0, overdue = 0, wrapped = 0
-    for (const s of activeShoots) {
+    for (const s of calendarShoots) {
       const r = rollupShoot(s)
       if (r.progress === 100) wrapped += 1
       else if (r.isOverdue) overdue += 1
       else inProgress += 1
     }
     return { inProgress, overdue, wrapped }
-  }, [activeShoots])
+  }, [calendarShoots])
 
   return (
     <div>
       <PageHeader
         title="Shoot Tracker"
-        eyebrow={`SCHEDULE · ${monthLabel} · ${activeShoots.length} SHOOTS`}
+        eyebrow={`SCHEDULE · ${monthLabel} · ${calendarShoots.length} SHOOTS`}
         subtitle={`${statusCounts.inProgress} in progress · ${statusCounts.overdue} overdue · ${statusCounts.wrapped} wrapped`}
+        studioAccent={studioFilter !== "All" ? studioFilter : undefined}
+        actions={
+          <div
+            className="flex items-center gap-1 rounded-md"
+            style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "3px" }}
+          >
+            {(["All", ...STUDIOS] as const).map(st => {
+              const active = studioFilter === st
+              const color = st === "All" ? "var(--color-lime)" : studioColor(st)
+              return (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setStudioFilter(st)}
+                  aria-pressed={active}
+                  className="rounded px-2 py-1 transition-colors"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: active ? 600 : 400,
+                    background: active ? "var(--color-elevated)" : "transparent",
+                    color: active ? color : "var(--color-text-muted)",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  {st} <span className="tabular-nums" style={{ opacity: 0.7 }}>{counts[st] ?? 0}</span>
+                </button>
+              )
+            })}
+          </div>
+        }
       />
 
       <section className="ec-block" style={{ marginBottom: 20 }}>
@@ -62,7 +140,25 @@ export function ShootsV2View({ initialShoots }: { initialShoots: Shoot[] }) {
             <span className="num">{monthStart.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</span>
             {monthLabel}
           </h2>
-          <div className="act">
+          <div className="act" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button
+              type="button"
+              onClick={() => { setUserOverrodeView(true); setViewMode(v => v === "month" ? "week" : "month") }}
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                background: "transparent",
+                color: "var(--color-text-muted)",
+                border: "1px solid var(--color-border)",
+                padding: "3px 8px",
+                cursor: "pointer",
+              }}
+              aria-pressed={viewMode === "week"}
+            >
+              {viewMode === "month" ? "Week" : "Month"}
+            </button>
             <a onClick={() => setMonthOffset(m => m - 1)} style={{ cursor: "pointer" }}>‹ Prev</a>
             {monthOffset !== 0 && (
               <a onClick={() => setMonthOffset(0)} style={{ cursor: "pointer" }}>Today</a>
@@ -71,7 +167,7 @@ export function ShootsV2View({ initialShoots }: { initialShoots: Shoot[] }) {
           </div>
         </header>
         <div style={{ padding: 0 }}>
-          {activeShoots.length === 0 ? (
+          {calendarShoots.length === 0 ? (
             <div
               style={{
                 padding: "40px 16px",
@@ -82,17 +178,32 @@ export function ShootsV2View({ initialShoots }: { initialShoots: Shoot[] }) {
                 textTransform: "uppercase",
               }}
             >
-              No shoots scheduled this month
+              {studioFilter === "All"
+                ? "No shoots scheduled this month"
+                : `No ${studioFilter} shoots this month`}
             </div>
           ) : (
             <MonthCalendar
-              shoots={activeShoots}
+              shoots={calendarShoots}
               monthStart={monthStart}
               onSelect={setSelected}
+              viewMode={viewMode}
             />
           )}
         </div>
       </section>
+
+      {/* Roster below — receives the same filter so picks stay in sync. */}
+      <div className="ec-embed-board">
+        <ShootBoard
+          initialShoots={initialShoots}
+          error={boardError}
+          idToken={idToken}
+          variant="v2"
+          studioFilter={studioFilter}
+          hideHeader
+        />
+      </div>
 
       {selected && <ShootModal shoot={selected} onClose={() => setSelected(null)} />}
     </div>

@@ -7,15 +7,20 @@ import { studioAbbr, studioColor } from "@/lib/studio-colors"
 /** Month grid: 7 columns × 5-6 rows of day cells. Each cell lists every
  *  shoot on that day as a studio-coloured pill. Click a pill to open the
  *  shoot modal.
+ *  When `viewMode="week"` we collapse to just the row containing the current
+ *  day — the month grid reads terribly on small viewports and the current
+ *  week is the practical unit on set.
  */
 export function MonthCalendar({
   shoots,
   monthStart,
   onSelect,
+  viewMode = "month",
 }: {
   shoots: Shoot[]
   monthStart: Date
   onSelect: (shoot: Shoot) => void
+  viewMode?: "month" | "week"
 }) {
   const [hoverDate, setHoverDate] = useState<string | null>(null)
 
@@ -41,8 +46,21 @@ export function MonthCalendar({
       }
       rows.push(row)
     }
+    // Week mode: return only the row containing today (or the first row if
+    // today falls outside the month being shown — happens when the user
+    // navigates Prev/Next).
+    if (viewMode === "week") {
+      const todayMs = new Date().setHours(0, 0, 0, 0)
+      const currentRow = rows.find(row =>
+        row.some(d => {
+          const dt = new Date(d).setHours(0, 0, 0, 0)
+          return dt === todayMs
+        }),
+      )
+      return currentRow ? [currentRow] : [rows[0]]
+    }
     return rows
-  }, [gridStart, monthStart])
+  }, [gridStart, monthStart, viewMode])
 
   const shootsByDate = useMemo(() => {
     const map: Record<string, Shoot[]> = {}
@@ -113,7 +131,11 @@ export function MonthCalendar({
                 onMouseEnter={() => setHoverDate(key)}
                 onMouseLeave={() => setHoverDate(prev => (prev === key ? null : prev))}
                 style={{
-                  minHeight: 96,
+                  // Hard height — rows must stay uniform regardless of how
+                  // many shoots land in a given day, otherwise long talent
+                  // names stretch every cell in the row. Max 2 chips fit,
+                  // anything above shows the "+N more" roll-up.
+                  height: 104,
                   padding: "6px 6px 8px",
                   borderRight: c === 6 ? undefined : "1px solid var(--color-border-subtle)",
                   background: hoverDate === key && inMonth
@@ -122,7 +144,8 @@ export function MonthCalendar({
                   opacity: inMonth ? 1 : 0.35,
                   display: "flex",
                   flexDirection: "column",
-                  gap: 4,
+                  gap: 3,
+                  overflow: "hidden",
                 }}
               >
                 <div
@@ -157,7 +180,7 @@ export function MonthCalendar({
                     </span>
                   )}
                 </div>
-                {cellShoots.slice(0, 3).map(s => {
+                {cellShoots.slice(0, 2).map(s => {
                   const studio = s.scenes[0]?.studio ?? ""
                   const color = studioColor(studio)
                   const abbr = studioAbbr(studio) || "—"
@@ -170,20 +193,20 @@ export function MonthCalendar({
                       title={`${abbr} · ${talent}`}
                       style={{
                         textAlign: "left",
-                        padding: "3px 6px",
+                        padding: "2px 6px",
                         background: `color-mix(in srgb, ${color} 34%, transparent)`,
                         color: "var(--color-text)",
                         fontSize: 10,
                         fontWeight: 600,
-                        lineHeight: 1.25,
+                        lineHeight: 1.2,
                         cursor: "pointer",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        display: "flex",
+                        display: "grid",
+                        gridTemplateColumns: "auto minmax(0, 1fr)",
                         alignItems: "center",
                         gap: 4,
                         border: 0,
+                        height: 20,
+                        flexShrink: 0,
                       }}
                     >
                       <span
@@ -197,20 +220,30 @@ export function MonthCalendar({
                       >
                         {abbr}
                       </span>
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{talent}</span>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                        {talent}
+                      </span>
                     </button>
                   )
                 })}
-                {cellShoots.length > 3 && (
-                  <span
+                {cellShoots.length > 2 && (
+                  <button
+                    type="button"
+                    onClick={() => onSelect(cellShoots[2])}
                     style={{
+                      background: "transparent",
+                      border: 0,
+                      textAlign: "left",
+                      padding: "0 6px",
                       fontSize: 9,
                       color: "var(--color-text-faint)",
                       letterSpacing: "0.04em",
+                      cursor: "pointer",
                     }}
+                    title={`${cellShoots.length - 2} more shoot${cellShoots.length - 2 === 1 ? "" : "s"} on this day`}
                   >
-                    +{cellShoots.length - 3} more
-                  </span>
+                    +{cellShoots.length - 2} more
+                  </button>
                 )}
               </div>
             )
