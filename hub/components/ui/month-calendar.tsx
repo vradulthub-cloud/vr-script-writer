@@ -4,6 +4,8 @@ import { useState, useMemo, useEffect } from "react"
 import { createPortal } from "react-dom"
 import type { Shoot } from "@/lib/api"
 import { studioAbbr, studioColor } from "@/lib/studio-colors"
+import { holidayMap } from "@/lib/usa-holidays"
+import { type CalendarEvent } from "@/lib/calendar-events"
 
 /** Month grid: 7 columns × 5-6 rows of day cells. Each cell lists every
  *  shoot on that day as a studio-coloured pill. Click a pill to open the
@@ -17,11 +19,17 @@ export function MonthCalendar({
   monthStart,
   onSelect,
   viewMode = "month",
+  events = [],
+  onAddEvent,
+  onRemoveEvent,
 }: {
   shoots: Shoot[]
   monthStart: Date
   onSelect: (shoot: Shoot) => void
   viewMode?: "month" | "week"
+  events?: CalendarEvent[]
+  onAddEvent?: (date: string) => void
+  onRemoveEvent?: (id: string) => void
 }) {
   const [hoverDate, setHoverDate] = useState<string | null>(null)
   const [overflowDate, setOverflowDate] = useState<string | null>(null)
@@ -74,6 +82,14 @@ export function MonthCalendar({
     return map
   }, [shoots])
 
+  const eventsByDate = useMemo(() => {
+    const map: Record<string, CalendarEvent[]> = {}
+    for (const e of events) (map[e.date] ??= []).push(e)
+    return map
+  }, [events])
+
+  const holidays = useMemo(() => holidayMap(monthStart.getFullYear()), [monthStart])
+
   const todayKey = new Date().toISOString().slice(0, 10)
   const monthIdx = monthStart.getMonth()
 
@@ -81,6 +97,9 @@ export function MonthCalendar({
   useEffect(() => setMounted(true), [])
 
   const overflowShoots = overflowDate ? shootsByDate[overflowDate] ?? [] : []
+  const overflowEvents = overflowDate ? eventsByDate[overflowDate] ?? [] : []
+  const overflowHoliday = overflowDate ? holidays.get(overflowDate) : undefined
+  const overflowCountTotal = overflowShoots.length + overflowEvents.length
   const overflowLabel = overflowDate
     ? new Date(overflowDate + "T00:00:00").toLocaleDateString("en-US", {
         weekday: "long",
@@ -138,6 +157,13 @@ export function MonthCalendar({
           {row.map((d, c) => {
             const key = d.toISOString().slice(0, 10)
             const cellShoots = shootsByDate[key] ?? []
+            const cellEvents = eventsByDate[key] ?? []
+            const holiday = holidays.get(key)
+            const totalChips = cellShoots.length + cellEvents.length
+            const visibleShoots = cellShoots.slice(0, Math.min(2, cellShoots.length))
+            const remainingSlots = Math.max(0, 2 - visibleShoots.length)
+            const visibleEvents = cellEvents.slice(0, remainingSlots)
+            const overflowCount = totalChips - visibleShoots.length - visibleEvents.length
             const inMonth = d.getMonth() === monthIdx
             const isToday = key === todayKey
             return (
@@ -182,20 +208,57 @@ export function MonthCalendar({
                   >
                     {d.getDate()}
                   </span>
-                  {cellShoots.length > 0 && (
-                    <span
-                      style={{
-                        fontSize: 9,
-                        fontWeight: 700,
-                        letterSpacing: "0.08em",
-                        color: "var(--color-text-faint)",
-                      }}
-                    >
-                      {cellShoots.length}
-                    </span>
-                  )}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {holiday && (
+                      <span
+                        title={holiday.name}
+                        style={{
+                          fontSize: 8,
+                          fontWeight: 800,
+                          letterSpacing: "0.08em",
+                          color: "var(--color-text-faint)",
+                          padding: "1px 4px",
+                          border: "1px solid var(--color-border)",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {holiday.short}
+                      </span>
+                    )}
+                    {onAddEvent && inMonth && (hoverDate === key) && (
+                      <button
+                        type="button"
+                        onClick={() => onAddEvent(key)}
+                        title="Add event"
+                        aria-label={`Add event on ${key}`}
+                        style={{
+                          background: "transparent",
+                          border: "1px solid var(--color-border)",
+                          color: "var(--color-text-muted)",
+                          fontSize: 10,
+                          lineHeight: 1,
+                          padding: "1px 5px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        +
+                      </button>
+                    )}
+                    {cellShoots.length > 0 && !holiday && (
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          letterSpacing: "0.08em",
+                          color: "var(--color-text-faint)",
+                        }}
+                      >
+                        {cellShoots.length}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                {cellShoots.slice(0, 2).map(s => {
+                {visibleShoots.map(s => {
                   const studio = s.scenes[0]?.studio ?? ""
                   const color = studioColor(studio)
                   const abbr = studioAbbr(studio) || "—"
@@ -241,7 +304,47 @@ export function MonthCalendar({
                     </button>
                   )
                 })}
-                {cellShoots.length > 2 && (
+                {visibleEvents.map(ev => (
+                  <button
+                    key={ev.id}
+                    type="button"
+                    onClick={() => setOverflowDate(key)}
+                    title={ev.notes ? `${ev.title} — ${ev.notes}` : ev.title}
+                    style={{
+                      textAlign: "left",
+                      padding: "2px 6px",
+                      background: "transparent",
+                      border: "1px dashed var(--color-border)",
+                      color: "var(--color-text-muted)",
+                      fontSize: 10,
+                      fontWeight: 500,
+                      lineHeight: 1.2,
+                      cursor: "pointer",
+                      display: "grid",
+                      gridTemplateColumns: "auto minmax(0, 1fr)",
+                      alignItems: "center",
+                      gap: 4,
+                      height: 20,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 8,
+                        fontWeight: 800,
+                        letterSpacing: "0.06em",
+                        color: "var(--color-text-faint)",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {(ev.kind || "EVT").slice(0, 4).toUpperCase()}
+                    </span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                      {ev.title}
+                    </span>
+                  </button>
+                ))}
+                {overflowCount > 0 && (
                   <button
                     type="button"
                     onClick={() => setOverflowDate(key)}
@@ -255,9 +358,9 @@ export function MonthCalendar({
                       letterSpacing: "0.04em",
                       cursor: "pointer",
                     }}
-                    title={`Show all ${cellShoots.length} shoots on this day`}
+                    title={`Show all ${totalChips} items on this day`}
                   >
-                    +{cellShoots.length - 2} more
+                    +{overflowCount} more
                   </button>
                 )}
               </div>
@@ -306,7 +409,8 @@ export function MonthCalendar({
           >
             <div>
               <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>
-                {overflowShoots.length} Shoots
+                {overflowCountTotal} {overflowCountTotal === 1 ? "Item" : "Items"}
+                {overflowHoliday && <span style={{ marginLeft: 8, color: "var(--color-lime)" }}>· {overflowHoliday.name.toUpperCase()}</span>}
               </div>
               <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text)" }}>
                 {overflowLabel}
@@ -371,6 +475,82 @@ export function MonthCalendar({
                 </button>
               )
             })}
+            {overflowEvents.map(ev => (
+              <div
+                key={ev.id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "auto 1fr auto",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "10px 14px",
+                  borderBottom: "1px solid var(--color-border-subtle)",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 800,
+                    letterSpacing: "0.08em",
+                    color: "var(--color-text-muted)",
+                    padding: "3px 6px",
+                    border: "1px dashed var(--color-border)",
+                  }}
+                >
+                  {(ev.kind || "EVT").slice(0, 4).toUpperCase()}
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {ev.title}
+                  </div>
+                  {ev.notes && (
+                    <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
+                      {ev.notes}
+                    </div>
+                  )}
+                </div>
+                {onRemoveEvent && (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveEvent(ev.id)}
+                    aria-label="Delete event"
+                    style={{
+                      background: "transparent",
+                      border: "1px solid var(--color-border)",
+                      color: "var(--color-text-muted)",
+                      fontSize: 10,
+                      lineHeight: 1,
+                      padding: "4px 6px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+            {onAddEvent && overflowDate && (
+              <button
+                type="button"
+                onClick={() => { const d = overflowDate; setOverflowDate(null); onAddEvent(d) }}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "10px 14px",
+                  background: "transparent",
+                  border: 0,
+                  color: "var(--color-lime)",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  cursor: "pointer",
+                }}
+              >
+                + Add Event
+              </button>
+            )}
           </div>
         </div>
       </div>,

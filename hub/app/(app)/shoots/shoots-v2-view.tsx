@@ -6,7 +6,9 @@ import type { Shoot } from "@/lib/api"
 import { PageHeader } from "@/components/ui/page-header"
 import { MonthCalendar } from "@/components/ui/month-calendar"
 import { ShootModal } from "@/components/ui/shoot-modal"
+import { AddEventModal } from "@/components/ui/add-event-modal"
 import { studioColor } from "@/lib/studio-colors"
+import { addEvent, listEvents, removeEvent, type CalendarEvent } from "@/lib/calendar-events"
 
 const ShootBoard = nextDynamic(() => import("./shoot-board").then(m => m.ShootBoard))
 
@@ -30,6 +32,9 @@ export function ShootsV2View({
   const [monthOffset, setMonthOffset] = useState(0)
   const [selected, setSelected] = useState<Shoot | null>(null)
   const [studioFilter, setStudioFilter] = useState<StudioFilter>("All")
+  const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [addEventDate, setAddEventDate] = useState<string | null>(null)
+  useEffect(() => { setEvents(listEvents()) }, [])
 
   // Viewport-aware view mode. The 7×5 month grid is unreadable on a narrow
   // phone — each cell becomes a ~50px postage stamp. On mobile we default
@@ -167,28 +172,31 @@ export function ShootsV2View({
           </div>
         </header>
         <div style={{ padding: 0 }}>
-          {calendarShoots.length === 0 ? (
+          <MonthCalendar
+            shoots={calendarShoots}
+            monthStart={monthStart}
+            onSelect={setSelected}
+            viewMode={viewMode}
+            events={events}
+            onAddEvent={(date) => setAddEventDate(date)}
+            onRemoveEvent={(id) => { removeEvent(id); setEvents(listEvents()) }}
+          />
+          {calendarShoots.length === 0 && (
             <div
               style={{
-                padding: "40px 16px",
+                padding: "16px",
                 textAlign: "center",
                 color: "var(--color-text-faint)",
-                fontSize: 12,
+                fontSize: 11,
                 letterSpacing: "0.1em",
                 textTransform: "uppercase",
+                borderTop: "1px solid var(--color-border-subtle)",
               }}
             >
               {studioFilter === "All"
                 ? "No shoots scheduled this month"
                 : `No ${studioFilter} shoots this month`}
             </div>
-          ) : (
-            <MonthCalendar
-              shoots={calendarShoots}
-              monthStart={monthStart}
-              onSelect={setSelected}
-              viewMode={viewMode}
-            />
           )}
         </div>
       </section>
@@ -206,6 +214,13 @@ export function ShootsV2View({
       </div>
 
       {selected && <ShootModal shoot={selected} onClose={() => setSelected(null)} />}
+      {addEventDate && (
+        <AddEventModal
+          date={addEventDate}
+          onSave={(ev) => { addEvent(ev); setEvents(listEvents()) }}
+          onClose={() => setAddEventDate(null)}
+        />
+      )}
     </div>
   )
 }
