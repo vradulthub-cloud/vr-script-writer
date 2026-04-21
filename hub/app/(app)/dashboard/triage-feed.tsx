@@ -290,9 +290,9 @@ export function TriageFeed({
           )}
         </SubSection>
 
-        {/* Missing Assets */}
+        {/* Grail Assets */}
         <SubSection
-          label="Missing Assets"
+          label="Grail Assets"
           count={missingTotal}
           href="/missing"
           emptyLabel="All assets accounted for ✓"

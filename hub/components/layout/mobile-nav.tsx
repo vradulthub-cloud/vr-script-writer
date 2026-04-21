@@ -18,17 +18,17 @@ import {
 } from "lucide-react"
 
 const PRIMARY_ITEMS = [
-  { href: "/dashboard",    label: "Home",      icon: Home },
-  { href: "/shoots",       label: "Shoots",    icon: LayoutGrid },
-  { href: "/missing",      label: "Scenes",    icon: LayoutGrid },
-  { href: "/scripts",      label: "Scripts",   icon: FileText },
+  { href: "/dashboard",   label: "Home",     icon: Home },
+  { href: "/shoots",      label: "Shoots",   icon: LayoutGrid },
+  { href: "/call-sheets", label: "Calls",    icon: Phone },
+  { href: "/scripts",     label: "Scripts",  icon: FileText },
 ]
 
 const OVERFLOW_ITEMS = [
+  { href: "/missing",      label: "Grail Assets", icon: LayoutGrid },
   { href: "/titles",       label: "Titles",       icon: Image },
   { href: "/descriptions", label: "Descriptions", icon: AlignLeft },
   { href: "/research",     label: "Research",     icon: Users },
-  { href: "/call-sheets",  label: "Call Sheets",  icon: Phone },
   { href: "/compilations", label: "Comps",        icon: Layers },
   { href: "/approvals",    label: "Approvals",    icon: CheckSquare },
   { href: "/tickets",      label: "Tickets",      icon: Ticket },

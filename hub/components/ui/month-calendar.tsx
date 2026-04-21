@@ -5,7 +5,7 @@ import { createPortal } from "react-dom"
 import type { Shoot } from "@/lib/api"
 import { studioAbbr, studioColor } from "@/lib/studio-colors"
 import { holidayMap } from "@/lib/usa-holidays"
-import { type CalendarEvent } from "@/lib/calendar-events"
+import { eventColorValue, type CalendarEvent } from "@/lib/calendar-events"
 
 /** Month grid: 7 columns × 5-6 rows of day cells. Each cell lists every
  *  shoot on that day as a studio-coloured pill. Click a pill to open the
@@ -304,46 +304,49 @@ export function MonthCalendar({
                     </button>
                   )
                 })}
-                {visibleEvents.map(ev => (
-                  <button
-                    key={ev.id}
-                    type="button"
-                    onClick={() => setOverflowDate(key)}
-                    title={ev.notes ? `${ev.title} — ${ev.notes}` : ev.title}
-                    style={{
-                      textAlign: "left",
-                      padding: "2px 6px",
-                      background: "transparent",
-                      border: "1px dashed var(--color-border)",
-                      color: "var(--color-text-muted)",
-                      fontSize: 10,
-                      fontWeight: 500,
-                      lineHeight: 1.2,
-                      cursor: "pointer",
-                      display: "grid",
-                      gridTemplateColumns: "auto minmax(0, 1fr)",
-                      alignItems: "center",
-                      gap: 4,
-                      height: 20,
-                      flexShrink: 0,
-                    }}
-                  >
-                    <span
+                {visibleEvents.map(ev => {
+                  const evColor = eventColorValue(ev.color)
+                  return (
+                    <button
+                      key={ev.id}
+                      type="button"
+                      onClick={() => setOverflowDate(key)}
+                      title={ev.notes ? `${ev.title} — ${ev.notes}` : ev.title}
                       style={{
-                        fontSize: 8,
-                        fontWeight: 800,
-                        letterSpacing: "0.06em",
-                        color: "var(--color-text-faint)",
+                        textAlign: "left",
+                        padding: "2px 6px",
+                        background: `color-mix(in srgb, ${evColor} 14%, transparent)`,
+                        border: `1px dashed ${evColor}`,
+                        color: "var(--color-text)",
+                        fontSize: 10,
+                        fontWeight: 500,
+                        lineHeight: 1.2,
+                        cursor: "pointer",
+                        display: "grid",
+                        gridTemplateColumns: "auto minmax(0, 1fr)",
+                        alignItems: "center",
+                        gap: 4,
+                        height: 20,
                         flexShrink: 0,
                       }}
                     >
-                      {(ev.kind || "EVT").slice(0, 4).toUpperCase()}
-                    </span>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                      {ev.title}
-                    </span>
-                  </button>
-                ))}
+                      <span
+                        style={{
+                          fontSize: 8,
+                          fontWeight: 800,
+                          letterSpacing: "0.06em",
+                          color: evColor,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {(ev.kind || "EVT").slice(0, 4).toUpperCase()}
+                      </span>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                        {ev.title}
+                      </span>
+                    </button>
+                  )
+                })}
                 {overflowCount > 0 && (
                   <button
                     type="button"
@@ -475,7 +478,9 @@ export function MonthCalendar({
                 </button>
               )
             })}
-            {overflowEvents.map(ev => (
+            {overflowEvents.map(ev => {
+              const evColor = eventColorValue(ev.color)
+              return (
               <div
                 key={ev.id}
                 style={{
@@ -492,9 +497,10 @@ export function MonthCalendar({
                     fontSize: 9,
                     fontWeight: 800,
                     letterSpacing: "0.08em",
-                    color: "var(--color-text-muted)",
+                    color: evColor,
                     padding: "3px 6px",
-                    border: "1px dashed var(--color-border)",
+                    border: `1px dashed ${evColor}`,
+                    background: `color-mix(in srgb, ${evColor} 12%, transparent)`,
                   }}
                 >
                   {(ev.kind || "EVT").slice(0, 4).toUpperCase()}
@@ -528,7 +534,8 @@ export function MonthCalendar({
                   </button>
                 )}
               </div>
-            ))}
+              )
+            })}
             {onAddEvent && overflowDate && (
               <button
                 type="button"

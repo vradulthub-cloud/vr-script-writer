@@ -21,32 +21,32 @@ import { cn } from "@/lib/utils"
 // ─── Nav structure ────────────────────────────────────────────────────────────
 
 const CORE_ITEMS = [
-  { href: "/dashboard", label: "Dashboard",      shortLabel: "Home",     icon: LayoutDashboard },
-  { href: "/missing",   label: "Missing Assets", shortLabel: "Missing",  icon: AlertCircle,    tabKey: "Tickets" },
+  { href: "/dashboard", label: "Dashboard", shortLabel: "Home", icon: LayoutDashboard },
 ] as const
 
 const NAV_SECTIONS = [
   {
     label: "Production",
     items: [
-      { href: "/shoots",   label: "Shoot Tracker",  shortLabel: "Shoots",    icon: Calendar,    tabKey: "Shoots" },
-      { href: "/research", label: "Model Research",  shortLabel: "Research",  icon: Users,       tabKey: "Model Research" },
+      { href: "/shoots",      label: "Shoot Tracker",  shortLabel: "Shoots",   icon: Calendar,    tabKey: "Shoots" },
+      { href: "/call-sheets", label: "Call Sheets",    shortLabel: "Calls",    icon: CalendarDays, tabKey: "Call Sheets" },
+      { href: "/research",    label: "Model Research", shortLabel: "Research", icon: Users,       tabKey: "Model Research" },
     ],
   },
   {
     label: "Writing Room",
     items: [
-      { href: "/scripts",      label: "Scripts",       shortLabel: "Scripts",  icon: FileText,    tabKey: "Scripts" },
-      { href: "/call-sheets",  label: "Call Sheets",   shortLabel: "Calls",    icon: CalendarDays, tabKey: "Call Sheets" },
-      { href: "/titles",       label: "Titles",         shortLabel: "Titles",   icon: ImageIcon,   tabKey: "Titles" },
-      { href: "/descriptions", label: "Descriptions",  shortLabel: "Descs",    icon: AlignLeft,   tabKey: "Descriptions" },
-      { href: "/compilations", label: "Compilations",  shortLabel: "Comps",    icon: Layers,      tabKey: "Compilations" },
+      { href: "/scripts",      label: "Scripts",       shortLabel: "Scripts", icon: FileText, tabKey: "Scripts" },
+      { href: "/descriptions", label: "Descriptions",  shortLabel: "Descs",   icon: AlignLeft, tabKey: "Descriptions" },
+      { href: "/compilations", label: "Compilations",  shortLabel: "Comps",   icon: Layers,    tabKey: "Compilations" },
     ],
   },
   {
     label: "Operations",
     items: [
-      { href: "/tickets", label: "Tickets", shortLabel: "Tickets", icon: Ticket, tabKey: "Tickets" },
+      { href: "/missing", label: "Grail Assets", shortLabel: "Grail",   icon: AlertCircle, tabKey: "Tickets" },
+      { href: "/titles",  label: "Titles",       shortLabel: "Titles",  icon: ImageIcon,   tabKey: "Titles" },
+      { href: "/tickets", label: "Tickets",      shortLabel: "Tickets", icon: Ticket,      tabKey: "Tickets" },
     ],
   },
 ] as const

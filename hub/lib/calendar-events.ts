@@ -12,7 +12,31 @@ export type CalendarEvent = {
   title: string
   /** Free-form short tag, e.g. "MEETING", "TRAVEL", "DEADLINE". Uppercase. */
   kind?: string
+  /** Slug from EVENT_COLORS (e.g. "lime", "amber"). Drives chip border + tag
+   *  color so users can scan a busy month by category at a glance. */
+  color?: string
   notes?: string
+}
+
+/** Curated tag palette. Eight options is enough for personal categorisation
+ *  without making the picker a UX burden. Names lowercase / values either a
+ *  CSS var (when the design system already owns the swatch) or a hex.
+ *  We deliberately exclude the studio identity colours — those should remain
+ *  unique to studio chips so the visual mapping stays clean. */
+export const EVENT_COLORS = [
+  { id: "lime",   label: "Lime",   value: "var(--color-lime)" },
+  { id: "amber",  label: "Amber",  value: "#f59e0b" },
+  { id: "red",    label: "Red",    value: "#ef4444" },
+  { id: "rose",   label: "Rose",   value: "#fb7185" },
+  { id: "violet", label: "Violet", value: "#a78bfa" },
+  { id: "sky",    label: "Sky",    value: "#38bdf8" },
+  { id: "teal",   label: "Teal",   value: "#2dd4bf" },
+  { id: "slate",  label: "Slate",  value: "#94a3b8" },
+] as const
+
+export function eventColorValue(id: string | undefined): string {
+  if (!id) return "var(--color-text-muted)"
+  return EVENT_COLORS.find(c => c.id === id)?.value ?? "var(--color-text-muted)"
 }
 
 function read(): CalendarEvent[] {

@@ -16,17 +16,17 @@ import {
 } from "lucide-react"
 
 const COMMANDS = [
-  { id: "shoots",       label: "Shoot Tracker",     href: "/shoots",       icon: LayoutGrid,  shortcut: "1" },
-  { id: "missing",      label: "Studio Catalog",     href: "/missing",      icon: LayoutGrid,  shortcut: "2" },
-  { id: "research",     label: "Model Research",    href: "/research",     icon: Users,        shortcut: "3" },
-  { id: "scripts",      label: "Scripts",           href: "/scripts",      icon: FileText,     shortcut: "4" },
-  { id: "call-sheets",  label: "Call Sheets",       href: "/call-sheets",  icon: Phone,        shortcut: "5" },
-  { id: "titles",       label: "Titles",            href: "/titles",       icon: Image,        shortcut: "6" },
-  { id: "descriptions", label: "Descriptions",      href: "/descriptions", icon: AlignLeft,    shortcut: "7" },
-  { id: "compilations", label: "Compilations",      href: "/compilations", icon: Layers,       shortcut: "8" },
-  { id: "approvals",    label: "Approvals",         href: "/approvals",    icon: CheckSquare,  shortcut: "9" },
-  { id: "tickets",      label: "Tickets",           href: "/tickets",      icon: Ticket,       shortcut: "" },
-  { id: "admin",        label: "Admin",             href: "/admin",        icon: Users,        shortcut: "0" },
+  { id: "shoots",       label: "Shoot Tracker",  href: "/shoots",       icon: LayoutGrid,  shortcut: "1" },
+  { id: "call-sheets",  label: "Call Sheets",    href: "/call-sheets",  icon: Phone,        shortcut: "2" },
+  { id: "research",     label: "Model Research", href: "/research",     icon: Users,        shortcut: "3" },
+  { id: "scripts",      label: "Scripts",        href: "/scripts",      icon: FileText,     shortcut: "4" },
+  { id: "descriptions", label: "Descriptions",   href: "/descriptions", icon: AlignLeft,    shortcut: "5" },
+  { id: "compilations", label: "Compilations",   href: "/compilations", icon: Layers,       shortcut: "6" },
+  { id: "missing",      label: "Grail Assets",   href: "/missing",      icon: LayoutGrid,  shortcut: "7" },
+  { id: "titles",       label: "Titles",         href: "/titles",       icon: Image,        shortcut: "8" },
+  { id: "approvals",    label: "Approvals",      href: "/approvals",    icon: CheckSquare,  shortcut: "9" },
+  { id: "tickets",      label: "Tickets",        href: "/tickets",      icon: Ticket,       shortcut: "" },
+  { id: "admin",        label: "Admin",          href: "/admin",        icon: Users,        shortcut: "0" },
 ]
 
 export function CommandPalette() {

@@ -6,7 +6,7 @@ import { studioAbbr, studioColor } from "@/lib/studio-colors"
 
 const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"] as const
 
-/** Prototype-style overview for Missing Assets. Owns the hero title, then
+/** Prototype-style overview for Grail Assets. Owns the hero title, then
  *  renders a stat cluster + studio strip. SceneGrid below keeps its own
  *  filter actions but its duplicate title block is hidden via CSS. */
 export function MissingV2View({ stats }: { stats: SceneStats }) {
@@ -18,7 +18,7 @@ export function MissingV2View({ stats }: { stats: SceneStats }) {
   return (
     <div style={{ marginBottom: 20 }}>
       <PageHeader
-        title="Missing Assets"
+        title="Grail Assets"
         eyebrow={`STUDIO CATALOG · ${totalMissing.toLocaleString()} SCENES NEED WORK`}
         subtitle={`${complete.toLocaleString()} of ${total.toLocaleString()} scenes complete · ${completePct}% of the catalog`}
       />

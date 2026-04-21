@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { createPortal } from "react-dom"
-import type { CalendarEvent } from "@/lib/calendar-events"
+import { EVENT_COLORS, type CalendarEvent } from "@/lib/calendar-events"
 
 /** Small modal to capture a new calendar event. Portalled to body so the
  *  existing shoots-page fadeIn transform doesn't trap the fixed overlay. */
@@ -18,6 +18,8 @@ export function AddEventModal({
   const [title, setTitle] = useState("")
   const [kind, setKind] = useState("")
   const [notes, setNotes] = useState("")
+  // Default to lime so the chip is visible even if the user skips the picker.
+  const [color, setColor] = useState<string>("lime")
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
@@ -32,7 +34,13 @@ export function AddEventModal({
     e.preventDefault()
     const trimmed = title.trim()
     if (!trimmed) return
-    onSave({ date, title: trimmed, kind: kind.trim() || undefined, notes: notes.trim() || undefined })
+    onSave({
+      date,
+      title: trimmed,
+      kind: kind.trim() || undefined,
+      color,
+      notes: notes.trim() || undefined,
+    })
     onClose()
   }
 
@@ -125,6 +133,38 @@ export function AddEventModal({
               style={inputStyle}
             />
           </label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>
+              Color
+            </span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {EVENT_COLORS.map(c => {
+                const active = color === c.id
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setColor(c.id)}
+                    aria-pressed={active}
+                    aria-label={c.label}
+                    title={c.label}
+                    style={{
+                      width: 26,
+                      height: 26,
+                      padding: 0,
+                      background: c.value,
+                      border: active ? "2px solid var(--color-text)" : "2px solid var(--color-border)",
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      // Lift the active swatch slightly so it reads as selected
+                      // even before the eye reaches the border.
+                      boxShadow: active ? "0 0 0 2px var(--color-surface) inset" : undefined,
+                    }}
+                  />
+                )
+              })}
+            </div>
+          </div>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>
               Notes <span style={{ color: "var(--color-text-faint)" }}>(optional)</span>
