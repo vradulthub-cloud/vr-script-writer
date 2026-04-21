@@ -2,7 +2,15 @@ import { signIn } from "@/auth"
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 
+// Dev-only: the mocked harness is always signed-in as Dev Admin, so skip the
+// Google form entirely when DEV_AUTH_MOCK is on. Production bundles inline
+// NODE_ENV and drop this branch.
+const DEV_MOCK =
+  process.env.NODE_ENV !== "production" && process.env.DEV_AUTH_MOCK === "1"
+
 export default async function LoginPage() {
+  if (DEV_MOCK) redirect("/dashboard")
+
   const session = await auth()
   if (session) redirect("/dashboard")
 
