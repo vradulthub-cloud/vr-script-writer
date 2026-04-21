@@ -358,16 +358,16 @@ TITLE_GEN_SYSTEMS: dict[str, str] = {
     ),
     "VRAllure": (
         "You are a creative title writer for VRAllure, a premium VR solo/intimate studio. "
-        "Generate exactly ONE scene title that reflects the actual plot/theme. "
-        "The title MUST hook into a concrete element from the script — the setup, the setting, "
-        "a prop, the wardrobe, or a beat of the action. Do not invent content that isn't there. "
+        "Generate scene titles that hook into the script's concrete details. "
+        "Each title MUST reference something concrete from the script — a wardrobe piece, "
+        "a prop, a beat of action, a specific gesture or mood — NOT the theme word. "
+        "Do not invent content that isn't there. Do not restate the theme verbatim. "
         "Form: 2-4 words, title case, sensual/intimate/soft tone, suggestive but elegant, "
         "no performer names, no crude language, no all-caps. "
-        "Reference tone — real VRA titles, match this voice (NOT content): "
+        "Reference tone — real VRA titles, match this voice (NOT content, NOT subject matter): "
         "Sweet Surrender, Always on Top, A Swift Release, Hovering With Intent, "
         "Just for You, Slow Burn, Perfectly Undone, Something to Watch, "
-        "Touch and Go, Open Invitation, All to Herself. "
-        "Respond with ONLY the title — no explanation, no quotes."
+        "Touch and Go, Open Invitation, All to Herself."
     ),
     "NaughtyJOI": (
         "You are a creative title writer for NaughtyJOI, a premium VR JOI studio. "
@@ -409,23 +409,61 @@ def generate_title_with_fallback(
 
     # Build the user prompt from whichever script fields are populated. Empty
     # fields are skipped entirely so the model doesn't anchor on "N/A".
-    lines: list[str] = ["Generate a title for this scene.\n\nScript:"]
+    lines: list[str] = ["Generate 5 distinct title candidates for this scene.\n\nScript:"]
     if female:     lines.append(f"- Female performer: {female}")
     if male:       lines.append(f"- Male performer: {male}")
-    if theme:      lines.append(f"- Theme: {theme}")
+    if theme:      lines.append(f"- Theme (internal working name — DO NOT reuse verbatim): {theme}")
     if location:   lines.append(f"- Location / set: {location}")
     if wardrobe_f: lines.append(f"- Wardrobe (f): {wardrobe_f}")
     if wardrobe_m: lines.append(f"- Wardrobe (m): {wardrobe_m}")
     if props:      lines.append(f"- Props: {props}")
     if plot:       lines.append(f"- Plot: {plot[:800]}")
     lines.append(
-        "\nThe title MUST hook into one of the concrete details above — do NOT invent "
-        "content that isn't in the script. Generate the title now."
+        "\nInstructions:\n"
+        "- Each of the 5 titles must hook into a DIFFERENT concrete detail "
+        "(one from wardrobe, one from a prop, one from a beat of action, one from "
+        "tone/mood, one from role/setup) — not all five from the same hook.\n"
+        "- DO NOT restate the theme word-for-word. The theme is an internal working "
+        "name; your job is to replace it, not echo it.\n"
+        "- DO NOT invent content that isn't in the script.\n"
+        "- Output ONLY the 5 titles, one per line, no numbering, no quotes, no commentary."
     )
     user_prompt = "\n".join(lines)
 
-    def _clean(raw: str) -> str:
-        return raw.split("\n")[0].strip().strip('"').strip("'")
+    def _clean_one(raw: str) -> str:
+        # Strip numbering like "1. ", "1) ", leading bullets, quotes.
+        import re as _re
+        s = raw.strip()
+        s = _re.sub(r"^[\d]+[\.\)]\s*", "", s)
+        s = _re.sub(r"^[-•·*]\s*", "", s)
+        return s.strip().strip('"').strip("'").strip()
+
+    def _pick_from_candidates(raw: str) -> str:
+        # Take all non-empty lines, clean them, drop dupes, pick the first that
+        # doesn't just echo the theme. Returning a single title keeps the
+        # existing {title: str} API contract — the variety comes from making
+        # each *call* land on a fresh line.
+        import random as _random
+        lines_out = [_clean_one(l) for l in raw.splitlines()]
+        lines_out = [l for l in lines_out if l]
+        # De-duplicate while preserving order
+        seen: set[str] = set()
+        uniq: list[str] = []
+        for l in lines_out:
+            key = l.lower()
+            if key in seen: continue
+            seen.add(key)
+            uniq.append(l)
+        # Deprioritize any candidate that starts with the theme's first word
+        theme_first = (theme.split()[0].lower() if theme else "")
+        if theme_first and len(uniq) > 1:
+            uniq.sort(key=lambda t: t.lower().startswith(theme_first))
+        if not uniq:
+            return ""
+        # Random pick from the top half so repeated clicks produce variety even
+        # when Claude returns the same 5 candidates.
+        top = uniq[:max(3, len(uniq) // 2 + 1)]
+        return _random.choice(top) if top else uniq[0]
 
     # --- Try Claude (haiku — fast, cheap, creative) ---
     try:
@@ -436,22 +474,29 @@ def generate_title_with_fallback(
             client = _anthropic.Anthropic(api_key=settings.anthropic_api_key)
             msg = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=60,
+                max_tokens=200,
+                # Max-creativity sampling — this endpoint benefits from variance
+                # across calls. The enforced 5-candidate return further dilutes
+                # same-seed collapse into a single "Morning X" output.
+                temperature=1.0,
+                top_p=0.95,
                 system=sys_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             )
             text = msg.content[0].text if msg.content else ""
             if text.strip():
-                return _clean(text)
+                picked = _pick_from_candidates(text)
+                if picked:
+                    return picked
     except Exception as exc:
         _log.warning("Claude title generation failed (%s), falling back to Ollama", exc)
 
     # --- Ollama fallback ---
     from api.ollama_client import ollama_generate
     title = ollama_generate(
-        "title", user_prompt, system=sys_prompt, max_tokens=60, temperature=0.7
+        "title", user_prompt, system=sys_prompt, max_tokens=200, temperature=1.0
     )
-    return _clean(title)
+    return _pick_from_candidates(title) or _clean_one(title)
 
 
 # ---------------------------------------------------------------------------
