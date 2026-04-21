@@ -3,6 +3,7 @@ import { api, type UserProfile } from "@/lib/api"
 import { requireAdmin } from "@/lib/rbac"
 import { isEclatechV2 } from "@/lib/eclatech-flag"
 import { UsersPanel } from "./users-panel"
+import { SystemCheck } from "./system-check"
 
 export const dynamic = "force-dynamic"
 
@@ -44,6 +45,8 @@ export default async function AdminPage() {
             <AdminStat label="Users" value={`${activeCount}`} sub={`${adminCount} admin · ${editorCount} editor`} />
           </div>
         </section>
+
+        <SystemCheck idToken={idToken} />
 
         {health?.syncs && Object.keys(health.syncs).length > 0 && (
           <section className="ec-block">

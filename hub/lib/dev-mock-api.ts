@@ -254,6 +254,12 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
 
   // ── Sync ──────────────────────────────────────────────────────────────
   if (base === "/sync/status") return wait([] as unknown as T)
+  if (base === "/sync/trigger") {
+    return wait({
+      status: "completed",
+      results: { scenes: 1274, scripts: 482, models: 1830, shoots: 12 },
+    } as unknown as T)
+  }
 
   // eslint-disable-next-line no-console
   console.warn(`[dev-mock-api] Unmapped path: ${path}`)
