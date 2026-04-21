@@ -113,16 +113,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
     setMnError(null)
     setMnDataUrl(null)
     try {
-      const res = await fetch(`${API_BASE_URL}/api/titles/model-name`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
-        },
-        body: JSON.stringify({ name: mnName.trim(), studio: mnStudio }),
-      })
-      if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => "")}`)
-      const data = await res.json() as { data_url: string; error?: string }
+      const data = await client.titles.modelName({ name: mnName.trim(), studio: mnStudio })
       if (data.error) throw new Error(data.error)
       setMnDataUrl(data.data_url)
     } catch (e) {

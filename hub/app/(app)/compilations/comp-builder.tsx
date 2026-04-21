@@ -28,6 +28,14 @@ interface ParsedIdea {
   talent: string
 }
 
+const STUDIO_COMP_PREFIX: Record<string, string> = {
+  FuckPassVR: "FPVR", VRHush: "VRH", VRAllure: "VRA", NaughtyJOI: "NNJOI",
+}
+
+function photosetCompId(studio: string): string {
+  return `${STUDIO_COMP_PREFIX[studio] ?? "FPVR"}-COMP-XXXX`
+}
+
 function parseIdeas(raw: string): ParsedIdea[] {
   const ideas: ParsedIdea[] = []
   // Split on blank lines or "TITLE:" to find idea blocks
@@ -112,6 +120,9 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
 
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
+  const [grailSaving, setGrailSaving] = useState(false)
+  const [grailMsg, setGrailMsg] = useState<string | null>(null)
+  const [photosetOpen, setPhotosetOpen] = useState(false)
 
   // Detect volume series: given an idea title, scan existing comps whose
   // titles share a root (after stripping "Vol. N" / "Best X" suffixes) and
@@ -195,6 +206,24 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
       setSaveMsg(e instanceof Error ? e.message : "Save failed")
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function saveToGrail() {
+    if (selected.length === 0) return
+    setGrailSaving(true)
+    setGrailMsg(null)
+    try {
+      const res = await api(idToken ?? null).compilations.grailWrite({
+        studio,
+        title: title || "Untitled Compilation",
+        scene_ids: selected,
+      })
+      setGrailMsg(`✓ Flagged ${res.scene_count} scene${res.scene_count === 1 ? "" : "s"} as compilation.`)
+    } catch (e) {
+      setGrailMsg(e instanceof Error ? e.message : "Grail write failed")
+    } finally {
+      setGrailSaving(false)
     }
   }
 
@@ -547,20 +576,90 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                 </div>
 
                 {!descStream.streaming && descStream.output && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={saveCompilation}
-                      disabled={saving}
-                      className="px-3 py-1.5 rounded text-xs font-semibold"
-                      style={{ background: "var(--color-lime)", color: "#0d0d0d", opacity: saving ? 0.5 : 1 }}
-                    >
-                      {saving ? "Saving…" : "Save Compilation"}
-                    </button>
-                    {saveMsg && (
-                      <span style={{ fontSize: 11, color: saveMsg === "Saved." ? "var(--color-ok)" : "var(--color-err)" }}>
-                        {saveMsg}
-                      </span>
-                    )}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={saveCompilation}
+                        disabled={saving}
+                        className="px-3 py-1.5 rounded text-xs font-semibold"
+                        style={{ background: "var(--color-lime)", color: "#0d0d0d", opacity: saving ? 0.5 : 1 }}
+                      >
+                        {saving ? "Saving…" : "Save to Planning Sheet"}
+                      </button>
+                      <button
+                        onClick={saveToGrail}
+                        disabled={grailSaving || selected.length === 0}
+                        title="Flag selected scenes as is_compilation in the Grail DB"
+                        className="px-3 py-1.5 rounded text-xs font-semibold"
+                        style={{
+                          background: "transparent",
+                          color: "var(--color-text)",
+                          border: "1px solid var(--color-border)",
+                          cursor: grailSaving ? "wait" : "pointer",
+                          opacity: grailSaving || selected.length === 0 ? 0.5 : 1,
+                        }}
+                      >
+                        {grailSaving ? "Writing…" : "Add to Grail Sheet"}
+                      </button>
+                      {saveMsg && (
+                        <span style={{ fontSize: 11, color: saveMsg.startsWith("Saved") ? "var(--color-ok)" : "var(--color-err)" }}>
+                          {saveMsg}
+                        </span>
+                      )}
+                      {grailMsg && (
+                        <span style={{ fontSize: 11, color: grailMsg.startsWith("✓") ? "var(--color-ok)" : "var(--color-err)" }}>
+                          {grailMsg}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Photoset build helper — copy-paste command for the local Mac script */}
+                    <div style={{ border: "1px solid var(--color-border)", borderRadius: 4, background: "var(--color-surface)" }}>
+                      <button
+                        type="button"
+                        onClick={() => setPhotosetOpen(o => !o)}
+                        aria-expanded={photosetOpen}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          width: "100%",
+                          padding: "6px 10px",
+                          background: "transparent",
+                          border: "none",
+                          color: "var(--color-text-muted)",
+                          fontSize: 11,
+                          cursor: "pointer",
+                          textAlign: "left",
+                        }}
+                      >
+                        <span aria-hidden style={{ fontSize: 9, color: "var(--color-text-faint)", transform: photosetOpen ? "rotate(90deg)" : undefined, transition: "transform 150ms" }}>▶</span>
+                        🖼 Build Photoset (Mac command)
+                      </button>
+                      {photosetOpen && (
+                        <div style={{ padding: "6px 10px 10px", borderTop: "1px solid var(--color-border-subtle)" }}>
+                          <pre
+                            style={{
+                              fontFamily: "var(--font-mono)",
+                              fontSize: 11,
+                              color: "var(--color-text)",
+                              background: "var(--color-elevated)",
+                              padding: "8px 10px",
+                              borderRadius: 4,
+                              margin: 0,
+                              overflow: "auto",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-all",
+                            }}
+                          >
+{`python3 ~/Scripts/comp_photoset.py --comp-id ${photosetCompId(studio)} --scenes ${selected.join(",") || "<scene-ids>"} --output ~/Desktop/Compilations --zip`}
+                          </pre>
+                          <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 6 }}>
+                            Save to Grail first to get the real comp ID.
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </>

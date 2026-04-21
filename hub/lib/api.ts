@@ -621,6 +621,16 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<{ scene_id: string; status: string }>("/descriptions/save-grail", body),
       seo: (body: { description: string; studio: string }) =>
         post<{ meta_title: string; meta_description: string }>("/descriptions/seo", body),
+      regenerateParagraph: (body: {
+        studio: string
+        paragraph: string
+        paragraph_index: number
+        performer?: string
+        title?: string
+        plot?: string
+        feedback?: string
+      }) =>
+        post<{ paragraph: string }>("/descriptions/regenerate-paragraph", body),
     },
 
     titles: {
@@ -629,6 +639,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<LocalTitleResult[]>("/titles/local", body),
       refine: (body: { text: string; treatment_name: string; refine_prompt: string; seed?: number }) =>
         post<LocalTitleResult>("/titles/refine", body),
+      modelName: (body: { name: string; studio: string }) =>
+        post<{ data_url: string; error?: string | null }>("/titles/model-name", body),
     },
 
     models: {
