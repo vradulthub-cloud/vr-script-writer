@@ -103,7 +103,7 @@ The tool lives behind the scenes of a production operation. It should feel like 
 ### Aesthetic Direction
 - **Theme:** Dark, always. Not "dark mode as a preference" — dark as the primary reality of this interface.
 - **Reference feel:** Linear, Raycast, Vercel Dashboard — confident use of dark surfaces, restrained accent use, excellent information density
-- **Color system:** Keep lime green (`#bed62f`) as the sole primary action color. Keep studio identity colors (FPVR blue `#3b82f6`, VRH purple `#8b5cf6`, VRA pink `#ec4899`, NJOI orange `#f97316`) as contextual anchors — they should dominate when in a studio context.
+- **Color system:** Keep lime green (`#bed62f`) as the sole primary action color. Keep studio identity colors (FPVR orange `#f97316`, VRH purple `#8b5cf6`, VRA pink `#ec4899`, NJOI blue `#3b82f6`) as contextual anchors — they should dominate when in a studio context. (FPVR and NJOI are swapped relative to early drafts; the values in `hub/app/globals.css` are authoritative — confirmed by commit `2ea9cc4`.)
 - **Typography evolution:** Syne and DM Sans are approved to replace on new work. Prefer a high-contrast grotesque display face (e.g., Basement Grotesque, Cabinet Grotesk, Clash Display, Neue Montreal) for headings. Body: General Sans, Geist, or Switzer. DM Mono is fine to keep for code/monospace contexts.
 - **Anti-references:** NO purple/cyan gradient combos, NO gradient text, NO glowing card borders, NO AI startup aesthetic. NO gray enterprise table grids, NO blue primary buttons, NO sidebar-with-accordion nav.
 

@@ -90,7 +90,7 @@ function DateRow({ date, doorCode, idToken, tabName }: DateRowProps) {
             className="px-3 py-1 rounded text-xs font-semibold transition-colors"
             style={{
               background: loading ? "var(--color-elevated)" : "var(--color-lime)",
-              color: loading ? "var(--color-text-muted)" : "#0d0d0d",
+              color: loading ? "var(--color-text-muted)" : "var(--color-lime-ink)",
               cursor: loading ? "wait" : "pointer",
             }}
           >
@@ -335,7 +335,7 @@ export function CallSheetsClient({
               className="px-4 py-1.5 rounded text-xs font-semibold transition-colors"
               style={{
                 background: batchRunning ? "var(--color-elevated)" : "var(--color-lime)",
-                color: batchRunning ? "var(--color-text-muted)" : "#0d0d0d",
+                color: batchRunning ? "var(--color-text-muted)" : "var(--color-lime-ink)",
                 cursor: batchRunning ? "wait" : "pointer",
               }}
             >

@@ -171,8 +171,7 @@ export function MonthCalendar({
                       style={{
                         textAlign: "left",
                         padding: "3px 6px",
-                        background: `color-mix(in srgb, ${color} 22%, transparent)`,
-                        borderLeft: `2px solid ${color}`,
+                        background: `color-mix(in srgb, ${color} 34%, transparent)`,
                         color: "var(--color-text)",
                         fontSize: 10,
                         fontWeight: 600,

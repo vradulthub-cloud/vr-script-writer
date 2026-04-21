@@ -64,7 +64,6 @@ export function MissingV2View({ stats }: { stats: SceneStats }) {
                 style={{
                   padding: "16px 18px",
                   borderRight: isLast ? undefined : "1px solid var(--color-border-subtle)",
-                  borderLeft: `2px solid ${color}`,
                 }}
               >
                 <div style={{ fontSize: 10, letterSpacing: "0.18em", fontWeight: 700, color }}>{abbr}</div>

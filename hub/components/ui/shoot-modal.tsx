@@ -64,7 +64,6 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
           overflow: "auto",
           background: "var(--color-surface)",
           border: `1px solid var(--color-border)`,
-          borderLeft: `3px solid ${accent}`,
           boxShadow: "0 24px 60px rgba(0,0,0,0.5)",
         }}
       >
@@ -326,7 +325,7 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
               letterSpacing: "0.08em",
               textTransform: "uppercase",
               background: "var(--color-lime)",
-              color: "#0d0d0d",
+              color: "var(--color-lime-ink)",
               textDecoration: "none",
               border: "1px solid var(--color-lime)",
             }}

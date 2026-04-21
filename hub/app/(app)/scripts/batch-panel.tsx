@@ -306,7 +306,7 @@ export function BatchPanel({ rows, idToken, isAdmin, onGenerated }: Props) {
             fontSize: 12,
             fontWeight: 700,
             background: running || selected.size === 0 ? "var(--color-elevated)" : "var(--color-lime)",
-            color: running || selected.size === 0 ? "var(--color-text-muted)" : "#0d0d0d",
+            color: running || selected.size === 0 ? "var(--color-text-muted)" : "var(--color-lime-ink)",
             border: "none",
             cursor: running || selected.size === 0 ? "not-allowed" : "pointer",
           }}
@@ -319,10 +319,12 @@ export function BatchPanel({ rows, idToken, isAdmin, onGenerated }: Props) {
         <div style={{ height: 4, background: "var(--color-border)", borderRadius: 2, overflow: "hidden" }}>
           <div
             style={{
-              width: `${(progress / total) * 100}%`,
+              width: "100%",
               height: "100%",
               background: "var(--color-lime)",
-              transition: "width 0.2s",
+              transform: `scaleX(${total > 0 ? progress / total : 0})`,
+              transformOrigin: "left center",
+              transition: "transform 200ms var(--ease-out-quart)",
             }}
           />
         </div>
@@ -441,21 +443,26 @@ function ResultCard({
   onSkip: () => void
 }) {
   const color = STUDIO_COLOR[result.studio] ?? "var(--color-text-muted)"
-  const borderColor = result.violations.length > 0 ? "var(--color-warn)" : "var(--color-ok)"
+  const hasViolations = result.violations.length > 0
+  const statusTint = hasViolations ? "var(--color-warn)" : "var(--color-ok)"
   return (
     <div
       style={{
-        border: "1px solid var(--color-border)",
-        borderLeft: `3px solid ${borderColor}`,
+        border: `1px solid ${hasViolations ? "var(--color-warn)" : "var(--color-border)"}`,
         borderRadius: 4,
         padding: "12px 14px",
-        background: "var(--color-surface)",
+        background: hasViolations
+          ? "color-mix(in srgb, var(--color-warn) 5%, var(--color-surface))"
+          : "var(--color-surface)",
         display: "flex",
         flexDirection: "column",
         gap: 10,
       }}
     >
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+        <span aria-hidden="true" style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", color: statusTint }}>
+          {hasViolations ? "WARN" : "OK"}
+        </span>
         <span style={{ fontSize: 15, fontWeight: 700, color: "var(--color-text)" }}>{result.label}</span>
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color }}>
           {result.studio}
@@ -522,7 +529,7 @@ function ResultCard({
             fontSize: 12,
             fontWeight: 700,
             background: saving ? "var(--color-elevated)" : "var(--color-lime)",
-            color: saving ? "var(--color-text-muted)" : "#0d0d0d",
+            color: saving ? "var(--color-text-muted)" : "var(--color-lime-ink)",
             border: "none",
             cursor: saving ? "wait" : "pointer",
           }}

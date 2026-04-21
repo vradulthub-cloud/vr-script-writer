@@ -1177,7 +1177,7 @@ function TicketQuickActions({ ticket, isAdmin, busy, onAction }: QuickActionsPro
                 fontWeight: 700,
                 borderRadius: 3,
                 background: isAdmin ? "var(--color-lime)" : "var(--color-elevated)",
-                color: isAdmin ? "#0d0d0d" : "var(--color-text-faint)",
+                color: isAdmin ? "var(--color-lime-ink)" : "var(--color-text-faint)",
                 border: "1px solid " + (isAdmin ? "var(--color-lime)" : "var(--color-border)"),
                 cursor: busy || !isAdmin ? "not-allowed" : "pointer",
               }}
@@ -1228,7 +1228,7 @@ function TicketQuickActions({ ticket, isAdmin, busy, onAction }: QuickActionsPro
                 fontWeight: 700,
                 borderRadius: 3,
                 background: "var(--color-lime)",
-                color: "#0d0d0d",
+                color: "var(--color-lime-ink)",
                 border: "1px solid var(--color-lime)",
                 cursor: busy ? "wait" : "pointer",
               }}

@@ -353,9 +353,8 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
               const isAllClear = studioScenes.length === 0
               return (
                 <div key={studioName} style={{ marginBottom: 32 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                    <div style={{ width: 3, height: 18, borderRadius: 2, background: color, flexShrink: 0 }} />
-                    <span style={{ fontWeight: 700, fontSize: 13, color: "var(--color-text)" }}>{studioName}</span>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color }}>{studioName}</span>
                     {isAllClear
                       ? <span style={{ fontSize: 11, color: "var(--color-ok)" }}>all clear</span>
                       : <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>{studioScenes.length} scene{studioScenes.length !== 1 ? "s" : ""} missing assets</span>
@@ -669,7 +668,7 @@ const SceneCard = memo(function SceneCard({
                 style={{
                   width: 18, height: 18, padding: 0,
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
-                  borderRadius: 3, background: "var(--color-lime)", color: "#0d0d0d",
+                  borderRadius: 3, background: "var(--color-lime)", color: "var(--color-lime-ink)",
                   border: "none", cursor: genBusy === "saving" ? "wait" : "pointer",
                 }}
               >

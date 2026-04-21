@@ -58,7 +58,7 @@ export function SystemCheck({ idToken: serverIdToken }: { idToken?: string }) {
               letterSpacing: "0.04em",
               borderRadius: 4,
               background: running ? "var(--color-elevated)" : "var(--color-lime)",
-              color: running ? "var(--color-text-muted)" : "#0d0d0d",
+              color: running ? "var(--color-text-muted)" : "var(--color-lime-ink)",
               border: "none",
               cursor: running ? "wait" : "pointer",
             }}

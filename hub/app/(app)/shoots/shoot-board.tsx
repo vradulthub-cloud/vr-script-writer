@@ -515,9 +515,12 @@ function ShootRowV2({ shoot, expanded, onToggle, onOpenDetails, onCellClick }: S
   return (
     <div
       style={{
-        border: `1px solid ${expanded ? "var(--color-border)" : "var(--color-border-subtle)"}`,
-        borderLeft: `3px solid ${alert ? "var(--color-err)" : accent}`,
-        background: expanded ? "var(--color-elevated)" : "var(--color-surface)",
+        border: `1px solid ${expanded ? "var(--color-border)" : alert ? "var(--color-err)" : "var(--color-border-subtle)"}`,
+        background: expanded
+          ? "var(--color-elevated)"
+          : alert
+            ? "color-mix(in srgb, var(--color-err) 6%, var(--color-surface))"
+            : "var(--color-surface)",
         transition: "background 120ms ease",
       }}
     >
@@ -579,10 +582,12 @@ function ShootRowV2({ shoot, expanded, onToggle, onOpenDetails, onCellClick }: S
             background: "var(--color-border-subtle)", overflow: "hidden",
           }}>
             <div style={{
-              width: `${progress}%`,
+              width: "100%",
               height: "100%",
               background: alert ? "var(--color-err)" : accent,
-              transition: "width 180ms ease",
+              transform: `scaleX(${progress / 100})`,
+              transformOrigin: "left center",
+              transition: "transform 180ms var(--ease-out-quart)",
             }} />
           </div>
           <span style={{
@@ -1276,7 +1281,7 @@ function SceneAssetTable({
                   padding: "2px 7px",
                   borderRadius: 3,
                   background: "var(--color-lime)",
-                  color: "#0d0d0d",
+                  color: "var(--color-lime-ink)",
                   fontWeight: 600,
                   border: "none",
                   cursor: genBusy === "saving" ? "wait" : "pointer",

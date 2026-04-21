@@ -232,11 +232,10 @@ function DueSoonPanel({ scenes }: { scenes: Scene[] }) {
                   color: "inherit",
                 }}
               >
-                <span aria-hidden="true" style={{ width: 2, height: 22, background: accent, borderRadius: 1, flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {s.id}
-                    {s.female && <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}> · {s.female}{s.male ? ` / ${s.male}` : ""}</span>}
+                    <span style={{ fontFamily: "var(--font-mono)", color: accent, fontWeight: 700, marginRight: 8 }}>{s.id}</span>
+                    {s.female && <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>{s.female}{s.male ? ` / ${s.male}` : ""}</span>}
                   </div>
                   <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 2 }}>
                     {s.release_date}
@@ -275,7 +274,6 @@ function ProductionScopeStrip({ stats }: { stats: SceneStats }) {
         const abbr  = studioAbbr(studio)
         return (
           <span key={studio} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-            <span aria-hidden="true" style={{ width: 2, height: 10, background: color, borderRadius: 1, display: "inline-block" }} />
             <span style={{ fontWeight: 700, color, letterSpacing: "0.04em" }}>{abbr}</span>
             <span style={{ fontVariantNumeric: "tabular-nums", color: "var(--color-text)" }}>
               {count.toLocaleString()}
@@ -355,12 +353,13 @@ function AgingShootsPanel({ shoots }: { shoots: Shoot[] }) {
                   color: "inherit",
                 }}
               >
-                <span
-                  aria-hidden="true"
-                  style={{ width: 2, height: 22, background: accent, borderRadius: 1, flexShrink: 0 }}
-                />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {primaryStudio && (
+                      <span style={{ fontFamily: "var(--font-mono)", color: accent, fontWeight: 700, marginRight: 8, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                        {primaryStudio.slice(0, 4)}
+                      </span>
+                    )}
                     {s.female_talent}
                     {s.male_talent && <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}> / {s.male_talent}</span>}
                   </div>

@@ -302,7 +302,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                 className="w-full px-3 py-2 rounded text-xs font-semibold transition-colors"
                 style={{
                   background: ideasStream.streaming ? "var(--color-elevated)" : "var(--color-lime)",
-                  color: ideasStream.streaming ? "var(--color-text-muted)" : "#0d0d0d",
+                  color: ideasStream.streaming ? "var(--color-text-muted)" : "var(--color-lime-ink)",
                   cursor: ideasStream.streaming ? "wait" : "pointer",
                 }}
               >
@@ -540,7 +540,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
               className="w-full mt-4 px-3 py-2 rounded text-xs font-semibold transition-colors"
               style={{
                 background: descStream.streaming ? "var(--color-elevated)" : "var(--color-lime)",
-                color: descStream.streaming ? "var(--color-text-muted)" : "#0d0d0d",
+                color: descStream.streaming ? "var(--color-text-muted)" : "var(--color-lime-ink)",
                 cursor: descStream.streaming ? "wait" : "pointer",
                 opacity: (selected.length === 0 && !descStream.streaming) ? 0.5 : 1,
               }}
@@ -582,7 +582,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                         onClick={saveCompilation}
                         disabled={saving}
                         className="px-3 py-1.5 rounded text-xs font-semibold"
-                        style={{ background: "var(--color-lime)", color: "#0d0d0d", opacity: saving ? 0.5 : 1 }}
+                        style={{ background: "var(--color-lime)", color: "var(--color-lime-ink)", opacity: saving ? 0.5 : 1 }}
                       >
                         {saving ? "Saving…" : "Save to Planning Sheet"}
                       </button>

@@ -49,7 +49,7 @@ export default async function LoginPage() {
             className="w-full flex items-center justify-center gap-2.5 rounded py-2.5 font-medium transition-colors hover:opacity-90"
             style={{
               background: "var(--color-lime)",
-              color: "#0d0d0d",
+              color: "var(--color-lime-ink)",
               fontSize: 13,
             }}
           >

@@ -617,7 +617,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
           className="w-full mt-4 px-3 py-2 rounded text-xs font-semibold transition-colors"
           style={{
             background: stream.streaming ? "var(--color-elevated)" : "var(--color-lime)",
-            color: stream.streaming ? "var(--color-text-muted)" : "#0d0d0d",
+            color: stream.streaming ? "var(--color-text-muted)" : "var(--color-lime-ink)",
             cursor: stream.streaming ? "wait" : "pointer",
             opacity: (!female && mode === "manual" && !stream.streaming) ? 0.5 : 1,
           }}
@@ -757,7 +757,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
                       className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
                       style={{
                         background: "var(--color-lime)",
-                        color: "#0d0d0d",
+                        color: "var(--color-lime-ink)",
                         opacity: saving || !selectedRow ? 0.5 : 1,
                       }}
                     >
@@ -770,7 +770,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
                       className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
                       style={{
                         background: "var(--color-lime)",
-                        color: "#0d0d0d",
+                        color: "var(--color-lime-ink)",
                         opacity: saving ? 0.5 : 1,
                       }}
                     >

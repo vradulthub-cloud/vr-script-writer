@@ -19,6 +19,7 @@
   /* Primary action — lime green, use sparingly */
   --color-lime:      #bed62f;
   --color-lime-dim:  #8fa820;
+  --color-lime-ink:  #0d0d0d;   /* text color that lands on top of --color-lime */
   /* Semantic aliases — separate intent from raw color */
   --color-cta:        var(--color-lime);   /* write-action buttons: Generate, Approve, Submit */
   --color-nav-active: var(--color-lime);   /* sidebar active-item icon tint */
@@ -674,7 +675,7 @@ button[style*="color-lime"]:hover:not(:disabled) {
 [data-eclatech="v2"] .ec-btn:hover       { background: var(--color-text); color: var(--color-base); }
 [data-eclatech="v2"] .ec-btn.primary     { background: var(--color-text); color: var(--color-base); }
 [data-eclatech="v2"] .ec-btn.primary:hover { background: var(--color-text-muted); }
-[data-eclatech="v2"] .ec-btn.molten      { background: var(--color-lime); color: #0d0d0d; border-color: var(--color-lime); }
+[data-eclatech="v2"] .ec-btn.molten      { background: var(--color-lime); color: var(--color-lime-ink); border-color: var(--color-lime); }
 [data-eclatech="v2"] .ec-btn.molten:hover { filter: brightness(1.08); }
 [data-eclatech="v2"] .ec-btn.ghost       { border-color: var(--color-border); color: var(--color-text-muted); }
 [data-eclatech="v2"] .ec-btn.ghost:hover { border-color: var(--color-text); color: var(--color-text); background: transparent; }
