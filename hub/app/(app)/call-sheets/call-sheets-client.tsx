@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { API_BASE_URL } from "@/lib/api"
+import { useState, useEffect, useMemo } from "react"
+import { api } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { StudioBadge } from "@/components/ui/studio-badge"
@@ -31,28 +31,11 @@ function DateRow({ date, doorCode, idToken, tabName }: DateRowProps) {
     setError(null)
     setResult(null)
     try {
-      const res = await fetch(`${API_BASE_URL}/api/call-sheets/generate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
-        },
-        body: JSON.stringify({
-          date_key: date.date_key,
-          door_code: doorCode,
-          tab_name: tabName || undefined,
-        }),
+      const data = await api(idToken ?? null).callSheets.generate({
+        date_key: date.date_key,
+        door_code: doorCode,
+        tab_name: tabName || undefined,
       })
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "")
-        try {
-          const json = JSON.parse(txt)
-          throw new Error(json.detail ?? txt)
-        } catch {
-          throw new Error(txt || `HTTP ${res.status}`)
-        }
-      }
-      const data = await res.json()
       setResult({ url: data.doc_url, title: data.title })
     } catch (e) {
       setError(e instanceof Error ? e.message : "Generation failed")
@@ -172,17 +155,26 @@ function DateRow({ date, doorCode, idToken, tabName }: DateRowProps) {
 // Page
 // ---------------------------------------------------------------------------
 
-export function CallSheetsClient() {
-  const idToken = useIdToken(undefined)
+export function CallSheetsClient({
+  idToken: serverIdToken,
+  initialTabs = [],
+  initialTabsError = null,
+}: {
+  idToken?: string
+  initialTabs?: string[]
+  initialTabsError?: string | null
+} = {}) {
+  const idToken = useIdToken(serverIdToken)
+  const client = useMemo(() => api(idToken ?? null), [idToken])
 
-  const [tabs, setTabs] = useState<string[]>([])
-  const [activeTab, setActiveTab] = useState<string>("")
+  const [tabs, setTabs] = useState<string[]>(initialTabs)
+  const [activeTab, setActiveTab] = useState<string>(initialTabs[0] ?? "")
   const [dates, setDates] = useState<ShootDate[]>([])
   const [doorCode, setDoorCode] = useState("1322")
   const [showDoorCode, setShowDoorCode] = useState(false)
-  const [tabsLoading, setTabsLoading] = useState(true)
+  const [tabsLoading, setTabsLoading] = useState(initialTabs.length === 0 && !initialTabsError)
   const [datesLoading, setDatesLoading] = useState(false)
-  const [tabsError, setTabsError] = useState<string | null>(null)
+  const [tabsError, setTabsError] = useState<string | null>(initialTabsError)
   const [datesError, setDatesError] = useState<string | null>(null)
 
   // Batch generate state
@@ -203,33 +195,12 @@ export function CallSheetsClient() {
       setBatchProgress(i + 1)
       const d = dates[i]
       try {
-        const res = await fetch(`${API_BASE_URL}/api/call-sheets/generate`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
-          },
-          body: JSON.stringify({
-            date_key: d.date_key,
-            door_code: doorCode,
-            tab_name: activeTab || undefined,
-          }),
+        const data = await client.callSheets.generate({
+          date_key: d.date_key,
+          door_code: doorCode,
+          tab_name: activeTab || undefined,
         })
-        if (!res.ok) {
-          const txt = await res.text().catch(() => "")
-          // Prefer FastAPI's `{ detail: "..." }` over the raw body so the
-          // user sees "Invalid date" instead of stringified JSON.
-          let msg = txt
-          try {
-            const parsed = JSON.parse(txt)
-            if (typeof parsed?.detail === "string") msg = parsed.detail
-            else if (Array.isArray(parsed?.detail)) msg = parsed.detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join("; ")
-          } catch { /* not JSON; keep raw text */ }
-          results.push({ date: d.date_display, error: msg || `HTTP ${res.status}` })
-        } else {
-          const data = await res.json()
-          results.push({ date: d.date_display, url: data.doc_url })
-        }
+        results.push({ date: d.date_display, url: data.doc_url })
       } catch (e) {
         results.push({ date: d.date_display, error: e instanceof Error ? e.message : "Failed" })
       }
@@ -238,18 +209,12 @@ export function CallSheetsClient() {
     setBatchRunning(false)
   }
 
-  // Load tabs once we have an idToken
+  // Load tabs client-side only if the server didn't hydrate them (e.g. stale
+  // session). The normal path has initialTabs from the server.
   useEffect(() => {
-    if (!idToken) return
+    if (tabs.length > 0 || tabsError) return
     setTabsLoading(true)
-    setTabsError(null)
-    fetch(`${API_BASE_URL}/api/call-sheets/tabs`, {
-      headers: { Authorization: `Bearer ${idToken}` },
-    })
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json() as Promise<string[]>
-      })
+    client.callSheets.tabs()
       .then(data => {
         setTabs(data)
         if (data.length > 0) setActiveTab(data[0])
@@ -259,21 +224,15 @@ export function CallSheetsClient() {
         setTabsError(e instanceof Error ? e.message : "Could not load tabs")
         setTabsLoading(false)
       })
-  }, [idToken])
+  }, [tabs.length, tabsError, client])
 
   // Load dates when tab changes
   useEffect(() => {
-    if (!idToken || !activeTab) return
+    if (!activeTab) return
     setDatesLoading(true)
     setDatesError(null)
     setDates([])
-    fetch(`${API_BASE_URL}/api/call-sheets/dates?tab=${encodeURIComponent(activeTab)}`, {
-      headers: { Authorization: `Bearer ${idToken}` },
-    })
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json() as Promise<ShootDate[]>
-      })
+    client.callSheets.dates(activeTab)
       .then(data => {
         setDates(data)
         setDatesLoading(false)
@@ -282,7 +241,7 @@ export function CallSheetsClient() {
         setDatesError(e instanceof Error ? e.message : "Could not load shoot dates")
         setDatesLoading(false)
       })
-  }, [idToken, activeTab])
+  }, [activeTab, client])
 
   return (
     <div>
