@@ -189,6 +189,22 @@ def main():
         print(f"Mode: recent only (last {RECENT_DAYS} days)")
     print()
 
+    # Load prior scan so out-of-scope scenes survive a recent-only run.
+    # Without this, a partial scan shrinks mega_scan.json to ~30d of scenes
+    # and sync_scenes() wipes has_* flags on every older scene in the DB.
+    prior_by_id: dict[str, dict] = {}
+    if not args.force and OUTPUT_FILE.exists():
+        try:
+            prior = json.loads(OUTPUT_FILE.read_text())
+            for s in prior.get("scenes") or []:
+                sid = s.get("scene_id")
+                if sid:
+                    prior_by_id[sid] = s
+            if prior_by_id:
+                print(f"Loaded {len(prior_by_id)} prior scenes to preserve on out-of-scope folders.")
+        except Exception as exc:
+            print(f"  [WARN] could not load prior scan: {exc}", file=sys.stderr)
+
     # De-dupe by (studio, scene_id): if a scene exists in both primary and
     # backup, prefer whichever has the fresher mtime so the latest asset state
     # wins.
@@ -300,6 +316,20 @@ def main():
             })
 
         print()
+
+    # Carry forward prior entries for scenes not touched this run so older
+    # scenes keep their last-known asset state instead of disappearing from
+    # mega_scan.json and being reset to has_*=0 on the next sync_scenes().
+    if prior_by_id:
+        touched = {s["scene_id"] for s in scenes}
+        carried = 0
+        for sid, prev in prior_by_id.items():
+            if sid in touched:
+                continue
+            scenes.append(prev)
+            carried += 1
+        if carried:
+            print(f"Carried forward {carried} scenes from prior scan.")
 
     # Sort: missing first, then by scene_id
     scenes.sort(key=lambda s: (s["has_description"], s["scene_id"]))

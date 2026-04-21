@@ -331,9 +331,29 @@ def sync_scenes() -> int:
 
     # --- Merge into scenes table ---
     with get_db() as conn:
+        # Snapshot the current MEGA-derived flags so we can preserve them
+        # when a scene is missing from mega_scan.json. Without this, a
+        # partial scan (recent-only, or one that dropped a path) would reset
+        # has_description/has_videos/etc to 0 for every older scene, and the
+        # Shoot Tracker / Asset Tracker would show blank cells for scenes
+        # whose assets exist in MEGA but simply weren't re-scanned this run.
+        prior_flags: dict[str, dict] = {}
+        try:
+            for row in conn.execute(
+                """SELECT id, has_description, has_videos, video_count,
+                          has_thumbnail, has_photos, has_storyboard,
+                          storyboard_count, mega_path, thumb_file
+                     FROM scenes"""
+            ).fetchall():
+                d = dict(row)
+                prior_flags[d["id"]] = d
+        except Exception as exc:
+            _log.warning("Could not snapshot prior scene flags: %s", exc)
+
         conn.execute("DELETE FROM scenes")
         for scene_id, grail in grail_scenes.items():
             mega = mega_data.get(scene_id, {})
+            prior = prior_flags.get(scene_id) if scene_id not in mega_data else None
             is_comp = 1 if any(
                 kw in grail.get("title", "").lower()
                 for kw in ("vol.", "best", "compilation")
@@ -347,6 +367,30 @@ def sync_scenes() -> int:
                 # Paths in the scan are relative: "Video Thumbnail/xxx.jpg"
                 first = thumb_files[0]
                 thumb_file = first.split("/", 1)[1] if "/" in first else first
+
+            if prior is not None:
+                # Scene is in Grail but missing from this scan's mega_data —
+                # preserve the last-known flags instead of resetting to 0.
+                has_desc_v     = prior.get("has_description") or 0
+                has_videos_v   = prior.get("has_videos") or 0
+                video_count_v  = prior.get("video_count") or 0
+                has_thumb_v    = prior.get("has_thumbnail") or 0
+                has_photos_v   = prior.get("has_photos") or 0
+                has_story_v    = prior.get("has_storyboard") or 0
+                story_count_v  = prior.get("storyboard_count") or 0
+                mega_path_v    = prior.get("mega_path") or ""
+                thumb_file_v   = prior.get("thumb_file") or ""
+            else:
+                has_desc_v     = 1 if mega.get("has_description") else 0
+                has_videos_v   = 1 if mega.get("has_videos") else 0
+                video_count_v  = mega.get("video_count", 0)
+                has_thumb_v    = 1 if mega.get("has_thumbnail") else 0
+                has_photos_v   = 1 if mega.get("has_photos") else 0
+                has_story_v    = 1 if mega.get("has_storyboard") else 0
+                story_count_v  = mega.get("storyboard_count", 0)
+                mega_path_v    = mega.get("path", "")
+                thumb_file_v   = thumb_file
+
             conn.execute(
                 """INSERT INTO scenes
                    (id, studio, grail_tab, site_code, title, performers,
@@ -365,15 +409,15 @@ def sync_scenes() -> int:
                     grail["categories"],
                     grail["tags"],
                     grail["grail_row"],
-                    1 if mega.get("has_description") else 0,
-                    1 if mega.get("has_videos") else 0,
-                    mega.get("video_count", 0),
-                    1 if mega.get("has_thumbnail") else 0,
-                    1 if mega.get("has_photos") else 0,
-                    1 if mega.get("has_storyboard") else 0,
-                    mega.get("storyboard_count", 0),
-                    mega.get("path", ""),
-                    thumb_file,
+                    has_desc_v,
+                    has_videos_v,
+                    video_count_v,
+                    has_thumb_v,
+                    has_photos_v,
+                    has_story_v,
+                    story_count_v,
+                    mega_path_v,
+                    thumb_file_v,
                     is_comp,
                 ),
             )
