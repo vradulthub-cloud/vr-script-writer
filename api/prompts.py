@@ -475,11 +475,10 @@ def generate_title_with_fallback(
             msg = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=200,
-                # Max-creativity sampling — this endpoint benefits from variance
-                # across calls. The enforced 5-candidate return further dilutes
-                # same-seed collapse into a single "Morning X" output.
+                # Max-creativity sampling. claude-haiku-4-5 rejects temperature
+                # and top_p together (400 invalid_request_error), so only pass
+                # temperature here.
                 temperature=1.0,
-                top_p=0.95,
                 system=sys_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             )
