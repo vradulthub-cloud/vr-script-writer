@@ -101,6 +101,17 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
 
   // ── Models ────────────────────────────────────────────────────────────
   if (base === "/models/") return wait(MOCK_MODELS as unknown as T)
+  if (base === "/models/trending") {
+    // Small fixture so /research doesn't show the "could not load" banner
+    // in mock mode. Real backend serves SLR/VRP scrape results.
+    return wait([
+      { name: "Liv Wilder",   platform: "SLR", scenes: "48", followers: "12.4k", views: "3.2M",  photo_url: "https://picsum.photos/seed/liv/160/200",   profile_url: "#" },
+      { name: "Nova Reign",   platform: "VRP", scenes: "31", followers: "8.7k",  views: "1.1M",  photo_url: "https://picsum.photos/seed/nova/160/200",  profile_url: "#" },
+      { name: "Cass Monroe",  platform: "SLR", scenes: "22", followers: "6.2k",  views: "740k",  photo_url: "https://picsum.photos/seed/cass/160/200",  profile_url: "#" },
+      { name: "River Black",  platform: "VRP", scenes: "17", followers: "4.1k",  views: "520k",  photo_url: "https://picsum.photos/seed/river/160/200", profile_url: "#" },
+      { name: "Sable Storm",  platform: "SLR", scenes: "12", followers: "3.6k",  views: "390k",  photo_url: "https://picsum.photos/seed/sable/160/200", profile_url: "#" },
+    ] as unknown as T)
+  }
 
   // ── Call sheets ───────────────────────────────────────────────────────
   if (base === "/call-sheets/tabs")   return wait(MOCK_CALLSHEET_TABS as unknown as T)
