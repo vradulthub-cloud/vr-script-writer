@@ -16,6 +16,7 @@ import { studioColor } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { PageHeader } from "@/components/ui/page-header"
+import { ShootModal } from "@/components/ui/shoot-modal"
 import { formatApiError } from "@/lib/errors"
 
 // ── Config ────────────────────────────────────────────────────────────
@@ -139,6 +140,10 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
   // specific month in YYYY-MM form for a custom 1-month view.
   const [monthFilter, setMonthFilter] = useState<string>("")
   const [selectedShootId, setSelectedShootId] = useState<string | null>(null)
+  // Separate state for the modal-based details view so it doesn't fight with
+  // the slide-in panel (used by v1 row-click). "Open details" on v2 rows
+  // opens the modal; v1's row click still opens the slide-in.
+  const [modalShootId, setModalShootId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshFailures, setRefreshFailures] = useState(0)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
@@ -152,6 +157,11 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
   const selected = useMemo(
     () => shoots.find(s => s.shoot_id === selectedShootId) ?? null,
     [shoots, selectedShootId],
+  )
+
+  const modalShoot = useMemo(
+    () => shoots.find(s => s.shoot_id === modalShootId) ?? null,
+    [shoots, modalShootId],
   )
 
   const refresh = useCallback(async () => {
@@ -301,7 +311,7 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
                   shoot={shoot}
                   expanded={expanded.has(shoot.shoot_id)}
                   onToggle={() => toggleExpanded(shoot.shoot_id)}
-                  onOpenDetails={() => setSelectedShootId(shoot.shoot_id)}
+                  onOpenDetails={() => setModalShootId(shoot.shoot_id)}
                   onCellClick={(sceneIdx, assetType) =>
                     setPopoverCell({
                       shootId: shoot.shoot_id,
@@ -378,6 +388,10 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
             </div>
           </div>
         </div>
+      )}
+
+      {modalShoot && (
+        <ShootModal shoot={modalShoot} onClose={() => setModalShootId(null)} />
       )}
 
       {popoverCell && (

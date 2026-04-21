@@ -36,7 +36,9 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
   const idToken = useIdToken(undefined)
   const [scripts, setScripts] = useState<Script[]>([])
   const [scriptsLoading, setScriptsLoading] = useState(true)
-  const [scriptsExpanded, setScriptsExpanded] = useState(false)
+  // Per-script expansion — each ScriptCard manages its own state so directors
+  // can drill into one scene without unfurling the others.
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -259,36 +261,9 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
 
           {/* Script(s) — sits right under the two quick-access links so the
               director can skim theme/plot before deciding whether to open the
-              full script view. Collapsed-by-default teaser; expand inline. */}
+              full script view. Each card manages its own expand/collapse. */}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <SectionLabel>Script</SectionLabel>
-              {!scriptsLoading && scripts.length > 0 && hasScriptContent && (
-                <button
-                  type="button"
-                  onClick={() => setScriptsExpanded(v => !v)}
-                  aria-expanded={scriptsExpanded}
-                  aria-controls="shoot-modal-script-body"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "2px 8px",
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: "0.1em",
-                    textTransform: "uppercase",
-                    background: "transparent",
-                    color: "var(--color-text-muted)",
-                    border: "1px solid var(--color-border)",
-                    cursor: "pointer",
-                  }}
-                >
-                  {scriptsExpanded ? "Collapse" : "Expand"}
-                  {scriptsExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                </button>
-              )}
-            </div>
+            <SectionLabel>{scripts.length > 1 ? `Scripts · ${scripts.length}` : "Script"}</SectionLabel>
             {scriptsLoading ? (
               <div style={{
                 padding: "10px 12px",
@@ -330,7 +305,13 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
                   <ScriptCard
                     key={s.id}
                     script={s}
-                    expanded={scriptsExpanded}
+                    expanded={expandedIds.has(s.id)}
+                    onToggle={() => setExpandedIds(prev => {
+                      const next = new Set(prev)
+                      if (next.has(s.id)) next.delete(s.id)
+                      else next.add(s.id)
+                      return next
+                    })}
                     accent={studioColor(s.studio)}
                     isLast={i === scripts.length - 1}
                   />
@@ -345,36 +326,25 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
             <ModalStat label="Scenes" value={String(shoot.scenes.length)} sub={shoot.source_tab || "—"} />
           </div>
 
-          {(shoot.female_agency || shoot.male_agency) && (
+          {(shoot.female_talent || shoot.male_talent) && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <SectionLabel>Talent</SectionLabel>
-              <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 12 }}>
                 {shoot.female_talent && (
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
-                    <span style={{ color: "var(--color-text)" }}>{shoot.female_talent}</span>
-                    <span style={{ color: "var(--color-text-muted)" }}>{shoot.female_agency || "—"}</span>
-                  </div>
+                  <TalentRow
+                    name={shoot.female_talent}
+                    agency={shoot.female_agency}
+                    rate={shoot.female_rate}
+                    paymentName={shoot.female_payment_name}
+                  />
                 )}
                 {shoot.male_talent && (
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
-                    <span style={{ color: "var(--color-text)" }}>{shoot.male_talent}</span>
-                    <span style={{ color: "var(--color-text-muted)" }}>{shoot.male_agency || "—"}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {(shoot.destination || shoot.location || shoot.home_owner) && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <SectionLabel>Location</SectionLabel>
-              <div style={{ fontSize: 12, color: "var(--color-text)", lineHeight: 1.6 }}>
-                {shoot.destination && <div>{shoot.destination}</div>}
-                {shoot.location && <div style={{ color: "var(--color-text-muted)" }}>{shoot.location}</div>}
-                {shoot.home_owner && (
-                  <div style={{ color: "var(--color-text-faint)", marginTop: 4 }}>
-                    Host: {shoot.home_owner}
-                  </div>
+                  <TalentRow
+                    name={shoot.male_talent}
+                    agency={shoot.male_agency}
+                    rate={shoot.male_rate}
+                    paymentName={shoot.male_payment_name}
+                  />
                 )}
               </div>
             </div>
@@ -479,6 +449,50 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
   )
 }
 
+function TalentRow({
+  name,
+  agency,
+  rate,
+  paymentName,
+}: {
+  name: string
+  agency?: string
+  rate?: string
+  paymentName?: string
+}) {
+  // When rate or paymentName are missing, we still surface the row so the
+  // user knows the W9 hasn't been synced yet — the pipeline fills these in
+  // once legal paperwork is logged on set.
+  const w9Pending = !paymentName && !rate
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "baseline" }}>
+        <span style={{ color: "var(--color-text)", fontWeight: 600 }}>{name}</span>
+        <span style={{ color: "var(--color-text-muted)" }}>{agency || "—"}</span>
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "auto 1fr",
+          columnGap: 12,
+          rowGap: 2,
+          fontSize: 11,
+          color: "var(--color-text-muted)",
+        }}
+      >
+        <span style={{ color: "var(--color-text-faint)", letterSpacing: "0.08em", textTransform: "uppercase", fontSize: 9, fontWeight: 700, alignSelf: "center" }}>Rate</span>
+        <span style={{ color: rate ? "var(--color-text)" : "var(--color-text-faint)", fontVariantNumeric: "tabular-nums" }}>
+          {rate || (w9Pending ? "Pending W9" : "—")}
+        </span>
+        <span style={{ color: "var(--color-text-faint)", letterSpacing: "0.08em", textTransform: "uppercase", fontSize: 9, fontWeight: 700, alignSelf: "center" }}>Pay&nbsp;to</span>
+        <span style={{ color: paymentName ? "var(--color-text)" : "var(--color-text-faint)" }}>
+          {paymentName || (w9Pending ? "Pending W9" : "—")}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function ModalStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div>
@@ -509,69 +523,138 @@ function ModalStat({ label, value, sub }: { label: string; value: string; sub?: 
 function ScriptCard({
   script,
   expanded,
+  onToggle,
   accent,
-  isLast,
+  isLast: _isLast,
 }: {
   script: Script
   expanded: boolean
+  onToggle: () => void
   accent: string
   isLast: boolean
 }) {
   const teaser = (script.theme?.trim() || script.plot?.trim() || "").slice(0, 180)
+  const hasDetail =
+    (script.theme?.trim() || "") !== "" ||
+    (script.plot?.trim() || "") !== "" ||
+    (script.wardrobe_f?.trim() || "") !== "" ||
+    (script.wardrobe_m?.trim() || "") !== ""
+  const cardId = `script-card-${script.id}`
   return (
     <div
       style={{
-        padding: "10px 12px",
         background: "var(--color-elevated)",
         border: "1px solid var(--color-border)",
         display: "flex",
         flexDirection: "column",
-        gap: 8,
-        marginBottom: isLast ? 0 : 0,
       }}
     >
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 9,
-            letterSpacing: "0.14em",
-            textTransform: "uppercase",
-            fontWeight: 700,
-            color: accent,
-          }}
-        >
-          {script.tab_name}
-        </span>
-        {script.title && (
-          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--color-text)", letterSpacing: "-0.01em" }}>
-            {script.title}
+      {/* Header row is a button when the card has content to expand, a plain
+          row otherwise — keeps the hit target a single element. */}
+      <button
+        type="button"
+        onClick={hasDetail ? onToggle : undefined}
+        aria-expanded={hasDetail ? expanded : undefined}
+        aria-controls={hasDetail ? cardId : undefined}
+        disabled={!hasDetail}
+        style={{
+          all: "unset",
+          padding: "10px 12px",
+          display: "grid",
+          gridTemplateColumns: "1fr auto",
+          alignItems: "center",
+          columnGap: 12,
+          cursor: hasDetail ? "pointer" : "default",
+          boxSizing: "border-box",
+          width: "100%",
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                fontWeight: 700,
+                color: accent,
+              }}
+            >
+              {script.tab_name}
+            </span>
+            {script.title && (
+              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--color-text)", letterSpacing: "-0.01em" }}>
+                {script.title}
+              </span>
+            )}
+          </div>
+          {!expanded && teaser && (
+            <div
+              style={{
+                fontSize: 12,
+                lineHeight: 1.55,
+                color: "var(--color-text-muted)",
+                display: "-webkit-box",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: 2,
+                overflow: "hidden",
+              }}
+            >
+              {teaser}
+              {teaser.length >= 180 && "…"}
+            </div>
+          )}
+        </div>
+        {hasDetail && (
+          <span
+            aria-hidden="true"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "2px 8px",
+              fontSize: 9,
+              fontWeight: 700,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: "var(--color-text-muted)",
+              border: "1px solid var(--color-border)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {expanded ? "Collapse" : "Expand"}
+            {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
           </span>
         )}
-      </div>
-      {expanded ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      </button>
+      {expanded && hasDetail && (
+        <div
+          id={cardId}
+          style={{
+            padding: "4px 12px 12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            borderTop: "1px solid var(--color-border)",
+          }}
+        >
           {script.theme?.trim() && (
             <ScriptField label="Theme" value={script.theme} />
           )}
           {script.plot?.trim() && (
             <ScriptField label="Plot" value={script.plot} />
           )}
-        </div>
-      ) : (
-        <div
-          style={{
-            fontSize: 12,
-            lineHeight: 1.55,
-            color: "var(--color-text-muted)",
-            display: "-webkit-box",
-            WebkitBoxOrient: "vertical",
-            WebkitLineClamp: 2,
-            overflow: "hidden",
-          }}
-        >
-          {teaser}
-          {teaser.length >= 180 && "…"}
+          {(script.wardrobe_f?.trim() || script.wardrobe_m?.trim()) && (
+            <div style={{ display: "grid", gridTemplateColumns: script.wardrobe_f && script.wardrobe_m ? "1fr 1fr" : "1fr", gap: 10 }}>
+              {script.wardrobe_f?.trim() && (
+                <ScriptField label="Wardrobe · F" value={script.wardrobe_f} />
+              )}
+              {script.wardrobe_m?.trim() && (
+                <ScriptField label="Wardrobe · M" value={script.wardrobe_m} />
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

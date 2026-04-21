@@ -225,6 +225,13 @@ export interface Script {
   plot: string
   title: string
   script_status: string
+  // Additional fields returned when the row has been filled out past the
+  // minimum — surface in the shoot modal so directors can see wardrobe at
+  // a glance. Optional since they may be blank on fresh rows.
+  wardrobe_f?: string
+  wardrobe_m?: string
+  shoot_location?: string
+  props?: string
 }
 
 export interface Model {
@@ -386,6 +393,16 @@ export interface Shoot {
   status: "active" | "cancelled" | string
   scenes: BoardShootScene[]
   aging_hours: number
+  // Day-of billing info. Optional because the sheet populates these only
+  // after the talent fills out their W9 in the morning — before that the
+  // modal should render a placeholder ("Pending W9"). Backend syncs these
+  // from the legal-paperwork pipeline; payment_name is whatever the
+  // talent wrote on the W9 (their legal name for the 1099), which can
+  // differ from their stage name.
+  female_rate?: string
+  female_payment_name?: string
+  male_rate?: string
+  male_payment_name?: string
 }
 
 export const SHOOT_ASSET_ORDER: readonly AssetType[] = [
