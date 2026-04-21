@@ -36,7 +36,9 @@ export default async function MissingPage() {
     return (
       <div>
         <MissingV2View stats={stats} />
-        <SceneGrid scenes={scenes} stats={stats} error={error} idToken={idToken} />
+        <div className="ec-embed-grid">
+          <SceneGrid scenes={scenes} stats={stats} error={error} idToken={idToken} />
+        </div>
       </div>
     )
   }

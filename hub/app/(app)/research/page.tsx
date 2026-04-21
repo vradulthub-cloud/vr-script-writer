@@ -29,7 +29,9 @@ export default async function ResearchPage() {
     return (
       <div>
         <ResearchV2View models={models} />
-        <ModelSearch models={models} error={error} idToken={idToken} />
+        <div className="ec-embed-grid">
+          <ModelSearch models={models} error={error} idToken={idToken} />
+        </div>
       </div>
     )
   }

@@ -864,6 +864,15 @@ button[style*="color-lime"]:hover:not(:disabled) {
   display: none;
 }
 
-/* V2 missing + research: DO NOT hide the embedded PageHeader — it hosts
-   the filter tabs ("All", "Missing only", search, etc.) that users need.
-   The v2 stat cluster/strip rendered above is additive overview only. */
+/* V2 missing: hide ONLY the title block of SceneGrid's embedded PageHeader
+   (MissingV2View owns the hero title above). Filter actions stay visible. */
+[data-eclatech="v2"] .ec-embed-grid .page-header > div:first-of-type {
+  display: none;
+}
+/* Collapse the PageHeader's bottom rule + padding since the title row is
+   gone — the grid would otherwise leave a weirdly tall filter bar. */
+[data-eclatech="v2"] .ec-embed-grid .page-header {
+  grid-template-columns: minmax(0, 1fr) !important;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+}
