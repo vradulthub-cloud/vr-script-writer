@@ -805,7 +805,9 @@ function normalizeDate(raw: string): string {
   const parts = raw.split("/")
   if (parts.length === 3) {
     const [m, d, y] = parts
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`
+    // Handle 2-digit year (e.g. "4/22/26" from Google Sheets) — assume 2000s
+    const fullYear = y.length === 2 ? `20${y}` : y
+    return `${fullYear}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`
   }
   return raw
 }
