@@ -88,9 +88,9 @@ export function WeekCalendar({
         </div>
         {lanes.map(lane => (
           <div key={lane.studio} className="lane">
-            <div className="label">
-              <div className="who">{lane.studio}</div>
-              <div>{lane.abbr}</div>
+            <div className={`label ${lane.abbr.toLowerCase()}`}>
+              <div className="who">{lane.abbr}</div>
+              <div className="sub">{lane.studio}</div>
             </div>
             <div className="track">
               {lane.events.map(e => {
