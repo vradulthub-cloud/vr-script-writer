@@ -245,6 +245,18 @@ CREATE TABLE IF NOT EXISTS calendar_events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cal_events_date ON calendar_events(date);
+
+-- Editable AI prompt overrides. The bundled defaults live in api/prompts.py;
+-- writing a row here causes get_prompt(key) to return the override instead.
+-- Deleting a row reverts to the bundled default. The admin UI surfaces this
+-- table directly — every editable prompt has a stable string key (e.g.
+-- "title.VRHush", "desc.FPVR") that downstream callers pass to get_prompt.
+CREATE TABLE IF NOT EXISTS prompt_overrides (
+    prompt_key TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    updated_by TEXT DEFAULT '',
+    updated_at TEXT NOT NULL
+);
 """
 
 

@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from api.auth import CurrentUser
 from api.config import get_settings
 from api.database import get_db
-from api.prompts import SYSTEM_PROMPT, NJOI_STATIC_PLOT, build_script_prompt
+from api.prompts import SYSTEM_PROMPT, NJOI_STATIC_PLOT, build_script_prompt, get_prompt
 from api.sheets_client import open_scripts, with_retry
 
 _log = logging.getLogger(__name__)
@@ -170,7 +170,8 @@ async def generate_script(body: ScriptGenRequest, user: CurrentUser):
                 body.destination,
                 body.director_note,
             )
-            for delta in ollama_stream("script", prompt, system=SYSTEM_PROMPT, max_tokens=4096, temperature=0.8):
+            sys_p = get_prompt("script.system", fallback=SYSTEM_PROMPT)
+            for delta in ollama_stream("script", prompt, system=sys_p, max_tokens=4096, temperature=0.8):
                 yield f"data: {json.dumps({'type': 'text', 'text': delta})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:

@@ -7,9 +7,30 @@ import { SystemCheck } from "./system-check"
 import { SyncPanel } from "./sync-panel"
 import { AuditLogPanel } from "./audit-log-panel"
 import { TasksPanel } from "./tasks-panel"
+import { PromptsPanel } from "./prompts-panel"
+import { AdminTabs } from "./admin-tabs"
+import { StatStrip, type StatTile } from "./stat-strip"
 
 export const dynamic = "force-dynamic"
 
+/**
+ * Admin console — tabbed layout.
+ *
+ * Top: full-width quick-stats strip (visible across all tabs because health
+ * is the kind of context admins want at a glance regardless of which task
+ * they're doing).
+ *
+ * Tabs:
+ *   1. Users      — the User Permissions table + add/remove flows
+ *   2. System     — System Check + per-source sync triggers
+ *   3. Activity   — Background tasks queue + permission audit log
+ *   4. AI Prompts — edit description/title/script generation prompts
+ *
+ * The previous 2-column layout was cramped: a wide users table on the
+ * left forced 5 panels into a single narrow column on the right. Tabs
+ * give every section its own canvas without losing top-of-page health
+ * context.
+ */
 export default async function AdminPage() {
   const session = await auth()
   const idToken = (session as { idToken?: string } | null)?.idToken
@@ -24,9 +45,6 @@ export default async function AdminPage() {
   let sceneStats: SceneStats | null = null
   let taskStats: TaskStats | null = null
 
-  // One Promise.allSettled gathers everything in parallel — v2 admins see the
-  // quick-stats strip + audit log + tasks panel, so the page is API-heavy.
-  // We tolerate any single failure rather than blanking the whole page.
   const [usersRes, healthRes, ticketRes, sceneRes, taskRes] = await Promise.allSettled([
     client.users.list(),
     v2 ? client.health() : Promise.resolve(null),
@@ -41,82 +59,90 @@ export default async function AdminPage() {
   if (v2 && sceneRes.status === "fulfilled") sceneStats = sceneRes.value
   if (v2 && taskRes.status === "fulfilled") taskStats = taskRes.value
 
-  const panel = <UsersPanel users={users} error={error} idToken={idToken} currentEmail={me.email} />
-  if (!v2) return panel
+  const usersPanel = (
+    <UsersPanel users={users} error={error} idToken={idToken} currentEmail={me.email} />
+  )
 
-  const activeCount = users.filter(u => u.role).length
+  // Pre-v2 still gets the original single-panel view — the tabbed shell is
+  // an Eclatech-V2 feature gated by the same flag the rest of the redesign
+  // sits behind.
+  if (!v2) return usersPanel
+
   const adminCount = users.filter(u => (u.role ?? "").toLowerCase() === "admin").length
   const editorCount = users.filter(u => (u.role ?? "").toLowerCase() === "editor").length
-
-  // Open tickets = anything not Closed/Rejected. The stats endpoint groups by
-  // status so we sum the active buckets rather than asking for "open" — fewer
-  // round-trips, and the same number we'd compute on the Tickets page.
   const openTickets = ticketStats
     ? (ticketStats["New"] ?? 0) + (ticketStats["Approved"] ?? 0) +
       (ticketStats["In Progress"] ?? 0) + (ticketStats["In Review"] ?? 0)
     : null
-
-  // Freshest sync — gives admins a one-glance "are we current?". Stale syncs
-  // are the most common silent failure mode (sheet went down, retries
-  // exhausted, but the UI keeps serving cached data).
   const newestSync = newestSyncAge(health?.syncs)
+  const liveTasks = taskStats ? taskStats.pending + taskStats.running : null
+
+  const stats: StatTile[] = [
+    { label: "Version",      value: health?.version ?? "—", mono: true },
+    { label: "Status",       value: health?.status ?? "—", accent: health?.status === "ok" ? "var(--color-ok)" : undefined },
+    { label: "Users",        value: `${users.length}`, sub: `${adminCount} admin · ${editorCount} editor` },
+    { label: "Open tickets", value: openTickets !== null ? `${openTickets}` : "—", sub: ticketStats ? `${ticketStats["Closed"] ?? 0} closed` : undefined },
+    { label: "Scenes",       value: sceneStats ? sceneStats.total.toLocaleString() : "—", sub: sceneStats ? `${sceneStats.complete} complete` : undefined },
+    { label: "Tasks",        value: liveTasks !== null ? `${liveTasks}` : "—", sub: taskStats ? `${taskStats.running} running · ${taskStats.pending} queued` : undefined, accent: liveTasks ? "var(--color-lime)" : undefined },
+    { label: "Latest sync",  value: newestSync.value, sub: newestSync.sub },
+  ]
+
+  // Build the badge map — at-a-glance counts on the tabs themselves so admins
+  // can spot e.g. "3 live tasks" without clicking into Activity.
+  const tabBadges: Partial<Record<"users" | "system" | "activity" | "prompts", string | number>> = {
+    users: users.length,
+    activity: liveTasks ?? undefined,
+  }
 
   return (
-    <div className="ec-cols">
-      <div className="ec-col">{panel}</div>
-      <div className="ec-col">
-        <section className="ec-block ec-inverted">
-          <header><h2>System</h2></header>
-          <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <AdminStat label="Version" value={health?.version ?? "—"} mono />
-            <AdminStat label="Status" value={health?.status ?? "—"} />
-            <AdminStat label="Users" value={`${activeCount}`} sub={`${adminCount} admin · ${editorCount} editor`} />
-            <AdminStat
-              label="Open tickets"
-              value={openTickets !== null ? `${openTickets}` : "—"}
-              sub={ticketStats ? `${ticketStats["Closed"] ?? 0} closed total` : undefined}
-            />
-            <AdminStat
-              label="Scenes"
-              value={sceneStats ? sceneStats.total.toLocaleString() : "—"}
-              sub={sceneStats ? `${sceneStats.complete} complete · ${sceneStats.missing_any} need work` : undefined}
-            />
-            <AdminStat
-              label="Tasks"
-              value={taskStats ? `${(taskStats.pending + taskStats.running)}` : "—"}
-              sub={taskStats ? `${taskStats.running} running · ${taskStats.pending} queued` : undefined}
-            />
-            <AdminStat
-              label="Latest sync"
-              value={newestSync.value}
-              sub={newestSync.sub}
-            />
-          </div>
-        </section>
+    <div style={{ padding: "0 0 32px" }}>
+      <header style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>
+          Admin
+        </div>
+        <h1 style={{ margin: "4px 0 0", fontSize: 32, fontWeight: 800, letterSpacing: "-0.02em", color: "var(--color-text)", fontFamily: "var(--font-display-hero)" }}>
+          Console
+        </h1>
+      </header>
 
-        <SystemCheck idToken={idToken} />
+      <StatStrip stats={stats} />
 
-        {health?.syncs && Object.keys(health.syncs).length > 0 && (
-          <SyncPanel
-            initial={Object.entries(health.syncs).map(([source, infoRaw]) => {
-              const info = infoRaw as { status?: string; row_count?: number; last_synced_at?: string }
-              return { source, ...info }
-            })}
-            idToken={idToken}
-          />
-        )}
-
-        <TasksPanel idToken={idToken} />
-        <AuditLogPanel idToken={idToken} />
-      </div>
+      <AdminTabs
+        badges={tabBadges}
+        panels={{
+          users: usersPanel,
+          system: (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
+              <SystemCheck idToken={idToken} />
+              {health?.syncs && Object.keys(health.syncs).length > 0 ? (
+                <SyncPanel
+                  initial={Object.entries(health.syncs).map(([source, infoRaw]) => {
+                    const info = infoRaw as { status?: string; row_count?: number; last_synced_at?: string }
+                    return { source, ...info }
+                  })}
+                  idToken={idToken}
+                />
+              ) : (
+                <div style={{ padding: 16, fontSize: 12, color: "var(--color-text-faint)", border: "1px dashed var(--color-border)", borderRadius: 6 }}>
+                  No sync sources reported by the API. The sync engine starts on
+                  the next backend boot — re-run a sync trigger to seed.
+                </div>
+              )}
+            </div>
+          ),
+          activity: (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
+              <TasksPanel idToken={idToken} />
+              <AuditLogPanel idToken={idToken} />
+            </div>
+          ),
+          prompts: <PromptsPanel idToken={idToken} />,
+        }}
+      />
     </div>
   )
 }
 
-/**
- * Walk the syncs map, find the most recent timestamp, and report it as a
- * relative age. Returns "—" if no syncs have ever run (fresh DB).
- */
 function newestSyncAge(syncs?: Record<string, unknown> | null): { value: string; sub?: string } {
   if (!syncs) return { value: "—" }
   let newest = 0
@@ -138,36 +164,4 @@ function newestSyncAge(syncs?: Record<string, unknown> | null): { value: string;
   else if (ageSec < 86400) label = `${Math.floor(ageSec / 3600)}h ago`
   else label = `${Math.floor(ageSec / 86400)}d ago`
   return { value: label, sub: newestSource ? `from ${newestSource}` : undefined }
-}
-
-function AdminStat({ label, value, sub, mono }: { label: string; value: string; sub?: string; mono?: boolean }) {
-  return (
-    <div>
-      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)" }}>
-        {label}
-      </div>
-      <div
-        style={{
-          marginTop: 4,
-          fontWeight: 800,
-          fontSize: 22,
-          letterSpacing: "-0.03em",
-          fontFamily: mono ? "var(--font-mono)" : "var(--font-display-hero)",
-          lineHeight: 1.05,
-          // Long version strings ("2.0.0") fit; tablet widths can clip otherwise.
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-        title={value}
-      >
-        {value}
-      </div>
-      {sub && (
-        <div style={{ marginTop: 2, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.55)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={sub}>
-          {sub}
-        </div>
-      )}
-    </div>
-  )
 }

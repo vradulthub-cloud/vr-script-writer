@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from api.auth import CurrentUser, require_grail_writer
 from api.config import get_settings
 from api.database import get_db
-from api.prompts import DESC_COMPILATION_SYSTEMS, STUDIO_KEY_MAP
+from api.prompts import DESC_COMPILATION_SYSTEMS, STUDIO_KEY_MAP, get_prompt
 from api.routers.scenes import SceneResponse, _row_to_scene
 
 _log = logging.getLogger(__name__)
@@ -287,7 +287,7 @@ async def generate_compilation_description(body: CompGenRequest, user: CurrentUs
     if not studio_key:
         raise HTTPException(status_code=400, detail=f"Unknown studio: {body.studio}")
 
-    system_prompt = DESC_COMPILATION_SYSTEMS.get(studio_key)
+    system_prompt = get_prompt(f"desc_comp.{studio_key}", fallback=DESC_COMPILATION_SYSTEMS.get(studio_key, ""))
     if not system_prompt:
         raise HTTPException(
             status_code=400,

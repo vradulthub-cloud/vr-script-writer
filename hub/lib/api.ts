@@ -464,6 +464,17 @@ export interface TaskStats {
   total: number
 }
 
+export interface PromptEntry {
+  key: string
+  label: string
+  group: string         // e.g. "Titles", "Descriptions", "Compilations", "Scripts"
+  content: string       // active text — override if present, otherwise default
+  default: string       // bundled default for diff/revert UI
+  is_overridden: boolean
+  updated_by: string
+  updated_at: string
+}
+
 export interface CalendarEventRow {
   event_id: string
   date: string           // YYYY-MM-DD
@@ -768,6 +779,17 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
 
     syncOne: (source: string) =>
       post<{ source: string; row_count: number; status: string }>(`/sync/trigger/${encodeURIComponent(source)}`, {}),
+
+    prompts: {
+      list: () => get<PromptEntry[]>("/prompts/"),
+      get: (key: string) => get<PromptEntry>(`/prompts/${encodeURIComponent(key)}`),
+      save: (key: string, content: string) =>
+        apiFetch<PromptEntry>(`/prompts/${encodeURIComponent(key)}`, token, {
+          method: "PUT",
+          body: JSON.stringify({ content }),
+        }),
+      revert: (key: string) => delVoid(`/prompts/${encodeURIComponent(key)}`),
+    },
 
     tasks: {
       list: (filters?: { status?: string; limit?: number }) => {

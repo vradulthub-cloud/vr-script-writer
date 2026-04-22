@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from api.auth import CurrentUser
 from api.config import get_settings
 from api.database import get_db
-from api.prompts import DESC_SYSTEMS, DESC_COMPILATION_SYSTEMS, STUDIO_KEY_MAP
+from api.prompts import DESC_SYSTEMS, DESC_COMPILATION_SYSTEMS, STUDIO_KEY_MAP, get_prompt
 
 _log = logging.getLogger(__name__)
 
@@ -98,8 +98,13 @@ async def generate_description(body: DescGenRequest, user: CurrentUser):
             detail=f"Unknown studio: {body.studio}. Must be one of: {', '.join(STUDIO_KEY_MAP.keys())}",
         )
 
-    prompt_dict = DESC_COMPILATION_SYSTEMS if body.is_compilation else DESC_SYSTEMS
-    system_prompt = prompt_dict.get(studio_key)
+    # Read via get_prompt so admin overrides apply without a restart.
+    # Bundled defaults are still the fallback when no override exists.
+    prompt_key = (
+        f"desc_comp.{studio_key}" if body.is_compilation else f"desc.{studio_key}"
+    )
+    fallback_dict = DESC_COMPILATION_SYSTEMS if body.is_compilation else DESC_SYSTEMS
+    system_prompt = get_prompt(prompt_key, fallback=fallback_dict.get(studio_key, ""))
     if not system_prompt:
         raise HTTPException(
             status_code=400,
@@ -152,7 +157,7 @@ async def regenerate_paragraph(body: ParagraphRegenRequest, user: CurrentUser):
             status_code=400,
             detail=f"Unknown studio: {body.studio}",
         )
-    system_prompt = DESC_SYSTEMS.get(studio_key)
+    system_prompt = get_prompt(f"desc.{studio_key}", fallback=DESC_SYSTEMS.get(studio_key, ""))
     if not system_prompt:
         raise HTTPException(
             status_code=400,

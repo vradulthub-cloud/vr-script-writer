@@ -47,6 +47,43 @@ type MockCalEvent = {
 }
 const MOCK_CAL_EVENTS: MockCalEvent[] = []
 
+// Stateful prompt overrides for dev-mock. Each entry mirrors the backend
+// PromptEntry shape so the editor exercises the full save/revert flow.
+type MockPrompt = {
+  key: string
+  label: string
+  group: string
+  content: string
+  default: string
+  is_overridden: boolean
+  updated_by: string
+  updated_at: string
+}
+const T_VRH = "You are a creative title writer for VRHush, a premium VR adult content studio. Generate exactly ONE scene title that reflects the actual plot/theme you're given. The title MUST hook into a concrete hook from the script — the setup, the setting, a prop, the wardrobe, the role, or a beat of the action. Form: 2-4 words, title case, clever wordplay/double-entendre preferred over literal description, no performer names, no all-caps. Respond with ONLY the title — no explanation, no quotes."
+const T_FPVR = "You are a creative title writer for FuckPassVR, a premium VR travel-and-intimacy studio. If the script names a destination or city, lean into it. Form: 2-5 words, title case, clever wordplay preferred. Respond with ONLY the title."
+const T_VRA = "You are a creative title writer for VRAllure. Sensual, intimate, soft tone. Each title MUST reference something concrete from the script — wardrobe, prop, gesture, or mood. Form: 2-4 words, title case."
+const T_NJOI = "You are a creative title writer for NaughtyJOI. Generate a PAIRED title using the performer's first name. Two lines: line 1 soft/intimate, line 2 more commanding."
+const D_FPVR = "# PERSONALITY:\nYou are an expert adult copywriter for FuckPassVR. Write sexual, filthy, deeply arousing scene descriptions optimized for SEO and VR immersion.\n\n# WRITING STANDARDS:\n1. Active voice, visceral verbs.\n2. 2-paragraph format with bold subheadings.\n3. Reference 8K VR naturally."
+const D_VRH = "# PERSONALITY:\nYou are a copywriter for VRHush — raw, kinetic, no wasted words. Single-paragraph 100-140 words. 2nd-person POV throughout. Close with 'Taste her on VRHush now.'"
+const D_VRA = "# PERSONALITY:\nYou are a sensual copywriter for VRAllure. Intimate, whisper-close. 60-90 words. Focus on breath, warmth, fingertips."
+const D_NJOI = "# PERSONALITY:\nYou are a teasing copywriter for NaughtyJOI. Must include at least one short performer quote. Tease-build-countdown-release rhythm."
+const SCRIPT_SYS = "You are a professional VR adult film script writer for VRHush and FuckPassVR. Cinematic, intimate, director-ready. Use exactly these section headers: THEME, PLOT, SHOOT LOCATION, SET DESIGN, PROPS, WARDROBE - FEMALE, WARDROBE - MALE."
+const MOCK_PROMPTS: MockPrompt[] = [
+  { key: "title.VRHush",     label: "Title — VRHush",     group: "Titles",       content: T_VRH,  default: T_VRH,  is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "title.FuckPassVR", label: "Title — FuckPassVR", group: "Titles",       content: T_FPVR, default: T_FPVR, is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "title.VRAllure",   label: "Title — VRAllure",   group: "Titles",       content: T_VRA,  default: T_VRA,  is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "title.NaughtyJOI", label: "Title — NaughtyJOI", group: "Titles",       content: T_NJOI, default: T_NJOI, is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc.FPVR",        label: "Description — FuckPassVR", group: "Descriptions", content: D_FPVR, default: D_FPVR, is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc.VRH",         label: "Description — VRHush",     group: "Descriptions", content: D_VRH,  default: D_VRH,  is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc.VRA",         label: "Description — VRAllure",   group: "Descriptions", content: D_VRA,  default: D_VRA,  is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc.NJOI",        label: "Description — NaughtyJOI", group: "Descriptions", content: D_NJOI, default: D_NJOI, is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc_comp.FPVR",   label: "Compilation Desc — FuckPassVR", group: "Compilations", content: D_FPVR, default: D_FPVR, is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc_comp.VRH",    label: "Compilation Desc — VRHush",     group: "Compilations", content: D_VRH,  default: D_VRH,  is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc_comp.VRA",    label: "Compilation Desc — VRAllure",   group: "Compilations", content: D_VRA,  default: D_VRA,  is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc_comp.NJOI",   label: "Compilation Desc — NaughtyJOI", group: "Compilations", content: D_NJOI, default: D_NJOI, is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "script.system",    label: "Script Generation — System Prompt", group: "Scripts", content: SCRIPT_SYS, default: SCRIPT_SYS, is_overridden: false, updated_by: "", updated_at: "" },
+]
+
 function parseQuery(path: string): { base: string; params: URLSearchParams } {
   const qIdx = path.indexOf("?")
   if (qIdx === -1) return { base: path, params: new URLSearchParams() }
@@ -175,6 +212,48 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
     return wait(list as unknown as T)
   }
   if (base === "/tickets/stats") return wait(MOCK_TICKET_STATS as unknown as T)
+
+  // ── AI Prompts ────────────────────────────────────────────────────────
+  if (base === "/prompts/") {
+    return wait(MOCK_PROMPTS as unknown as T)
+  }
+  if (base.startsWith("/prompts/")) {
+    const method = (_options.method || "GET").toUpperCase()
+    const key = decodeURIComponent(base.slice("/prompts/".length))
+    if (method === "GET") {
+      const p = MOCK_PROMPTS.find(x => x.key === key)
+      if (!p) return wait(null as unknown as T)
+      return wait(p as unknown as T)
+    }
+    if (method === "PUT") {
+      const body = _options.body ? JSON.parse(_options.body as string) : {}
+      const idx = MOCK_PROMPTS.findIndex(x => x.key === key)
+      if (idx >= 0) {
+        MOCK_PROMPTS[idx] = {
+          ...MOCK_PROMPTS[idx],
+          content: body.content ?? "",
+          is_overridden: true,
+          updated_by: "Dev Admin",
+          updated_at: new Date().toISOString(),
+        }
+        return wait(MOCK_PROMPTS[idx] as unknown as T)
+      }
+      return wait(null as unknown as T)
+    }
+    if (method === "DELETE") {
+      const idx = MOCK_PROMPTS.findIndex(x => x.key === key)
+      if (idx >= 0) {
+        MOCK_PROMPTS[idx] = {
+          ...MOCK_PROMPTS[idx],
+          content: MOCK_PROMPTS[idx].default,
+          is_overridden: false,
+          updated_by: "",
+          updated_at: "",
+        }
+      }
+      return wait(undefined as unknown as T)
+    }
+  }
 
   // ── Background tasks ──────────────────────────────────────────────────
   if (base === "/tasks/") {

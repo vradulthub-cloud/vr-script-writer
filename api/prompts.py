@@ -405,7 +405,9 @@ def generate_title_with_fallback(
     import logging
     _log = logging.getLogger(__name__)
 
-    sys_prompt = TITLE_GEN_SYSTEMS.get(studio, TITLE_GEN_SYSTEMS["VRHush"])
+    # Read via get_prompt so admin overrides land here without a redeploy.
+    # The bundled default still wins if the studio key isn't in PROMPT_DEFAULTS.
+    sys_prompt = get_prompt(f"title.{studio}", fallback=TITLE_GEN_SYSTEMS.get(studio, TITLE_GEN_SYSTEMS["VRHush"]))
 
     # Build the user prompt from whichever script fields are populated. Empty
     # fields are skipped entirely so the model doesn't anchor on "N/A".
@@ -556,3 +558,69 @@ def build_script_prompt(
         )
 
     return "\n".join(prompt_parts)
+
+
+# ---------------------------------------------------------------------------
+# Editable prompt registry + override-aware getter
+# ---------------------------------------------------------------------------
+# The admin panel exposes a fixed set of prompt keys for editing. Each key
+# maps to a default string bundled in this module; an override row in the
+# `prompt_overrides` SQLite table takes precedence when present.
+#
+# To make a prompt editable: add a (key, label, group, default) entry to
+# PROMPT_REGISTRY below, then have the call site read it via get_prompt(key)
+# instead of accessing the constant directly.
+
+PROMPT_REGISTRY: list[dict[str, str]] = [
+    # Title generation — one per studio
+    {"key": "title.VRHush",     "label": "Title — VRHush",     "group": "Titles",       "default": TITLE_GEN_SYSTEMS["VRHush"]},
+    {"key": "title.FuckPassVR", "label": "Title — FuckPassVR", "group": "Titles",       "default": TITLE_GEN_SYSTEMS["FuckPassVR"]},
+    {"key": "title.VRAllure",   "label": "Title — VRAllure",   "group": "Titles",       "default": TITLE_GEN_SYSTEMS["VRAllure"]},
+    {"key": "title.NaughtyJOI", "label": "Title — NaughtyJOI", "group": "Titles",       "default": TITLE_GEN_SYSTEMS["NaughtyJOI"]},
+    # Scene descriptions — one per studio (regular)
+    {"key": "desc.FPVR",        "label": "Description — FuckPassVR", "group": "Descriptions", "default": DESC_SYSTEMS["FPVR"]},
+    {"key": "desc.VRH",         "label": "Description — VRHush",     "group": "Descriptions", "default": DESC_SYSTEMS["VRH"]},
+    {"key": "desc.VRA",         "label": "Description — VRAllure",   "group": "Descriptions", "default": DESC_SYSTEMS["VRA"]},
+    {"key": "desc.NJOI",        "label": "Description — NaughtyJOI", "group": "Descriptions", "default": DESC_SYSTEMS["NJOI"]},
+    # Compilation descriptions
+    {"key": "desc_comp.FPVR",   "label": "Compilation Desc — FuckPassVR", "group": "Compilations", "default": DESC_COMPILATION_SYSTEMS["FPVR"]},
+    {"key": "desc_comp.VRH",    "label": "Compilation Desc — VRHush",     "group": "Compilations", "default": DESC_COMPILATION_SYSTEMS["VRH"]},
+    {"key": "desc_comp.VRA",    "label": "Compilation Desc — VRAllure",   "group": "Compilations", "default": DESC_COMPILATION_SYSTEMS["VRA"]},
+    {"key": "desc_comp.NJOI",   "label": "Compilation Desc — NaughtyJOI", "group": "Compilations", "default": DESC_COMPILATION_SYSTEMS["NJOI"]},
+    # Script generation — shared system prompt for VRH + FPVR
+    {"key": "script.system",    "label": "Script Generation — System Prompt", "group": "Scripts", "default": SYSTEM_PROMPT},
+]
+
+PROMPT_DEFAULTS: dict[str, str] = {p["key"]: p["default"] for p in PROMPT_REGISTRY}
+
+
+def get_prompt(key: str, fallback: str | None = None) -> str:
+    """
+    Read the active text for a prompt key, preferring the SQLite override.
+
+    The fallback chain is:
+      1. prompt_overrides row content (admin-edited)
+      2. PROMPT_DEFAULTS entry (bundled in this module)
+      3. The fallback argument (caller-provided last resort)
+      4. Empty string
+
+    Reads are dirt cheap — single-row PK lookup against an in-process SQLite
+    DB — but we still hold the connection open for as little time as possible
+    so concurrent writers (which there aren't right now, but might be later)
+    don't get queued behind us.
+    """
+    try:
+        from api.database import get_db
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT content FROM prompt_overrides WHERE prompt_key=?",
+                (key,),
+            ).fetchone()
+        if row:
+            return dict(row)["content"]
+    except Exception:
+        # Schema not migrated yet, or table empty — fall through to defaults.
+        pass
+    if key in PROMPT_DEFAULTS:
+        return PROMPT_DEFAULTS[key]
+    return fallback if fallback is not None else ""
