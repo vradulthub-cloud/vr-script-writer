@@ -12,10 +12,12 @@ export function WeekCalendar({
   shoots,
   weekStart,
   showHeader = true,
+  studios = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"],
 }: {
   shoots: Shoot[]
   weekStart?: Date
   showHeader?: boolean
+  studios?: string[]
 }) {
   const [selected, setSelected] = useState<Shoot | null>(null)
 
@@ -23,8 +25,7 @@ export function WeekCalendar({
   const end = new Date(start)
   end.setDate(end.getDate() + 7)
 
-  const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"] as const
-  const lanes = STUDIOS.map(studio => {
+  const lanes = studios.map(studio => {
     const laneEvents = shoots
       .filter(s => {
         if (s.scenes.length === 0) return false
