@@ -29,7 +29,7 @@ export function WeekCalendar({
     const laneEvents = shoots
       .filter(s => {
         if (s.scenes.length === 0) return false
-        if (s.scenes[0].studio !== studio) return false
+        if (!s.scenes.some(sc => sc.studio === studio)) return false
         const t = Date.parse(s.shoot_date || "")
         return Number.isFinite(t) && t >= start.getTime() && t < end.getTime()
       })
@@ -39,7 +39,8 @@ export function WeekCalendar({
         const left = (dayIdx / 7) * 100
         const right = ((dayIdx + 1) / 7) * 100
         const talent = [s.female_talent, s.male_talent].filter(Boolean).join(" / ")
-        return { shoot: s, left, right, talent }
+        const studioScene = s.scenes.find(sc => sc.studio === studio) ?? s.scenes[0]
+        return { shoot: s, left, right, talent, studioScene }
       })
     return { studio, abbr: studioAbbr(studio), events: laneEvents }
   })
@@ -94,7 +95,7 @@ export function WeekCalendar({
             <div className="track">
               {lane.events.map(e => {
                 const cls = lane.abbr.toLowerCase()
-                const sceneTitle = e.shoot.scenes[0]?.title || `${e.shoot.scenes.length} scene${e.shoot.scenes.length === 1 ? "" : "s"}`
+                const sceneTitle = e.studioScene.title || `${e.shoot.scenes.length} scene${e.shoot.scenes.length === 1 ? "" : "s"}`
                 return (
                   <button
                     key={e.shoot.shoot_id}
