@@ -378,6 +378,30 @@ export const MOCK_TICKETS: Ticket[] = [
     assignee: "dev@eclatech.test", notes: "", resolved_at: "",
     linked_items: "",
   },
+  // ── Audit entries (synthetic tickets written by users-panel.tsx whenever
+  //    a permission change is saved). The admin Audit Log panel filters on
+  //    type=Audit so these surface there, not in the regular Tickets list.
+  {
+    ticket_id: "TKT-9007", title: "Admin change: editor3@eclatech.test — role editor → admin",
+    description: "Changed by Drew at 2026-04-21T15:30:00Z.\n\nrole editor → admin",
+    project: "Hub", type: "Audit", priority: "Low", status: "New",
+    submitted_by: "Drew", submitted_at: "2026-04-21T15:30:00Z",
+    assignee: "", notes: "", resolved_at: "", linked_items: "",
+  },
+  {
+    ticket_id: "TKT-9006", title: "Admin change: contractor@eclatech.test — tabs ALL → Tickets, Scripts",
+    description: "Changed by Drew at 2026-04-19T11:14:00Z.\n\ntabs ALL → Tickets, Scripts",
+    project: "Hub", type: "Audit", priority: "Low", status: "New",
+    submitted_by: "Drew", submitted_at: "2026-04-19T11:14:00Z",
+    assignee: "", notes: "", resolved_at: "", linked_items: "",
+  },
+  {
+    ticket_id: "TKT-9005", title: "Admin change: alex@eclatech.test — role admin → editor",
+    description: "Changed by Drew at 2026-04-12T09:02:00Z.\n\nrole admin → editor",
+    project: "Hub", type: "Audit", priority: "Low", status: "New",
+    submitted_by: "Drew", submitted_at: "2026-04-12T09:02:00Z",
+    assignee: "", notes: "", resolved_at: "", linked_items: "",
+  },
 ]
 
 export const MOCK_TICKET_STATS: TicketStats = {

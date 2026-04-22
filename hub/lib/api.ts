@@ -444,6 +444,26 @@ export interface Notification {
   link: string
 }
 
+export interface TaskRow {
+  task_id: string
+  task_type: string
+  status: string         // pending, running, completed, failed
+  progress: number       // 0..1
+  created_at: string
+  started_at: string
+  completed_at: string
+  created_by: string
+  error: string
+}
+
+export interface TaskStats {
+  pending: number
+  running: number
+  completed: number
+  failed: number
+  total: number
+}
+
 export interface CalendarEventRow {
   event_id: string
   date: string           // YYYY-MM-DD
@@ -551,12 +571,16 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         project?: string
         priority?: string
         assignee?: string
+        type?: string
+        limit?: number
       }) => {
         const params = new URLSearchParams()
         if (filters?.status)   params.set("status",   filters.status)
         if (filters?.project)  params.set("project",  filters.project)
         if (filters?.priority) params.set("priority", filters.priority)
         if (filters?.assignee) params.set("assignee", filters.assignee)
+        if (filters?.type)     params.set("type",     filters.type)
+        if (filters?.limit)    params.set("limit",    String(filters.limit))
         const qs = params.toString()
         return get<Ticket[]>(`/tickets/${qs ? `?${qs}` : ""}`)
       },
@@ -744,6 +768,17 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
 
     syncOne: (source: string) =>
       post<{ source: string; row_count: number; status: string }>(`/sync/trigger/${encodeURIComponent(source)}`, {}),
+
+    tasks: {
+      list: (filters?: { status?: string; limit?: number }) => {
+        const params = new URLSearchParams()
+        if (filters?.status) params.set("status", filters.status)
+        if (filters?.limit) params.set("limit", String(filters.limit))
+        const qs = params.toString()
+        return get<TaskRow[]>(`/tasks/${qs ? `?${qs}` : ""}`)
+      },
+      stats: () => get<TaskStats>("/tasks/stats"),
+    },
 
     notifications: {
       list: (limit = 50) => get<Notification[]>(`/notifications/?limit=${limit}`),

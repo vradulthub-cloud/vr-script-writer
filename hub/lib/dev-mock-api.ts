@@ -164,8 +164,38 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
   }
 
   // ── Tickets ───────────────────────────────────────────────────────────
-  if (base === "/tickets/") return wait(MOCK_TICKETS as unknown as T)
+  if (base === "/tickets/") {
+    const typeFilter = params.get("type")
+    const statusFilter = params.get("status")
+    const limit = params.get("limit") ? parseInt(params.get("limit")!) : undefined
+    let list = MOCK_TICKETS as typeof MOCK_TICKETS
+    if (typeFilter) list = list.filter(t => t.type === typeFilter)
+    if (statusFilter) list = list.filter(t => t.status === statusFilter)
+    if (limit) list = list.slice(0, limit)
+    return wait(list as unknown as T)
+  }
   if (base === "/tickets/stats") return wait(MOCK_TICKET_STATS as unknown as T)
+
+  // ── Background tasks ──────────────────────────────────────────────────
+  if (base === "/tasks/") {
+    const statusFilter = params.get("status")
+    const limit = params.get("limit") ? parseInt(params.get("limit")!) : 50
+    const all = [
+      { task_id: "task-aa11bb22cc33", task_type: "script_gen",  status: "running",   progress: 0.62, created_at: "2026-04-21T16:42:00Z", started_at: "2026-04-21T16:42:01Z", completed_at: "", created_by: "Drew",   error: "" },
+      { task_id: "task-44dd55ee66ff", task_type: "desc_gen",    status: "running",   progress: 0.18, created_at: "2026-04-21T16:41:30Z", started_at: "2026-04-21T16:41:31Z", completed_at: "", created_by: "Editor", error: "" },
+      { task_id: "task-7788aabbccdd", task_type: "mega_scan",   status: "completed", progress: 1.0,  created_at: "2026-04-21T16:30:00Z", started_at: "2026-04-21T16:30:01Z", completed_at: "2026-04-21T16:38:12Z", created_by: "system", error: "" },
+      { task_id: "task-eeff00112233", task_type: "title_gen",   status: "completed", progress: 1.0,  created_at: "2026-04-21T16:18:00Z", started_at: "2026-04-21T16:18:00Z", completed_at: "2026-04-21T16:19:05Z", created_by: "Drew",   error: "" },
+      { task_id: "task-44556677ee99", task_type: "comp_export", status: "failed",    progress: 0.45, created_at: "2026-04-21T15:55:00Z", started_at: "2026-04-21T15:55:01Z", completed_at: "2026-04-21T15:56:30Z", created_by: "Editor", error: "MEGA timeout after 60s" },
+      { task_id: "task-998877665544", task_type: "script_gen",  status: "completed", progress: 1.0,  created_at: "2026-04-21T15:42:00Z", started_at: "2026-04-21T15:42:01Z", completed_at: "2026-04-21T15:43:50Z", created_by: "Drew",   error: "" },
+      { task_id: "task-aabbccdd1122", task_type: "desc_gen",    status: "pending",   progress: 0,    created_at: "2026-04-21T16:43:10Z", started_at: "", completed_at: "", created_by: "Drew", error: "" },
+    ]
+    let list = all
+    if (statusFilter) list = list.filter(t => t.status === statusFilter)
+    return wait(list.slice(0, limit) as unknown as T)
+  }
+  if (base === "/tasks/stats") {
+    return wait({ pending: 1, running: 2, completed: 3, failed: 1, total: 7 } as unknown as T)
+  }
 
   // ── Calendar events ───────────────────────────────────────────────────
   if (base === "/calendar-events/") {
@@ -329,7 +359,19 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
   }
 
   // ── Sync ──────────────────────────────────────────────────────────────
-  if (base === "/sync/status") return wait([] as unknown as T)
+  if (base === "/sync/status") {
+    // Return rows so the SyncPanel doesn't blank itself in dev mode after
+    // its mount-time refresh — initial data comes from /health.syncs.
+    return wait([
+      { source: "scenes",        last_synced_at: "2026-04-21T18:00:00Z", row_count: 1274, status: "ok",    error: "" },
+      { source: "scripts",       last_synced_at: "2026-04-21T17:55:00Z", row_count: 186,  status: "ok",    error: "" },
+      { source: "tickets",       last_synced_at: "2026-04-21T17:50:00Z", row_count: 47,   status: "ok",    error: "" },
+      { source: "notifications", last_synced_at: "2026-04-21T17:48:00Z", row_count: 23,   status: "ok",    error: "" },
+      { source: "approvals",     last_synced_at: "2026-04-21T17:42:00Z", row_count: 5,    status: "ok",    error: "" },
+      { source: "users",         last_synced_at: "2026-04-21T17:30:00Z", row_count: 4,    status: "ok",    error: "" },
+      { source: "bookings",      last_synced_at: "2026-04-21T17:00:00Z", row_count: 412,  status: "ok",    error: "" },
+    ] as unknown as T)
+  }
   if (base === "/sync/trigger") {
     return wait({
       status: "completed",

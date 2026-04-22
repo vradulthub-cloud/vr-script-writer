@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.auth import require_admin as _require_admin_dep
 from api.database import init_db
 from api.sync_engine import start_sync_loop, stop_sync_loop
-from api.routers import tickets, scenes, scripts, descriptions, models, approvals, compilations, titles, call_sheets, users, notifications, shoots, calendar_events
+from api.routers import tickets, scenes, scripts, descriptions, models, approvals, compilations, titles, call_sheets, users, notifications, shoots, calendar_events, tasks
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -91,6 +91,7 @@ app.include_router(users.router)
 app.include_router(notifications.router)
 app.include_router(shoots.router)
 app.include_router(calendar_events.router)
+app.include_router(tasks.router)
 
 
 # ---------------------------------------------------------------------------
