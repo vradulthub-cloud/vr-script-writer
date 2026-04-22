@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo } from "react"
 import { createPortal } from "react-dom"
 import Link from "next/link"
 import { X, ChevronDown, ChevronUp, FileText } from "lucide-react"
-import { api, type Shoot, type Script } from "@/lib/api"
+import { api, type Shoot, type Script, type LegalDocFile, type LegalDocsResult, SHOOT_ASSET_ORDER, SHOOT_ASSET_LABELS } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { studioAbbr, studioColor } from "@/lib/studio-colors"
 
@@ -39,6 +39,10 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
   // Per-script expansion — each ScriptCard manages its own state so directors
   // can drill into one scene without unfurling the others.
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
+  // Per-scene expansion for asset detail grid
+  const [expandedScenes, setExpandedScenes] = useState<Set<string>>(new Set())
+  // Legal docs fetched from Drive for the W9 display in TalentRow
+  const [legalDocs, setLegalDocs] = useState<LegalDocsResult | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -55,7 +59,7 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
         const byId = new Map<number, Script>()
         for (const s of lists.flat()) byId.set(s.id, s)
         const matched = Array.from(byId.values()).filter(s =>
-          (s.shoot_date || "").slice(0, 10) === targetDate &&
+          normalizeDate(s.shoot_date || "") === targetDate &&
           (!shoot.female_talent || s.female === shoot.female_talent) &&
           (!shoot.male_talent || !s.male || s.male === shoot.male_talent),
         )
@@ -66,6 +70,14 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
       .finally(() => { if (!cancelled) setScriptsLoading(false) })
     return () => { cancelled = true }
   }, [idToken, shoot.shoot_date, shoot.female_talent, shoot.male_talent, shoot.scenes])
+
+  useEffect(() => {
+    if (!idToken) return
+    const client = api(idToken)
+    client.shoots.legalDocs(shoot.shoot_id)
+      .then(setLegalDocs)
+      .catch(() => {})
+  }, [idToken, shoot.shoot_id])
 
   const hasScriptContent = useMemo(
     () => scripts.some(s => (s.theme?.trim() || s.plot?.trim())),
@@ -336,6 +348,8 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
                     agency={shoot.female_agency}
                     rate={shoot.female_rate}
                     paymentName={shoot.female_payment_name}
+                    legalFiles={legalDocs?.files}
+                    folderUrl={legalDocs?.folder_url ?? undefined}
                   />
                 )}
                 {shoot.male_talent && (
@@ -344,6 +358,8 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
                     agency={shoot.male_agency}
                     rate={shoot.male_rate}
                     paymentName={shoot.male_payment_name}
+                    legalFiles={legalDocs?.files}
+                    folderUrl={legalDocs?.folder_url ?? undefined}
                   />
                 )}
               </div>
@@ -359,36 +375,90 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
                   let sceneTot = 0
                   for (const a of sc.assets) { sceneTot += 1; if (a.status === "validated") sceneVal += 1 }
                   const scenePct = sceneTot ? Math.round((sceneVal / sceneTot) * 100) : 0
+                  const sceneKey = sc.scene_id || `scene-${idx}`
+                  const isSceneExpanded = expandedScenes.has(sceneKey)
                   return (
                     <div
-                      key={`${sc.scene_id || "scene"}-${idx}`}
+                      key={sceneKey}
                       style={{
-                        display: "grid",
-                        gridTemplateColumns: "auto 1fr auto",
-                        gap: 10,
-                        alignItems: "center",
-                        padding: "8px 10px",
                         background: "var(--color-elevated)",
                         border: "1px solid var(--color-border)",
                       }}
                     >
-                      <span
+                      <button
+                        type="button"
+                        onClick={() => setExpandedScenes(prev => {
+                          const next = new Set(prev)
+                          if (next.has(sceneKey)) next.delete(sceneKey)
+                          else next.add(sceneKey)
+                          return next
+                        })}
                         style={{
-                          fontFamily: "var(--font-mono)",
-                          fontSize: 10,
-                          letterSpacing: "0.08em",
-                          color: studioColor(sc.studio),
-                          fontWeight: 700,
+                          all: "unset",
+                          display: "grid",
+                          gridTemplateColumns: "auto 1fr auto auto",
+                          gap: 10,
+                          alignItems: "center",
+                          padding: "8px 10px",
+                          width: "100%",
+                          boxSizing: "border-box",
+                          cursor: "pointer",
                         }}
                       >
-                        {sc.scene_id || sc.scene_type || `#${idx + 1}`}
-                      </span>
-                      <span style={{ fontSize: 12, color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {sc.title || sc.scene_type}
-                      </span>
-                      <span style={{ fontSize: 10, color: "var(--color-text-muted)", fontVariantNumeric: "tabular-nums" }}>
-                        {sceneVal}/{sceneTot} · {scenePct}%
-                      </span>
+                        <span
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            fontSize: 10,
+                            letterSpacing: "0.08em",
+                            color: studioColor(sc.studio),
+                            fontWeight: 700,
+                          }}
+                        >
+                          {sc.scene_id || sc.scene_type || `#${idx + 1}`}
+                        </span>
+                        <span style={{ fontSize: 12, color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {sc.title || sc.scene_type}
+                        </span>
+                        <span style={{ fontSize: 10, color: "var(--color-text-muted)", fontVariantNumeric: "tabular-nums" }}>
+                          {sceneVal}/{sceneTot} · {scenePct}%
+                        </span>
+                        {isSceneExpanded ? <ChevronUp size={11} aria-hidden="true" /> : <ChevronDown size={11} aria-hidden="true" />}
+                      </button>
+                      {isSceneExpanded && (
+                        <div
+                          style={{
+                            borderTop: "1px solid var(--color-border)",
+                            padding: "8px 10px",
+                            display: "grid",
+                            gridTemplateColumns: "repeat(2, 1fr)",
+                            gap: "4px 12px",
+                          }}
+                        >
+                          {SHOOT_ASSET_ORDER.map(at => {
+                            const asset = sc.assets.find(a => a.asset_type === at)
+                            const status = asset?.status ?? "not_present"
+                            const dotColor =
+                              status === "validated" ? "var(--color-ok)"
+                              : status === "available" ? "#f59e0b"
+                              : status === "stuck" ? "var(--color-err)"
+                              : "var(--color-text-faint)"
+                            return (
+                              <div key={at} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span
+                                  aria-hidden="true"
+                                  style={{
+                                    width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
+                                    background: dotColor,
+                                  }}
+                                />
+                                <span style={{ fontSize: 10, color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {SHOOT_ASSET_LABELS[at]}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -454,16 +524,19 @@ function TalentRow({
   agency,
   rate,
   paymentName,
+  legalFiles,
+  folderUrl,
 }: {
   name: string
   agency?: string
   rate?: string
   paymentName?: string
+  legalFiles?: LegalDocFile[]
+  folderUrl?: string
 }) {
-  // When rate or paymentName are missing, we still surface the row so the
-  // user knows the W9 hasn't been synced yet — the pipeline fills these in
-  // once legal paperwork is logged on set.
   const w9Pending = !paymentName && !rate
+  // W9 files: any PDF with "w9" in the name (case-insensitive)
+  const w9Files = (legalFiles ?? []).filter(f => /w9/i.test(f.name))
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "baseline" }}>
@@ -488,6 +561,33 @@ function TalentRow({
         <span style={{ color: paymentName ? "var(--color-text)" : "var(--color-text-faint)" }}>
           {paymentName || (w9Pending ? "Pending W9" : "—")}
         </span>
+        {(w9Files.length > 0 || folderUrl) && (
+          <>
+            <span style={{ color: "var(--color-text-faint)", letterSpacing: "0.08em", textTransform: "uppercase", fontSize: 9, fontWeight: 700, alignSelf: "center" }}>W9</span>
+            <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {w9Files.length > 0 ? w9Files.map(f => (
+                <a
+                  key={f.web_view_link}
+                  href={f.web_view_link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontSize: 10, color: "var(--color-lime)", fontWeight: 700, letterSpacing: "0.06em", textDecoration: "none" }}
+                >
+                  {f.name} ↗
+                </a>
+              )) : folderUrl ? (
+                <a
+                  href={folderUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontSize: 10, color: "var(--color-text-muted)", fontWeight: 600, textDecoration: "none" }}
+                >
+                  View folder ↗
+                </a>
+              ) : null}
+            </span>
+          </>
+        )}
       </div>
     </div>
   )
@@ -697,6 +797,17 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   )
+}
+
+function normalizeDate(raw: string): string {
+  if (!raw) return ""
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10)
+  const parts = raw.split("/")
+  if (parts.length === 3) {
+    const [m, d, y] = parts
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`
+  }
+  return raw
 }
 
 function formatFullDate(raw: string): string {
