@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/rbac"
 import { isEclatechV2 } from "@/lib/eclatech-flag"
 import { UsersPanel } from "./users-panel"
 import { SystemCheck } from "./system-check"
+import { SyncPanel } from "./sync-panel"
 
 export const dynamic = "force-dynamic"
 
@@ -49,24 +50,13 @@ export default async function AdminPage() {
         <SystemCheck idToken={idToken} />
 
         {health?.syncs && Object.keys(health.syncs).length > 0 && (
-          <section className="ec-block">
-            <header><h2>Syncs</h2></header>
-            <ul className="ec-list">
-              {Object.entries(health.syncs).map(([source, infoRaw]) => {
-                const info = infoRaw as { status?: string; row_count?: number; last_synced_at?: string }
-                const ok = !info.status || info.status === "ok" || info.status === "synced"
-                return (
-                  <li key={source} style={{ gridTemplateColumns: "10px 1fr auto" }}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: ok ? "var(--color-ok)" : "var(--color-err)" }} />
-                    <span style={{ fontSize: 12, color: "var(--color-text)" }}>{source}</span>
-                    <span style={{ fontSize: 10, color: "var(--color-text-faint)", fontVariantNumeric: "tabular-nums", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                      {info.row_count !== undefined ? `${info.row_count.toLocaleString()} rows` : info.status ?? "—"}
-                    </span>
-                  </li>
-                )
-              })}
-            </ul>
-          </section>
+          <SyncPanel
+            initial={Object.entries(health.syncs).map(([source, infoRaw]) => {
+              const info = infoRaw as { status?: string; row_count?: number; last_synced_at?: string }
+              return { source, ...info }
+            })}
+            idToken={idToken}
+          />
         )}
       </div>
     </div>

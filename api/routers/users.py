@@ -34,6 +34,13 @@ class UserUpdate(BaseModel):
     allowed_tabs: Optional[str] = None
 
 
+class UserCreate(BaseModel):
+    email: str
+    name: str
+    role: str = "editor"
+    allowed_tabs: str = "ALL"
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -108,6 +115,56 @@ async def update_user(
     return target
 
 
+@router.post("/", status_code=status.HTTP_201_CREATED)
+async def create_user(body: UserCreate, _manager: dict = Depends(require_user_manager)):
+    """Add a new user to the team. Requires user-manager permission."""
+    if body.role not in ("admin", "editor"):
+        raise HTTPException(status_code=400, detail="Role must be 'admin' or 'editor'")
+    email = body.email.strip().lower()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Invalid email")
+
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM users WHERE LOWER(email) = ?", (email,),
+        ).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"User {email} already exists")
+        conn.execute(
+            "INSERT INTO users (email, name, role, allowed_tabs) VALUES (?, ?, ?, ?)",
+            (email, body.name.strip(), body.role, body.allowed_tabs),
+        )
+
+    user = {
+        "email": email,
+        "name": body.name.strip(),
+        "role": body.role,
+        "allowed_tabs": body.allowed_tabs,
+    }
+    threading.Thread(target=_append_user_to_sheet, args=(user,), daemon=True).start()
+    _log.info("User %s created (role=%s)", email, body.role)
+    return user
+
+
+@router.delete("/{email}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(email: str, manager: dict = Depends(require_user_manager)):
+    """Remove a user from the team. Requires user-manager permission."""
+    target_email = email.lower()
+    if target_email == manager["email"].lower():
+        raise HTTPException(status_code=400, detail="You cannot remove yourself")
+
+    with get_db() as conn:
+        result = conn.execute(
+            "DELETE FROM users WHERE LOWER(email) = ?", (target_email,),
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail=f"User {email} not found")
+
+    threading.Thread(target=_remove_user_from_sheet, args=(target_email,), daemon=True).start()
+    _log.info("User %s deleted by %s", target_email, manager["email"])
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Sheets write-through (background)
 # ---------------------------------------------------------------------------
@@ -134,3 +191,35 @@ def _update_user_in_sheet(email: str, user_data: dict) -> None:
         _log.warning("User %s not found in Sheets — skipping write-through", email)
     except Exception:
         _log.exception("Failed to write user update to Sheets for %s", email)
+
+
+def _append_user_to_sheet(user: dict) -> None:
+    """Append a new user row to the Tickets sheet 'Users' tab."""
+    try:
+        sh = open_tickets()
+        ws = get_or_create_worksheet(sh, "Users", headers=["Email", "Name", "Role", "Allowed Tabs"])
+        with_retry(lambda: ws.append_row(
+            [user["email"], user["name"], user["role"], user.get("allowed_tabs", "")],
+            value_input_option="USER_ENTERED",
+        ))
+        _log.info("Appended user %s to Sheets", user["email"])
+    except Exception:
+        _log.exception("Failed to append user %s to Sheets", user["email"])
+
+
+def _remove_user_from_sheet(email: str) -> None:
+    """Delete a user row from the Tickets sheet 'Users' tab."""
+    try:
+        sh = open_tickets()
+        ws = get_or_create_worksheet(sh, "Users", headers=["Email", "Name", "Role", "Allowed Tabs"])
+        rows = with_retry(lambda: ws.get_all_values())
+        for i, row in enumerate(rows):
+            if i == 0:
+                continue
+            if row and row[0].lower() == email.lower():
+                with_retry(lambda rn=i + 1: ws.delete_rows(rn))
+                _log.info("Removed user %s from Sheets (row %d)", email, i + 1)
+                return
+        _log.warning("User %s not found in Sheets — skipping removal", email)
+    except Exception:
+        _log.exception("Failed to remove user %s from Sheets", email)

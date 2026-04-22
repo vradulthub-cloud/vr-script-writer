@@ -35,6 +35,51 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState("")
 
+  // Add-user form state. Inline rather than a modal so admins see the
+  // existing roster while typing — fewer mistakes (e.g. duplicate names).
+  const [addOpen, setAddOpen] = useState(false)
+  const [addEmail, setAddEmail] = useState("")
+  const [addName, setAddName] = useState("")
+  const [addRole, setAddRole] = useState("editor")
+  const [addBusy, setAddBusy] = useState(false)
+  const [addMsg, setAddMsg] = useState("")
+
+  async function addUser() {
+    const email = addEmail.trim().toLowerCase()
+    const name = addName.trim()
+    if (!email || !name) { setAddMsg("Email and name are required"); return }
+    if (users.some(u => u.email.toLowerCase() === email)) {
+      setAddMsg("That email is already in the roster"); return
+    }
+    setAddBusy(true)
+    setAddMsg("")
+    try {
+      const created = await client.users.create({ email, name, role: addRole, allowed_tabs: "ALL" })
+      setUsers(prev => [...prev, created])
+      setAddEmail(""); setAddName(""); setAddRole("editor")
+      setAddOpen(false)
+    } catch (e) {
+      setAddMsg(e instanceof Error ? e.message : "Failed to add user")
+    } finally {
+      setAddBusy(false)
+    }
+  }
+
+  async function removeUser(u: UserProfile) {
+    const isSelf = u.email.toLowerCase() === (currentEmail ?? "").toLowerCase()
+    if (isSelf) { window.alert("You can't remove yourself."); return }
+    const ok = window.confirm(
+      `Remove ${u.name} (${u.email}) from the team?\n\nThey will lose access immediately.`,
+    )
+    if (!ok) return
+    try {
+      await client.users.remove(u.email)
+      setUsers(prev => prev.filter(x => x.email !== u.email))
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Failed to remove user")
+    }
+  }
+
   function startEdit(user: UserProfile) {
     setEditingEmail(user.email)
     setEditRole(user.role)
@@ -143,7 +188,86 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
         title="User Permissions"
         eyebrow="Admin"
         subtitle={`${users.length} user${users.length === 1 ? "" : "s"} · ${admins} admin · role + tab access control`}
+        actions={
+          <button
+            type="button"
+            onClick={() => setAddOpen(o => !o)}
+            style={{
+              background: addOpen ? "transparent" : "var(--color-lime)",
+              color: addOpen ? "var(--color-text-muted)" : "var(--color-lime-ink, #0d0d0d)",
+              border: addOpen ? "1px solid var(--color-border)" : "1px solid var(--color-lime)",
+              padding: "6px 12px",
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+            }}
+          >
+            {addOpen ? "Cancel" : "+ Add user"}
+          </button>
+        }
       />
+      {addOpen && (
+        <Panel>
+          <div style={{ padding: 14, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "2 1 240px" }}>
+              <span style={addLabelStyle}>Email</span>
+              <input
+                type="email"
+                value={addEmail}
+                onChange={e => setAddEmail(e.target.value)}
+                placeholder="alex@eclatech.test"
+                style={addInputStyle}
+                autoFocus
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 160px" }}>
+              <span style={addLabelStyle}>Name</span>
+              <input
+                value={addName}
+                onChange={e => setAddName(e.target.value)}
+                placeholder="Alex Rivera"
+                style={addInputStyle}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={addLabelStyle}>Role</span>
+              <select
+                value={addRole}
+                onChange={e => setAddRole(e.target.value)}
+                style={addInputStyle}
+              >
+                <option value="editor">editor</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={addUser}
+              disabled={addBusy}
+              style={{
+                background: "var(--color-lime)",
+                color: "var(--color-lime-ink, #0d0d0d)",
+                border: "1px solid var(--color-lime)",
+                padding: "6px 14px",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                cursor: addBusy ? "wait" : "pointer",
+                opacity: addBusy ? 0.6 : 1,
+                height: 30,
+              }}
+            >
+              {addBusy ? "Saving…" : "Add"}
+            </button>
+            {addMsg && (
+              <span role="status" style={{ fontSize: 11, color: "var(--color-err)" }}>{addMsg}</span>
+            )}
+          </div>
+        </Panel>
+      )}
       <Panel>
         <table className="w-full" style={{ borderCollapse: "collapse" }}>
         <thead>
@@ -274,13 +398,25 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
                       </button>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => startEdit(u)}
-                      className="rounded px-2 py-1 transition-colors hover:bg-[--color-elevated]"
-                      style={{ fontSize: 11, color: "var(--color-text-muted)" }}
-                    >
-                      Edit
-                    </button>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => startEdit(u)}
+                        className="rounded px-2 py-1 transition-colors hover:bg-[--color-elevated]"
+                        style={{ fontSize: 11, color: "var(--color-text-muted)" }}
+                      >
+                        Edit
+                      </button>
+                      {!isSelf && (
+                        <button
+                          onClick={() => removeUser(u)}
+                          title={`Remove ${u.name}`}
+                          className="rounded px-2 py-1 transition-colors hover:bg-[--color-elevated]"
+                          style={{ fontSize: 11, color: "var(--color-err)" }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
                   )}
                 </td>
               </tr>
@@ -291,4 +427,23 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
       </Panel>
     </div>
   )
+}
+
+const addLabelStyle: React.CSSProperties = {
+  fontSize: 9,
+  fontWeight: 700,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+  color: "var(--color-text-muted)",
+}
+
+const addInputStyle: React.CSSProperties = {
+  background: "var(--color-elevated)",
+  border: "1px solid var(--color-border)",
+  color: "var(--color-text)",
+  fontSize: 13,
+  padding: "6px 10px",
+  outline: "none",
+  fontFamily: "inherit",
+  height: 30,
 }

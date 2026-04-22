@@ -65,7 +65,34 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
 
   // ── Users ─────────────────────────────────────────────────────────────
   if (base === "/users/me") return wait(MOCK_USER as unknown as T)
-  if (base === "/users/")   return wait(MOCK_ALL_USERS as unknown as T)
+  if (base === "/users/") {
+    const method = (_options.method || "GET").toUpperCase()
+    if (method === "GET") return wait(MOCK_ALL_USERS as unknown as T)
+    if (method === "POST") {
+      const body = _options.body ? JSON.parse(_options.body as string) : {}
+      const u = {
+        email: (body.email ?? "").toLowerCase(),
+        name: body.name ?? "",
+        role: body.role ?? "editor",
+        allowed_tabs: body.allowed_tabs ?? "ALL",
+      }
+      ;(MOCK_ALL_USERS as Array<typeof u>).push(u)
+      return wait(u as unknown as T)
+    }
+  }
+  // /users/{email} — DELETE removes from the mock array
+  if (base.startsWith("/users/") && (_options.method || "").toUpperCase() === "DELETE") {
+    const email = decodeURIComponent(base.slice("/users/".length)).toLowerCase()
+    const arr = MOCK_ALL_USERS as Array<{ email: string }>
+    const idx = arr.findIndex(u => u.email.toLowerCase() === email)
+    if (idx >= 0) arr.splice(idx, 1)
+    return wait(undefined as unknown as T)
+  }
+  // ── Per-source sync (admin) ───────────────────────────────────────────
+  if (base.startsWith("/sync/trigger/")) {
+    const source = decodeURIComponent(base.slice("/sync/trigger/".length))
+    return wait({ source, row_count: 42, status: "ok" } as unknown as T)
+  }
 
   // ── Scenes ────────────────────────────────────────────────────────────
   if (base === "/scenes/stats") return wait(MOCK_SCENE_STATS as unknown as T)

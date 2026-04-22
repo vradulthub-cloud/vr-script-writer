@@ -135,3 +135,34 @@ async def trigger_sync(_admin: dict = Depends(_require_admin_dep)):
     """Manually trigger a full sync from Google Sheets. Admin only."""
     from api.sync_engine import run_full_sync
     return {"status": "completed", "results": run_full_sync()}
+
+
+@app.post("/api/sync/trigger/{source}")
+async def trigger_sync_one(source: str, _admin: dict = Depends(_require_admin_dep)):
+    """Manually trigger a sync for a single source. Admin only.
+    Sources: users, tickets, notifications, approvals, scenes, scripts, bookings."""
+    from api.sync_engine import (
+        sync_users, sync_tickets, sync_notifications, sync_approvals,
+        sync_scenes, sync_scripts, sync_bookings,
+    )
+    from api.database import update_sync_meta
+    from fastapi import HTTPException
+
+    funcs = {
+        "users": sync_users,
+        "tickets": sync_tickets,
+        "notifications": sync_notifications,
+        "approvals": sync_approvals,
+        "scenes": sync_scenes,
+        "scripts": sync_scripts,
+        "bookings": sync_bookings,
+    }
+    fn = funcs.get(source)
+    if not fn:
+        raise HTTPException(status_code=404, detail=f"Unknown source: {source}")
+    try:
+        count = fn()
+        return {"source": source, "row_count": count, "status": "ok"}
+    except Exception as exc:
+        update_sync_meta(source, status="error", error=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc))

@@ -736,7 +736,14 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       list: async () => (await get<UserProfile[]>("/users/")).map(normalizeProfile),
       update: async (email: string, body: UserUpdate) =>
         normalizeProfile(await patch<UserProfile>(`/users/${encodeURIComponent(email)}`, body)),
+      create: async (body: { email: string; name: string; role?: string; allowed_tabs?: string }) =>
+        normalizeProfile(await post<UserProfile>("/users/", body)),
+      remove: (email: string) =>
+        delVoid(`/users/${encodeURIComponent(email)}`),
     },
+
+    syncOne: (source: string) =>
+      post<{ source: string; row_count: number; status: string }>(`/sync/trigger/${encodeURIComponent(source)}`, {}),
 
     notifications: {
       list: (limit = 50) => get<Notification[]>(`/notifications/?limit=${limit}`),
