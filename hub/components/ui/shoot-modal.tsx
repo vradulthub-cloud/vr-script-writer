@@ -60,8 +60,8 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
         for (const s of lists.flat()) byId.set(s.id, s)
         const matched = Array.from(byId.values()).filter(s =>
           normalizeDate(s.shoot_date || "") === targetDate &&
-          (!shoot.female_talent || s.female === shoot.female_talent) &&
-          (!shoot.male_talent || !s.male || s.male === shoot.male_talent),
+          (!shoot.female_talent || s.female.trim().toLowerCase() === shoot.female_talent.trim().toLowerCase()) &&
+          (!shoot.male_talent || !s.male || s.male.trim().toLowerCase() === shoot.male_talent.trim().toLowerCase()),
         )
         // Stable order — by tab_name then id
         matched.sort((a, b) => a.tab_name.localeCompare(b.tab_name) || a.id - b.id)

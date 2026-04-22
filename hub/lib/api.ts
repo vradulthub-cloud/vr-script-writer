@@ -663,12 +663,13 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
     },
 
     scripts: {
-      list: (filters?: { studio?: string; tab_name?: string; needs_script?: boolean; search?: string }) => {
+      list: (filters?: { studio?: string; tab_name?: string; needs_script?: boolean; search?: string; limit?: number }) => {
         const params = new URLSearchParams()
         if (filters?.studio) params.set("studio", filters.studio)
         if (filters?.tab_name) params.set("tab_name", filters.tab_name)
         if (filters?.needs_script) params.set("needs_script", "true")
         if (filters?.search) params.set("search", filters.search)
+        params.set("limit", String(filters?.limit ?? 500))
         const qs = params.toString()
         return get<Script[]>(`/scripts/${qs ? `?${qs}` : ""}`)
       },

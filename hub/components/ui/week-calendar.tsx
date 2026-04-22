@@ -41,9 +41,9 @@ export function WeekCalendar({
         return { shoot: s, left, right, talent }
       })
     return { studio, abbr: studioAbbr(studio), events: laneEvents }
-  }).filter(l => l.events.length > 0)
+  })
 
-  if (lanes.length === 0) return null
+  if (lanes.every(l => l.events.length === 0)) return null
 
   const weekLabel = `${formatMonthDay(start)} → ${formatMonthDay(new Date(end.getTime() - 1))}`
 
