@@ -13,6 +13,7 @@ import { CopyButton } from "@/components/ui/copy-button"
 import { PageHeader } from "@/components/ui/page-header"
 import { studioAbbr } from "@/lib/studio-colors"
 import { ApprovedTagsReference } from "@/components/ui/approved-tags-reference"
+import { SeoModal } from "@/components/ui/seo-modal"
 
 // ---------------------------------------------------------------------------
 // Per-studio category lists — grouped for visual structure
@@ -245,6 +246,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const [docxLoading, setDocxLoading] = useState(false)
   const [docxError, setDocxError] = useState<string | null>(null)
+  const [seoOpen, setSeoOpen] = useState(false)
 
   const client = api(idToken ?? null)
 
@@ -1066,73 +1068,54 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
               )}
             </div>
 
-            {/* SEO section */}
+            {/* SEO summary chip — opens the full editor in a modal. */}
             {!stream.streaming && stream.output && (
-              <div
-                className="rounded mb-4 px-4 py-3"
+              <button
+                type="button"
+                onClick={() => setSeoOpen(true)}
+                className="mb-4"
                 style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 14px",
                   background: "var(--color-surface)",
                   border: "1px solid var(--color-border)",
+                  cursor: "pointer",
+                  textAlign: "left",
                 }}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <span style={{ fontSize: 11, color: "var(--color-text-muted)", fontWeight: 600 }}>SEO Tags</span>
-                  <button
-                    onClick={generateSeo}
-                    disabled={seoLoading}
-                    className="px-2.5 py-1 rounded text-xs transition-colors"
-                    style={{
-                      background: "transparent",
-                      color: seoLoading ? "var(--color-text-faint)" : studioColor,
-                      border: `1px solid ${seoLoading ? "var(--color-border)" : `color-mix(in srgb, ${studioColor} 35%, transparent)`}`,
-                      cursor: seoLoading ? "wait" : "pointer",
-                    }}
-                  >
-                    {seoLoading ? "Generating…" : "Generate SEO Tags"}
-                  </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+                    SEO Tags
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {metaTitle || metaDesc ? (
+                      <>
+                        {metaTitle || <span style={{ color: "var(--color-text-faint)" }}>No title</span>}
+                        {metaDesc && <span style={{ color: "var(--color-text-muted)" }}> · {metaDesc.slice(0, 80)}{metaDesc.length > 80 ? "…" : ""}</span>}
+                      </>
+                    ) : (
+                      <span style={{ color: "var(--color-text-faint)" }}>Not generated yet — click to open editor</span>
+                    )}
+                  </span>
                 </div>
-                {seoError && <p style={{ fontSize: 11, color: "var(--color-err)", marginBottom: 6 }}>{seoError}</p>}
-
-                {/* Meta Title */}
-                <div className="mb-2">
-                  <label className="block mb-1" style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
-                    Meta Title <span style={{ opacity: 0.6 }}>({metaTitle.length}/60)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={metaTitle}
-                    onChange={e => setMetaTitle(e.target.value.slice(0, 60))}
-                    placeholder="Auto-generated on click above…"
-                    maxLength={60}
-                    className="w-full px-2.5 py-1.5 rounded text-xs outline-none"
-                    style={{
-                      background: "var(--color-elevated)",
-                      border: "1px solid var(--color-border)",
-                      color: "var(--color-text)",
-                    }}
-                  />
-                </div>
-
-                {/* Meta Description */}
-                <div>
-                  <label className="block mb-1" style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
-                    Meta Description <span style={{ opacity: 0.6, color: metaDesc.length > 145 ? "var(--color-warn)" : undefined }}>({metaDesc.length}/155)</span>
-                  </label>
-                  <textarea
-                    value={metaDesc}
-                    onChange={e => setMetaDesc(e.target.value.slice(0, 155))}
-                    rows={2}
-                    placeholder="Auto-generated on click above…"
-                    maxLength={155}
-                    className="w-full px-2.5 py-1.5 rounded text-xs outline-none resize-none"
-                    style={{
-                      background: "var(--color-elevated)",
-                      border: "1px solid var(--color-border)",
-                      color: "var(--color-text)",
-                    }}
-                  />
-                </div>
-              </div>
+                <span
+                  style={{
+                    flexShrink: 0,
+                    padding: "3px 9px",
+                    fontSize: 9,
+                    fontWeight: 700,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    color: studioColor,
+                    border: `1px solid color-mix(in srgb, ${studioColor} 32%, transparent)`,
+                  }}
+                >
+                  {metaTitle || metaDesc ? "Edit" : "Open"} →
+                </span>
+              </button>
             )}
 
             {/* Save / Download row */}
@@ -1220,6 +1203,20 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
         </section>
       </div>
     </div>
+
+    {seoOpen && (
+      <SeoModal
+        metaTitle={metaTitle}
+        metaDesc={metaDesc}
+        studioColor={studioColor}
+        loading={seoLoading}
+        error={seoError}
+        onChangeTitle={setMetaTitle}
+        onChangeDesc={setMetaDesc}
+        onGenerate={generateSeo}
+        onClose={() => setSeoOpen(false)}
+      />
+    )}
     </div>
   )
 }

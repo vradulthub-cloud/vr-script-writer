@@ -11,6 +11,7 @@ import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
 import { PageHeader } from "@/components/ui/page-header"
+import { SheetRowModal } from "@/components/ui/sheet-row-modal"
 import { studioAbbr } from "@/lib/studio-colors"
 import { BatchPanel } from "./batch-panel"
 const SCENE_TYPES = ["BG", "BGCP"]
@@ -444,53 +445,9 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
               </select>
             </div>
 
-            {/* Rows needing scripts */}
-            {/* Overwrite confirmation — shown when a row selection would clobber manual inputs */}
-            {pendingRow && (
-              <div
-                className="rounded mb-3"
-                style={{
-                  padding: "10px 12px",
-                  background: "color-mix(in srgb, var(--color-warn) 10%, var(--color-surface))",
-                  border: "1px solid color-mix(in srgb, var(--color-warn) 30%, transparent)",
-                }}
-              >
-                <p style={{ fontSize: 11, color: "var(--color-warn)", marginBottom: 8, lineHeight: 1.5 }}>
-                  This will overwrite your current inputs
-                  {(female || male) && (
-                    <span style={{ color: "var(--color-text-muted)", fontStyle: "italic" }}>
-                      {" "}({[female, male].filter(Boolean).join(" / ")})
-                    </span>
-                  )}
-                  .
-                </p>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button
-                    onClick={() => applyRow(pendingRow)}
-                    className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
-                    style={{
-                      background: "color-mix(in srgb, var(--color-warn) 18%, transparent)",
-                      color: "var(--color-warn)",
-                      border: "1px solid color-mix(in srgb, var(--color-warn) 35%, transparent)",
-                    }}
-                  >
-                    Overwrite
-                  </button>
-                  <button
-                    onClick={() => setPendingRow(null)}
-                    className="px-2.5 py-1 rounded text-xs transition-colors"
-                    style={{
-                      background: "transparent",
-                      color: "var(--color-text-muted)",
-                      border: "1px solid var(--color-border)",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
+            {/* Overwrite confirmation is now handled by SheetRowModal, mounted
+                at the bottom of the component. The old inline yellow banner
+                would get lost when the picker list scrolled. */}
             {sheetLoading && (
               <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Loading…</p>
             )}
@@ -514,11 +471,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
                     className="w-full text-left px-3 py-2 transition-colors hover:bg-[--color-elevated]"
                     style={{
                       borderBottom: i < sheetRows.length - 1 ? "1px solid var(--color-border-subtle)" : undefined,
-                      background: selectedRow?.id === row.id
-                        ? "var(--color-elevated)"
-                        : pendingRow?.id === row.id
-                          ? "color-mix(in srgb, var(--color-warn) 8%, transparent)"
-                          : undefined,
+                      background: selectedRow?.id === row.id ? "var(--color-elevated)" : undefined,
                     }}
                   >
                     <div className="flex items-center gap-2 flex-wrap">
@@ -1022,6 +975,16 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
         )}
       </div>
     </div>
+
+    {pendingRow && (
+      <SheetRowModal
+        row={pendingRow}
+        currentFemale={female}
+        currentMale={male}
+        onConfirm={() => applyRow(pendingRow)}
+        onCancel={() => setPendingRow(null)}
+      />
+    )}
     </div>
   )
 }

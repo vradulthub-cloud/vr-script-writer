@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { useStream } from "@/lib/sse"
 import { api, API_BASE_URL, type Scene, type ExistingComp } from "@/lib/api"
 import { StudioBadge } from "@/components/ui/studio-badge"
@@ -9,6 +9,7 @@ import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 import { PageHeader } from "@/components/ui/page-header"
+import { ExistingCompModal } from "@/components/ui/existing-comp-modal"
 import { studioAbbr } from "@/lib/studio-colors"
 
 type Mode = "ideas" | "builder" | "existing"
@@ -703,10 +704,22 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
           loading={existingLoading}
           studio={studio}
           studioColor={studioColor}
-          expanded={expandedComp}
-          onToggle={(id) => setExpandedComp(prev => prev === id ? null : id)}
+          onOpen={(id) => setExpandedComp(id)}
         />
       )}
+
+      {/* Existing-comp detail modal — lifted out of the inline accordion. */}
+      {expandedComp && (() => {
+        const comp = existingComps.find(c => c.comp_id === expandedComp)
+        if (!comp) return null
+        return (
+          <ExistingCompModal
+            comp={comp}
+            studioColor={studioColor}
+            onClose={() => setExpandedComp(null)}
+          />
+        )
+      })()}
     </div>
   )
 }
@@ -728,11 +741,10 @@ interface ExistingCompsTableProps {
   loading: boolean
   studio: string
   studioColor: string
-  expanded: string | null
-  onToggle: (compId: string) => void
+  onOpen: (compId: string) => void
 }
 
-function ExistingCompsTable({ comps, loading, studio, studioColor, expanded, onToggle }: ExistingCompsTableProps) {
+function ExistingCompsTable({ comps, loading, studio, studioColor, onOpen }: ExistingCompsTableProps) {
   if (loading) {
     return <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Loading existing compilations…</p>
   }
@@ -753,120 +765,65 @@ function ExistingCompsTable({ comps, loading, studio, studioColor, expanded, onT
       <table className="ec-ctab w-full" style={{ borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "var(--color-elevated)", borderBottom: "1px solid var(--color-border)" }}>
-            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)", width: 32 }}></th>
             <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Comp ID</th>
             <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Title</th>
             <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Vol.</th>
             <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Status</th>
             <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Scenes</th>
             <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Created</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)", width: 24 }} aria-hidden="true"></th>
           </tr>
         </thead>
         <tbody>
           {comps.map((comp) => {
-            const isOpen = expanded === comp.comp_id
             const statCol = statusColors(comp.status)
             return (
-              <Fragment key={comp.comp_id}>
-                <tr
-                  onClick={() => onToggle(comp.comp_id)}
-                  style={{
-                    borderBottom: "1px solid var(--color-border)",
-                    cursor: "pointer",
-                    background: isOpen ? "var(--color-surface)" : "transparent",
-                  }}
-                >
-                  <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-                    {isOpen ? "▾" : "▸"}
-                  </td>
-                  <td className="px-3 py-2 font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                    {comp.comp_id}
-                  </td>
-                  <td className="px-3 py-2" style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500 }}>
-                    {comp.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}
-                  </td>
-                  <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                    {comp.volume || "—"}
-                  </td>
-                  <td className="px-3 py-2" style={{ fontSize: 11 }}>
-                    <span style={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      letterSpacing: "0.04em",
-                      textTransform: "uppercase",
-                      padding: "2px 7px",
-                      borderRadius: 9,
-                      color: statCol.fg,
-                      background: statCol.bg,
-                      border: `1px solid ${statCol.border}`,
-                    }}>
-                      {comp.status || "Draft"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                    {comp.scene_count}
-                  </td>
-                  <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-                    {comp.created || "—"}
-                  </td>
-                </tr>
-                {isOpen && (
-                  <tr style={{ background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
-                    <td colSpan={7} className="px-4 py-3">
-                      {comp.description && (
-                        <div className="mb-3 rounded" style={{ background: "var(--color-elevated)", padding: "8px 10px" }}>
-                          <p style={{ fontSize: 10, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Description</p>
-                          <p style={{ fontSize: 12, color: "var(--color-text)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{comp.description}</p>
-                        </div>
-                      )}
-                      <p style={{ fontSize: 10, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                        Scenes (click MEGA link to download source)
-                      </p>
-                      <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-                        <table className="w-full" style={{ borderCollapse: "collapse" }}>
-                          <thead>
-                            <tr style={{ background: "var(--color-bg, var(--color-surface))" }}>
-                              <th className="text-left px-2 py-1" style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 500, width: 28 }}>#</th>
-                              <th className="text-left px-2 py-1" style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 500 }}>Scene ID</th>
-                              <th className="text-left px-2 py-1" style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 500 }}>Title</th>
-                              <th className="text-left px-2 py-1" style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 500 }}>Performers</th>
-                              <th className="text-left px-2 py-1" style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 500 }}>MEGA</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {comp.scenes.map((sc) => (
-                              <tr key={`${comp.comp_id}-${sc.scene_num}`} style={{ borderTop: "1px solid var(--color-border)" }}>
-                                <td className="px-2 py-1.5" style={{ fontSize: 10, color: "var(--color-text-faint)" }}>{sc.scene_num}</td>
-                                <td className="px-2 py-1.5 font-mono" style={{ fontSize: 10, color: "var(--color-text-muted)" }}>{sc.scene_id}</td>
-                                <td className="px-2 py-1.5" style={{ fontSize: 11, color: "var(--color-text)" }}>{sc.title || <span style={{ color: "var(--color-text-faint)" }}>—</span>}</td>
-                                <td className="px-2 py-1.5" style={{ fontSize: 10, color: "var(--color-text-muted)" }}>{sc.performers || "—"}</td>
-                                <td className="px-2 py-1.5" style={{ fontSize: 10 }}>
-                                  {sc.mega_link ? (
-                                    <a
-                                      href={sc.mega_link}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      style={{ color: studioColor, textDecoration: "underline" }}
-                                    >
-                                      open
-                                    </a>
-                                  ) : (
-                                    <span style={{ color: "var(--color-text-faint)" }}>pending</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                      <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 8 }}>
-                        Created by {comp.created_by || "—"}
-                        {comp.updated && comp.updated !== comp.created && ` · Updated ${comp.updated}`}
-                      </p>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
+              <tr
+                key={comp.comp_id}
+                tabIndex={0}
+                role="button"
+                aria-label={`Open ${comp.title || comp.comp_id}`}
+                onClick={() => onOpen(comp.comp_id)}
+                onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(comp.comp_id) } }}
+                style={{
+                  borderBottom: "1px solid var(--color-border)",
+                  cursor: "pointer",
+                }}
+              >
+                <td className="px-3 py-2 font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  {comp.comp_id}
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500 }}>
+                  {comp.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  {comp.volume || "—"}
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 11 }}>
+                  <span style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                    padding: "2px 7px",
+                    borderRadius: 9,
+                    color: statCol.fg,
+                    background: statCol.bg,
+                    border: `1px solid ${statCol.border}`,
+                  }}>
+                    {comp.status || "Draft"}
+                  </span>
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  {comp.scene_count}
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                  {comp.created || "—"}
+                </td>
+                <td className="px-3 py-2" aria-hidden="true" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                  ›
+                </td>
+              </tr>
             )
           })}
         </tbody>
