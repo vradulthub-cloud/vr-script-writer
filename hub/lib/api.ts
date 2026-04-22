@@ -405,6 +405,18 @@ export interface Shoot {
   male_payment_name?: string
 }
 
+export interface LegalDocFile {
+  name: string
+  web_view_link: string
+  mime_type: string
+}
+
+export interface LegalDocsResult {
+  folder_url: string | null
+  folder_name: string | null
+  files: LegalDocFile[]
+}
+
 export const SHOOT_ASSET_ORDER: readonly AssetType[] = [
   "script_done",
   "call_sheet_sent",
@@ -843,6 +855,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
           `/shoots/${encodeURIComponent(shootId)}/scenes/${position}/assets/${encodeURIComponent(assetType)}/revalidate`,
           {},
         ),
+      legalDocs: (shootId: string) =>
+        get<LegalDocsResult>(`/shoots/${encodeURIComponent(shootId)}/legal-docs`),
     },
   }
 }

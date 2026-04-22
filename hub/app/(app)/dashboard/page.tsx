@@ -136,8 +136,12 @@ export default async function DashboardPage() {
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
+const STUDIO_ORDER = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
+
 function ProductionScopeStripV2({ stats, shootCount }: { stats: SceneStats; shootCount: number }) {
-  const entries = Object.entries(stats.by_studio).sort(([, a], [, b]) => b - a)
+  const entries = STUDIO_ORDER
+    .map(s => [s, stats.by_studio[s] ?? 0] as [string, number])
+    .filter(([, n]) => n > 0)
   const max = Math.max(1, ...entries.map(([, n]) => n))
   return (
     <div>
