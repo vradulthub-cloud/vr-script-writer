@@ -225,6 +225,13 @@ export interface Script {
   plot: string
   title: string
   script_status: string
+  // Additional fields returned when the row has been filled out past the
+  // minimum — surface in the shoot modal so directors can see wardrobe at
+  // a glance. Optional since they may be blank on fresh rows.
+  wardrobe_f?: string
+  wardrobe_m?: string
+  shoot_location?: string
+  props?: string
 }
 
 export interface Model {
@@ -386,6 +393,16 @@ export interface Shoot {
   status: "active" | "cancelled" | string
   scenes: BoardShootScene[]
   aging_hours: number
+  // Day-of billing info. Optional because the sheet populates these only
+  // after the talent fills out their W9 in the morning — before that the
+  // modal should render a placeholder ("Pending W9"). Backend syncs these
+  // from the legal-paperwork pipeline; payment_name is whatever the
+  // talent wrote on the W9 (their legal name for the 1099), which can
+  // differ from their stage name.
+  female_rate?: string
+  female_payment_name?: string
+  male_rate?: string
+  male_payment_name?: string
 }
 
 export const SHOOT_ASSET_ORDER: readonly AssetType[] = [
@@ -425,6 +442,48 @@ export interface Notification {
   message: string
   read: number           // 0 or 1
   link: string
+}
+
+export interface TaskRow {
+  task_id: string
+  task_type: string
+  status: string         // pending, running, completed, failed
+  progress: number       // 0..1
+  created_at: string
+  started_at: string
+  completed_at: string
+  created_by: string
+  error: string
+}
+
+export interface TaskStats {
+  pending: number
+  running: number
+  completed: number
+  failed: number
+  total: number
+}
+
+export interface PromptEntry {
+  key: string
+  label: string
+  group: string         // e.g. "Titles", "Descriptions", "Compilations", "Scripts"
+  content: string       // active text — override if present, otherwise default
+  default: string       // bundled default for diff/revert UI
+  is_overridden: boolean
+  updated_by: string
+  updated_at: string
+}
+
+export interface CalendarEventRow {
+  event_id: string
+  date: string           // YYYY-MM-DD
+  title: string
+  kind: string
+  color: string
+  notes: string
+  created_by: string
+  created_at: string
 }
 
 export interface Treatment {
@@ -506,6 +565,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
   const postVoid = (path: string, body: unknown) =>
     apiFetch<void>(path, token, { method: "POST", body: JSON.stringify(body), expectEmpty: true })
   const del = <T>(path: string) => apiFetch<T>(path, token, { method: "DELETE" })
+  const delVoid = (path: string) =>
+    apiFetch<void>(path, token, { method: "DELETE", expectEmpty: true })
 
   return {
     health: () => get<{ status: string; version: string; syncs: Record<string, unknown> }>("/health"),
@@ -521,12 +582,16 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         project?: string
         priority?: string
         assignee?: string
+        type?: string
+        limit?: number
       }) => {
         const params = new URLSearchParams()
         if (filters?.status)   params.set("status",   filters.status)
         if (filters?.project)  params.set("project",  filters.project)
         if (filters?.priority) params.set("priority", filters.priority)
         if (filters?.assignee) params.set("assignee", filters.assignee)
+        if (filters?.type)     params.set("type",     filters.type)
+        if (filters?.limit)    params.set("limit",    String(filters.limit))
         const qs = params.toString()
         return get<Ticket[]>(`/tickets/${qs ? `?${qs}` : ""}`)
       },
@@ -565,7 +630,19 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         patch<{ ok: boolean }>(`/scenes/${id}/categories`, { value }),
       updateTags: (id: string, value: string) =>
         patch<{ ok: boolean }>(`/scenes/${id}/tags`, { value }),
-      generateTitle: (id: string, body: { female?: string; theme?: string; plot?: string }) =>
+      generateTitle: (
+        id: string,
+        body: {
+          female?: string
+          male?: string
+          theme?: string
+          plot?: string
+          wardrobe_f?: string
+          wardrobe_m?: string
+          location?: string
+          props?: string
+        },
+      ) =>
         post<{ title: string }>(`/scenes/${id}/generate-title`, body),
       namingIssues: (id: string) =>
         get<{ scene_id: string; issues: NamingIssue[]; ok: boolean }>(`/scenes/${id}/naming-issues`),
@@ -588,7 +665,17 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<{ id: number; status: string }>("/scripts/save", body),
       validate: (body: { theme: string; plot: string; wardrobe_f: string; wardrobe_m?: string; shoot_location: string; female?: string; male?: string }) =>
         post<{ violations: string[]; passed: boolean }>("/scripts/validate", body),
-      generateTitle: (body: { studio: string; female?: string; theme?: string; plot?: string }) =>
+      generateTitle: (body: {
+        studio: string
+        female?: string
+        male?: string
+        theme?: string
+        plot?: string
+        wardrobe_f?: string
+        wardrobe_m?: string
+        location?: string
+        props?: string
+      }) =>
         post<{ title: string }>("/scripts/title-generate", body),
     },
 
@@ -599,6 +686,16 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<{ scene_id: string; status: string }>("/descriptions/save-grail", body),
       seo: (body: { description: string; studio: string }) =>
         post<{ meta_title: string; meta_description: string }>("/descriptions/seo", body),
+      regenerateParagraph: (body: {
+        studio: string
+        paragraph: string
+        paragraph_index: number
+        performer?: string
+        title?: string
+        plot?: string
+        feedback?: string
+      }) =>
+        post<{ paragraph: string }>("/descriptions/regenerate-paragraph", body),
     },
 
     titles: {
@@ -607,6 +704,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<LocalTitleResult[]>("/titles/local", body),
       refine: (body: { text: string; treatment_name: string; refine_prompt: string; seed?: number }) =>
         post<LocalTitleResult>("/titles/refine", body),
+      modelName: (body: { name: string; studio: string }) =>
+        post<{ data_url: string; error?: string | null }>("/titles/model-name", body),
     },
 
     models: {
@@ -672,12 +771,55 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       list: async () => (await get<UserProfile[]>("/users/")).map(normalizeProfile),
       update: async (email: string, body: UserUpdate) =>
         normalizeProfile(await patch<UserProfile>(`/users/${encodeURIComponent(email)}`, body)),
+      create: async (body: { email: string; name: string; role?: string; allowed_tabs?: string }) =>
+        normalizeProfile(await post<UserProfile>("/users/", body)),
+      remove: (email: string) =>
+        delVoid(`/users/${encodeURIComponent(email)}`),
+    },
+
+    syncOne: (source: string) =>
+      post<{ source: string; row_count: number; status: string }>(`/sync/trigger/${encodeURIComponent(source)}`, {}),
+
+    prompts: {
+      list: () => get<PromptEntry[]>("/prompts/"),
+      get: (key: string) => get<PromptEntry>(`/prompts/${encodeURIComponent(key)}`),
+      save: (key: string, content: string) =>
+        apiFetch<PromptEntry>(`/prompts/${encodeURIComponent(key)}`, token, {
+          method: "PUT",
+          body: JSON.stringify({ content }),
+        }),
+      revert: (key: string) => delVoid(`/prompts/${encodeURIComponent(key)}`),
+    },
+
+    tasks: {
+      list: (filters?: { status?: string; limit?: number }) => {
+        const params = new URLSearchParams()
+        if (filters?.status) params.set("status", filters.status)
+        if (filters?.limit) params.set("limit", String(filters.limit))
+        const qs = params.toString()
+        return get<TaskRow[]>(`/tasks/${qs ? `?${qs}` : ""}`)
+      },
+      stats: () => get<TaskStats>("/tasks/stats"),
     },
 
     notifications: {
       list: (limit = 50) => get<Notification[]>(`/notifications/?limit=${limit}`),
       unreadCount: () => get<{ count: number }>("/notifications/unread-count"),
       markRead: () => post<{ updated: number }>("/notifications/mark-read", {}),
+    },
+
+    calendarEvents: {
+      list: (range?: { from?: string; to?: string }) => {
+        const params = new URLSearchParams()
+        if (range?.from) params.set("from", range.from)
+        if (range?.to) params.set("to", range.to)
+        const qs = params.toString()
+        return get<CalendarEventRow[]>(`/calendar-events/${qs ? `?${qs}` : ""}`)
+      },
+      create: (body: { date: string; title: string; kind?: string; color?: string; notes?: string }) =>
+        post<CalendarEventRow>("/calendar-events/", body),
+      remove: (eventId: string) =>
+        delVoid(`/calendar-events/${encodeURIComponent(eventId)}`),
     },
 
     shoots: {

@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from api.auth import CurrentUser
 from api.config import get_settings
 from api.database import get_db
-from api.prompts import SYSTEM_PROMPT, NJOI_STATIC_PLOT, build_script_prompt
+from api.prompts import SYSTEM_PROMPT, NJOI_STATIC_PLOT, build_script_prompt, get_prompt
 from api.sheets_client import open_scripts, with_retry
 
 _log = logging.getLogger(__name__)
@@ -170,7 +170,8 @@ async def generate_script(body: ScriptGenRequest, user: CurrentUser):
                 body.destination,
                 body.director_note,
             )
-            for delta in ollama_stream("script", prompt, system=SYSTEM_PROMPT, max_tokens=4096, temperature=0.8):
+            sys_p = get_prompt("script.system", fallback=SYSTEM_PROMPT)
+            for delta in ollama_stream("script", prompt, system=sys_p, max_tokens=4096, temperature=0.8):
                 yield f"data: {json.dumps({'type': 'text', 'text': delta})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
@@ -194,7 +195,21 @@ async def save_script(body: ScriptSaveBody, user: CurrentUser):
 
     If script_id is provided, updates that row.
     Otherwise creates a new row.
+
+    Runs the slop filter (see api.slop_filter) across every user-visible
+    field at save time so the model's raw output streams live but the
+    copy that lands in Sheets is post-processed.
     """
+    from api.slop_filter import post_process
+
+    body = body.model_copy(update={
+        "theme": post_process(body.theme or ""),
+        "plot": post_process(body.plot or ""),
+        "wardrobe_f": post_process(body.wardrobe_f or ""),
+        "wardrobe_m": post_process(body.wardrobe_m or ""),
+        "shoot_location": post_process(body.shoot_location or ""),
+        "props": post_process(body.props or ""),
+    })
     now = datetime.now(timezone.utc).isoformat()
 
     with get_db() as conn:
@@ -297,6 +312,16 @@ async def validate_script(body: ValidateBody, user: CurrentUser):
         if first_name in body.plot.lower():
             violations.append(f"Male talent first name '{first_name}' appears in plot — should use 'you' instead")
 
+    # Slop phrase detection — mirrors the Streamlit substitution list so
+    # editors can see exactly which lines the save-time filter will rewrite.
+    try:
+        from api.slop_filter import find_slop
+        violations.extend(find_slop(body.plot))
+        violations.extend(find_slop(body.theme))
+    except Exception:
+        # Non-fatal — slop list is a nice-to-have, not a save-gate.
+        pass
+
     return {"violations": violations, "passed": len(violations) == 0}
 
 
@@ -307,8 +332,13 @@ async def validate_script(body: ValidateBody, user: CurrentUser):
 class TitleGenBody(BaseModel):
     studio: str
     female: str = ""
+    male: str = ""
     theme: str = ""
     plot: str = ""
+    wardrobe_f: str = ""
+    wardrobe_m: str = ""
+    location: str = ""
+    props: str = ""
 
 
 @router.post("/title-generate")
@@ -316,7 +346,14 @@ async def generate_script_title(body: TitleGenBody, user: CurrentUser):
     """Generate an AI title for a script (Claude with Ollama fallback)."""
     try:
         from api.prompts import generate_title_with_fallback
-        title = generate_title_with_fallback(body.studio, body.female, body.theme, body.plot)
+        title = generate_title_with_fallback(
+            body.studio, body.female, body.theme, body.plot,
+            male=body.male,
+            wardrobe_f=body.wardrobe_f,
+            wardrobe_m=body.wardrobe_m,
+            location=body.location,
+            props=body.props,
+        )
         return {"title": title}
     except RuntimeError as exc:
         _log.error("Script title generation failed: %s", exc)

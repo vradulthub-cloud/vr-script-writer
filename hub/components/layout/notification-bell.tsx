@@ -1,17 +1,17 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
-import { Bell, Ticket, RefreshCw, UserCheck, ClipboardList, CheckCircle, Pin } from "lucide-react"
+import { Bell, Ticket, RefreshCw, UserCheck, Pin } from "lucide-react"
 import { signOut } from "next-auth/react"
 import { api, ApiError, type Notification } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 
+// Approval icons removed when the team paused the approvals workflow.
+// Legacy notifications with type approval_* fall through to FallbackIcon.
 const TYPE_ICONS: Record<string, typeof Bell> = {
   ticket_created: Ticket,
   ticket_status: RefreshCw,
   ticket_assigned: UserCheck,
-  approval_submitted: ClipboardList,
-  approval_decided: CheckCircle,
 }
 const FallbackIcon = Pin
 

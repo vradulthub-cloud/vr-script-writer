@@ -38,9 +38,12 @@ export function AssetCells({
       role="group"
       aria-label="Asset status"
       style={{
-        display: "inline-flex",
+        display: "flex",
+        flexWrap: "wrap",
         alignItems: "center",
         gap: compact ? gap : 6,
+        rowGap: compact ? gap : 4,
+        maxWidth: "100%",
         ...style,
       }}
     >

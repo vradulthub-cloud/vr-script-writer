@@ -24,8 +24,10 @@ echo "      Done."
 
 # ── 2. Install / update Python deps ──────────────────────────────────────────
 echo "[2/3] Checking Python deps..."
+# `anthropic` is load-bearing — title generation silently falls back to Ollama
+# (weak, repetitive) when it's missing. Pin it in the install list.
 ssh -i "$SSH_KEY" "$WINDOWS_HOST" \
-  "pip install fastapi uvicorn pydantic-settings gspread google-auth google-auth-oauthlib -q"
+  "pip install fastapi uvicorn pydantic-settings gspread google-auth google-auth-oauthlib anthropic -q"
 echo "      Deps up to date."
 
 # ── 3. Restart / start service ───────────────────────────────────────────────

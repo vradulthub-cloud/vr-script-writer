@@ -113,16 +113,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
     setMnError(null)
     setMnDataUrl(null)
     try {
-      const res = await fetch(`${API_BASE_URL}/api/titles/model-name`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
-        },
-        body: JSON.stringify({ name: mnName.trim(), studio: mnStudio }),
-      })
-      if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => "")}`)
-      const data = await res.json() as { data_url: string; error?: string }
+      const data = await client.titles.modelName({ name: mnName.trim(), studio: mnStudio })
       if (data.error) throw new Error(data.error)
       setMnDataUrl(data.data_url)
     } catch (e) {
@@ -257,8 +248,9 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
         <div className="flex flex-col gap-3">
           {/* Title text (shared) */}
           <div>
-            <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Title text</label>
+            <label htmlFor="title-text-input" className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Title text</label>
             <input
+              id="title-text-input"
               type="text"
               value={titleText}
               onChange={e => setTitleText(e.target.value)}
@@ -315,10 +307,12 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
 
               {/* Variations slider (1-20) */}
               <div>
-                <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                <label htmlFor="title-variations-input" className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
                   Variations: <span style={{ color: "var(--color-text)" }}>{variations}</span>
                 </label>
                 <input
+                  id="title-variations-input"
+                  aria-label={`Variations: ${variations}`}
                   type="range" min={1} max={20} value={variations}
                   onChange={e => setVariations(Number(e.target.value))}
                   className="w-full"
@@ -415,7 +409,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
           className="w-full mt-4 px-3 py-2 rounded text-xs font-semibold transition-colors"
           style={{
             background: (engine === "cloud" ? loading : localLoading) ? "var(--color-elevated)" : "var(--color-lime)",
-            color: (engine === "cloud" ? loading : localLoading) ? "var(--color-text-muted)" : "#0d0d0d",
+            color: (engine === "cloud" ? loading : localLoading) ? "var(--color-text-muted)" : "var(--color-lime-ink)",
             cursor: (engine === "cloud" ? loading : localLoading) ? "wait" : "pointer",
             opacity: (!titleText && !(engine === "cloud" ? loading : localLoading)) ? 0.5 : 1,
           }}
@@ -505,7 +499,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
                   className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
                   style={{
                     background: "var(--color-lime)",
-                    color: "#0d0d0d",
+                    color: "var(--color-lime-ink)",
                   }}
                 >
                   Download{successResults.length > 1 ? ` v${i + 1}` : ""}
@@ -558,7 +552,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
                       <button
                         onClick={() => downloadLocalImage(r.data_url, r.treatment_name)}
                         className="px-2 py-1 rounded text-xs transition-colors"
-                        style={{ background: "var(--color-lime)", color: "#0d0d0d", fontWeight: 600 }}
+                        style={{ background: "var(--color-lime)", color: "var(--color-lime-ink)", fontWeight: 600 }}
                       >
                         Download
                       </button>
@@ -604,8 +598,9 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
 
             {/* Name input */}
             <div style={{ flex: 1 }}>
-              <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Model name</label>
+              <label htmlFor="model-name-input" className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Model name</label>
               <input
+                id="model-name-input"
                 type="text"
                 value={mnName}
                 onChange={e => setMnName(e.target.value)}
@@ -627,7 +622,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
               className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
               style={{
                 background: mnLoading ? "var(--color-elevated)" : "var(--color-lime)",
-                color: mnLoading ? "var(--color-text-muted)" : "#0d0d0d",
+                color: mnLoading ? "var(--color-text-muted)" : "var(--color-lime-ink)",
                 cursor: mnLoading ? "wait" : "pointer",
                 opacity: (!mnName.trim() && !mnLoading) ? 0.5 : 1,
                 whiteSpace: "nowrap",
@@ -661,7 +656,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
               <button
                 onClick={downloadModelName}
                 className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-                style={{ background: "var(--color-lime)", color: "#0d0d0d" }}
+                style={{ background: "var(--color-lime)", color: "var(--color-lime-ink)" }}
               >
                 Download {mnStudio} — {mnName}
               </button>

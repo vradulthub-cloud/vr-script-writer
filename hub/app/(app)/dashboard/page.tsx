@@ -1,10 +1,12 @@
 import Link from "next/link"
 import { AlertTriangle } from "lucide-react"
 import { auth } from "@/auth"
-import { api, type SceneStats, type Shoot } from "@/lib/api"
+import { api, type Scene, type SceneStats, type Shoot } from "@/lib/api"
 import { studioColor, studioAbbr } from "@/lib/studio-colors"
+import { isEclatechV2 } from "@/lib/eclatech-flag"
 import { PageHeader } from "@/components/ui/page-header"
 import { Panel } from "@/components/ui/panel"
+import { WeekCalendar } from "@/components/ui/week-calendar"
 import { NotificationFeed } from "./notification-feed"
 import { TriageFeed } from "./triage-feed"
 
@@ -16,9 +18,12 @@ export default async function DashboardPage() {
   const session = await auth()
   const client = api(session)
   const idToken = (session as { idToken?: string } | null)?.idToken
+  const v2 = await isEclatechV2()
 
+  // Approvals removed from the dashboard for now — the team isn't using
+  // the approvals workflow yet. The /approvals route + API are gone too;
+  // bring them back via git when the workflow's needed.
   const [
-    approvalRes,
     sceneStatsRes,
     scriptsRes,
     notificationsRes,
@@ -26,7 +31,6 @@ export default async function DashboardPage() {
     shootsRes,
     ...missingResults
   ] = await Promise.allSettled([
-    client.approvals.list("Pending"),
     client.scenes.stats(),
     client.scripts.list({ needs_script: true }),
     client.notifications.list(12),
@@ -35,7 +39,6 @@ export default async function DashboardPage() {
     ...STUDIOS.map(s => client.scenes.list({ studio: s, limit: 3, missing_only: true })),
   ])
 
-  const approvals      = approvalRes.status      === "fulfilled" ? approvalRes.value      : []
   const sceneStats     = sceneStatsRes.status    === "fulfilled" ? sceneStatsRes.value    : null
   const scripts        = scriptsRes.status       === "fulfilled" ? scriptsRes.value       : []
   const notifications  = notificationsRes.status === "fulfilled" ? notificationsRes.value : []
@@ -96,11 +99,14 @@ export default async function DashboardPage() {
 
         <div className="flex flex-col gap-3.5">
           {sceneStats && Object.keys(sceneStats.by_studio).length > 0 && (
-            <ProductionScopeStrip stats={sceneStats} />
+            v2
+              ? <ProductionScopeStripV2 stats={sceneStats} shootCount={shoots.length} />
+              : <ProductionScopeStrip stats={sceneStats} />
           )}
 
+          {v2 && shoots.length > 0 && <WeekCalendar shoots={shoots} />}
+
           <TriageFeed
-            initialApprovals={approvals}
             missingScenes={missingScenes}
             missingTotal={sceneStats?.missing_any ?? 0}
             scripts={scripts}
@@ -109,6 +115,8 @@ export default async function DashboardPage() {
         </div>
 
         <div className="flex flex-col gap-3.5">
+          {v2 && <DueSoonPanel scenes={missingScenes} />}
+
           <AgingShootsPanel shoots={shoots} />
 
           <NotificationFeed
@@ -127,6 +135,115 @@ export default async function DashboardPage() {
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
+
+function ProductionScopeStripV2({ stats, shootCount }: { stats: SceneStats; shootCount: number }) {
+  const entries = Object.entries(stats.by_studio).sort(([, a], [, b]) => b - a)
+  const max = Math.max(1, ...entries.map(([, n]) => n))
+  return (
+    <div>
+      <div className="ec-stats">
+        <div className="s">
+          <div className="k">Scenes live</div>
+          <div className="v">{stats.total.toLocaleString()}</div>
+          <div className="d">{stats.missing_any.toLocaleString()} missing</div>
+        </div>
+        <div className="s">
+          <div className="k">Shoots</div>
+          <div className="v">{shootCount}<span className="unit">active</span></div>
+          <div className="d">Across 4 studios</div>
+        </div>
+        <div className="s">
+          <div className="k">Studios</div>
+          <div className="v">4</div>
+          <div className="d">FPVR · VRH · VRA · NJOI</div>
+        </div>
+      </div>
+      <div className="ec-strip">
+        <div className="label">Production</div>
+        {entries.slice(0, 4).map(([studio, count]) => {
+          const key = studioAbbr(studio).toLowerCase()
+          return (
+            <div key={studio} className={`cell ${key}`}>
+              <div className="mono">{studioAbbr(studio)}</div>
+              <div className="big">{count.toLocaleString()}<sup>SCN</sup></div>
+              <div className="bar" style={{ width: `${Math.round((count / max) * 100)}%` }} />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function DueSoonPanel({ scenes }: { scenes: Scene[] }) {
+  const now = Date.now()
+  const WEEK = 7 * 24 * 60 * 60 * 1000
+  const upcoming = scenes
+    .filter(s => {
+      const t = Date.parse(s.release_date || "")
+      if (!Number.isFinite(t)) return false
+      const delta = t - now
+      return delta > -WEEK && delta < WEEK * 2 // -7d through +14d
+    })
+    .sort((a, b) => (a.release_date ?? "").localeCompare(b.release_date ?? ""))
+    .slice(0, 6)
+
+  return (
+    <Panel
+      title="Due Soon"
+      count={upcoming.length > 0 ? upcoming.length : undefined}
+      action={
+        <Link href="/missing" style={{ fontSize: 10, color: "var(--color-text-faint)", textDecoration: "none" }}>
+          All missing →
+        </Link>
+      }
+    >
+      {upcoming.length === 0 ? (
+        <div style={{ padding: "16px 14px", textAlign: "center", color: "var(--color-text-faint)", fontSize: 12 }}>
+          Nothing on deck ✓
+        </div>
+      ) : (
+        <div>
+          {upcoming.map((s, i) => {
+            const accent = studioColor(s.studio)
+            const missingBits: string[] = []
+            if (!s.has_videos) missingBits.push("videos")
+            if (!s.has_thumbnail) missingBits.push("thumb")
+            if (!s.has_description) missingBits.push("desc")
+            if (!s.has_photos) missingBits.push("photos")
+            return (
+              <Link
+                key={s.id}
+                href={`/missing?scene=${encodeURIComponent(s.id)}`}
+                className="hover:bg-[--color-elevated]"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 14px",
+                  borderBottom: i < upcoming.length - 1 ? "1px solid var(--color-border-subtle, var(--color-border))" : undefined,
+                  textDecoration: "none",
+                  color: "inherit",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ fontFamily: "var(--font-mono)", color: accent, fontWeight: 700, marginRight: 8 }}>{s.id}</span>
+                    {s.female && <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>{s.female}{s.male ? ` / ${s.male}` : ""}</span>}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 2 }}>
+                    {s.release_date}
+                    {missingBits.length > 0 && <span style={{ color: "var(--color-err)" }}> · missing {missingBits.join(", ")}</span>}
+                  </div>
+                </div>
+              </Link>
+            )
+          })}
+        </div>
+      )}
+    </Panel>
+  )
+}
 
 function ProductionScopeStrip({ stats }: { stats: SceneStats }) {
   const entries = Object.entries(stats.by_studio).sort(([, a], [, b]) => b - a)
@@ -151,7 +268,6 @@ function ProductionScopeStrip({ stats }: { stats: SceneStats }) {
         const abbr  = studioAbbr(studio)
         return (
           <span key={studio} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-            <span aria-hidden="true" style={{ width: 2, height: 10, background: color, borderRadius: 1, display: "inline-block" }} />
             <span style={{ fontWeight: 700, color, letterSpacing: "0.04em" }}>{abbr}</span>
             <span style={{ fontVariantNumeric: "tabular-nums", color: "var(--color-text)" }}>
               {count.toLocaleString()}
@@ -231,12 +347,13 @@ function AgingShootsPanel({ shoots }: { shoots: Shoot[] }) {
                   color: "inherit",
                 }}
               >
-                <span
-                  aria-hidden="true"
-                  style={{ width: 2, height: 22, background: accent, borderRadius: 1, flexShrink: 0 }}
-                />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {primaryStudio && (
+                      <span style={{ fontFamily: "var(--font-mono)", color: accent, fontWeight: 700, marginRight: 8, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                        {primaryStudio.slice(0, 4)}
+                      </span>
+                    )}
                     {s.female_talent}
                     {s.male_talent && <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}> / {s.male_talent}</span>}
                   </div>

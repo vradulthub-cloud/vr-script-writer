@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from api.auth import CurrentUser
 from api.config import get_settings
 from api.database import get_db
-from api.prompts import DESC_SYSTEMS, DESC_COMPILATION_SYSTEMS, STUDIO_KEY_MAP
+from api.prompts import DESC_SYSTEMS, DESC_COMPILATION_SYSTEMS, STUDIO_KEY_MAP, get_prompt
 
 _log = logging.getLogger(__name__)
 
@@ -69,6 +69,16 @@ class DocxRequest(BaseModel):
     meta_description: str | None = None
 
 
+class ParagraphRegenRequest(BaseModel):
+    studio: str                     # "FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"
+    paragraph: str                  # Current paragraph body
+    paragraph_index: int            # 0-based index, for prompt context
+    performer: str = ""
+    title: str = ""                 # Scene title
+    plot: str = ""                  # Scene plot (truncated in prompt)
+    feedback: str = ""              # Optional director-style nudge
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -88,8 +98,13 @@ async def generate_description(body: DescGenRequest, user: CurrentUser):
             detail=f"Unknown studio: {body.studio}. Must be one of: {', '.join(STUDIO_KEY_MAP.keys())}",
         )
 
-    prompt_dict = DESC_COMPILATION_SYSTEMS if body.is_compilation else DESC_SYSTEMS
-    system_prompt = prompt_dict.get(studio_key)
+    # Read via get_prompt so admin overrides apply without a restart.
+    # Bundled defaults are still the fallback when no override exists.
+    prompt_key = (
+        f"desc_comp.{studio_key}" if body.is_compilation else f"desc.{studio_key}"
+    )
+    fallback_dict = DESC_COMPILATION_SYSTEMS if body.is_compilation else DESC_SYSTEMS
+    system_prompt = get_prompt(prompt_key, fallback=fallback_dict.get(studio_key, ""))
     if not system_prompt:
         raise HTTPException(
             status_code=400,
@@ -123,6 +138,64 @@ async def generate_description(body: DescGenRequest, user: CurrentUser):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/regenerate-paragraph")
+async def regenerate_paragraph(body: ParagraphRegenRequest, user: CurrentUser):
+    """
+    Rewrite a single paragraph of a scene description. Uses the same per-studio
+    system prompt as /generate so tone/voice stays consistent with the rest.
+
+    The user types an optional feedback nudge ("make it steamier", "more POV",
+    etc.); we feed it alongside the current paragraph and scene context and
+    return the new text as plain JSON — no streaming, since a single paragraph
+    regen is fast enough that a loading spinner is fine.
+    """
+    studio_key = STUDIO_KEY_MAP.get(body.studio)
+    if not studio_key:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown studio: {body.studio}",
+        )
+    system_prompt = get_prompt(f"desc.{studio_key}", fallback=DESC_SYSTEMS.get(studio_key, ""))
+    if not system_prompt:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No description prompt for studio: {studio_key}",
+        )
+
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    nudge = f"\n\nEditor feedback: {body.feedback.strip()}" if body.feedback.strip() else ""
+    user_prompt = (
+        f"Rewrite ONLY paragraph {body.paragraph_index + 1} of the scene description. "
+        f"Keep the same voice, tense, and POV as the surrounding description.\n\n"
+        f"Scene context:\n"
+        f"- Performer: {body.performer or '(unspecified)'}\n"
+        f"- Title: {body.title or '(untitled)'}\n"
+        f"- Plot: {(body.plot or '')[:400]}\n\n"
+        f"Current paragraph:\n{body.paragraph}\n"
+        f"{nudge}\n\n"
+        f"Output ONLY the new paragraph body — no title, no meta, no headings. "
+        f"Keep it roughly the same length."
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=600,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        new_text = msg.content[0].text.strip() if msg.content else ""
+    except Exception as exc:
+        _log.error("Paragraph regeneration failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Claude error: {exc}") from exc
+
+    return {"paragraph": new_text}
 
 
 @router.post("/seo")

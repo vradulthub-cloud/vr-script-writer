@@ -192,8 +192,16 @@ async def list_tickets(
     project: Optional[str] = None,
     priority: Optional[str] = None,
     assignee: Optional[str] = None,
+    type_filter: Optional[str] = Query(None, alias="type"),
+    limit: Optional[int] = Query(None, ge=1, le=500),
 ):
-    """List tickets with optional filters."""
+    """List tickets with optional filters.
+
+    `type=Audit` is the underlying primitive for the admin audit log — every
+    permission change is written as a synthetic Audit ticket (see
+    users-panel.tsx). Capping with `limit` lets the audit panel ask for just
+    the most recent N rows without paying for the whole table.
+    """
     query = "SELECT * FROM tickets WHERE 1=1"
     params: list = []
 
@@ -209,8 +217,13 @@ async def list_tickets(
     if assignee:
         query += " AND assignee = ?"
         params.append(assignee)
+    if type_filter:
+        query += " AND type = ?"
+        params.append(type_filter)
 
     query += " ORDER BY submitted_at DESC"
+    if limit:
+        query += f" LIMIT {int(limit)}"
 
     with get_db() as conn:
         rows = conn.execute(query, params).fetchall()

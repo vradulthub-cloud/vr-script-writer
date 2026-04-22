@@ -331,41 +331,48 @@ STUDIO_KEY_MAP: dict[str, str] = {
 TITLE_GEN_SYSTEMS: dict[str, str] = {
     "VRHush": (
         "You are a creative title writer for VRHush, a premium VR adult content studio. "
-        "Generate exactly ONE scene title. Rules: 2-3 words ONLY, clever double-entendres or "
-        "wordplay strongly preferred, hint at theme without being literal, no performer names, "
-        "no generic porn titles, no all-caps. "
-        "Real VRH titles for reference — match this tone and length: "
-        "Heat By Design, Born To Breed, Under Her Spell, Intimate Renderings, "
-        "She Blooms on Command, Nailing the Interview, Deep Focus, Behind Closed Doors, "
-        "The Long Game, Perfectly Still, Earning It, All In, "
-        "Private Practice, Stay After Class, The Right Fit. "
+        "Generate exactly ONE scene title that reflects the actual plot/theme you're given. "
+        "The title MUST hook into a concrete hook from the script — the setup, the setting, "
+        "a prop, the wardrobe, the role, or a beat of the action. Do not invent content that "
+        "isn't in the script. "
+        "Form: 2-4 words, title case, clever wordplay/double-entendre preferred over literal "
+        "description, no performer names, no generic porn clichés, no all-caps. "
+        "Reference tone — these are real VRH titles, match this voice (NOT content): "
+        "Heat By Design, Born To Breed, Under Her Spell, Nailing the Interview, "
+        "Deep Focus, Behind Closed Doors, Private Practice, Stay After Class, The Right Fit, "
+        "Earning It. "
         "Respond with ONLY the title — no explanation, no quotes."
     ),
     "FuckPassVR": (
         "You are a creative title writer for FuckPassVR, a premium VR travel-and-intimacy studio. "
-        "Generate exactly ONE scene title. Rules: 2-5 words, travel or destination themes when "
-        "applicable, clever wordplay preferred, no performer names, no all-caps. "
-        "Real FPVR titles for reference — match this tone: "
-        "The Grind Finale, Eager Beaver, Deep Devotion, Fully Seated Affair, "
-        "Behind the Curtain, The Bouncing Layover, Last Night in Lisbon, "
-        "Checked In, The Long Layover, Passport to Paradise, "
-        "Her City Her Rules, Local Knowledge, First Class Upgrade. "
+        "Generate exactly ONE scene title that reflects the actual plot/theme. If the script "
+        "names a destination, city, or travel setup, the title should lean into it. The title "
+        "MUST hook into a concrete element from the script — the destination, the setting, a "
+        "prop, the wardrobe, or a beat of the action. Do not invent content that isn't in the script. "
+        "Form: 2-5 words, title case, clever wordplay preferred, no performer names, no all-caps. "
+        "Reference tone — real FPVR titles, match this voice (NOT content): "
+        "The Grind Finale, Eager Beaver, Fully Seated Affair, The Bouncing Layover, "
+        "Last Night in Lisbon, Checked In, Passport to Paradise, Her City Her Rules, "
+        "Local Knowledge, First Class Upgrade. "
         "Respond with ONLY the title — no explanation, no quotes."
     ),
     "VRAllure": (
         "You are a creative title writer for VRAllure, a premium VR solo/intimate studio. "
-        "Generate exactly ONE scene title. Rules: 2-3 words ONLY, sensual/intimate/soft tone, "
-        "suggestive but elegant, no performer names, no crude language, no all-caps. "
-        "Real VRA titles for reference — match this tone: "
-        "Sweet Surrender, Rise and Grind, Always on Top, A Swift Release, "
-        "She Came to Play, Hovering With Intent, Just for You, "
-        "Slow Burn, Perfectly Undone, Something to Watch, "
-        "Touch and Go, Open Invitation, All to Herself. "
-        "Respond with ONLY the title — no explanation, no quotes."
+        "Generate scene titles that hook into the script's concrete details. "
+        "Each title MUST reference something concrete from the script — a wardrobe piece, "
+        "a prop, a beat of action, a specific gesture or mood — NOT the theme word. "
+        "Do not invent content that isn't there. Do not restate the theme verbatim. "
+        "Form: 2-4 words, title case, sensual/intimate/soft tone, suggestive but elegant, "
+        "no performer names, no crude language, no all-caps. "
+        "Reference tone — real VRA titles, match this voice (NOT content, NOT subject matter): "
+        "Sweet Surrender, Always on Top, A Swift Release, Hovering With Intent, "
+        "Just for You, Slow Burn, Perfectly Undone, Something to Watch, "
+        "Touch and Go, Open Invitation, All to Herself."
     ),
     "NaughtyJOI": (
         "You are a creative title writer for NaughtyJOI, a premium VR JOI studio. "
-        "Generate a PAIRED title using the performer's first name: "
+        "Generate a PAIRED title using the performer's first name. Both lines should reflect "
+        "the script's actual setup, wardrobe, or props when given. "
         "line 1: '[Name] [soft intimate verb phrase]' "
         "line 2: '[Name] [more intense/commanding verb phrase]' "
         "Keep each line 3-5 words. Tone should be teasing and commanding. "
@@ -379,9 +386,18 @@ def generate_title_with_fallback(
     female: str,
     theme: str,
     plot: str,
+    *,
+    male: str = "",
+    wardrobe_f: str = "",
+    wardrobe_m: str = "",
+    location: str = "",
+    props: str = "",
 ) -> str:
     """
     Generate a scene title — tries Claude first, falls back to Ollama.
+
+    The prompt is fed the full script so the title hooks into a concrete beat
+    (setting, prop, wardrobe, role) instead of riffing on an empty brief.
 
     Claude produces better creative results; Ollama (dolphin3, uncensored) is
     the fallback when Claude refuses due to content policy or is unreachable.
@@ -389,17 +405,67 @@ def generate_title_with_fallback(
     import logging
     _log = logging.getLogger(__name__)
 
-    sys_prompt = TITLE_GEN_SYSTEMS.get(studio, TITLE_GEN_SYSTEMS["VRHush"])
-    user_prompt = (
-        f"Generate a title for this scene:\n\n"
-        f"Performer: {female}\n"
-        f"Theme: {theme}\n"
-        f"Plot summary: {plot[:500] if plot else 'N/A'}\n\n"
-        "Generate the title now."
-    )
+    # Read via get_prompt so admin overrides land here without a redeploy.
+    # The bundled default still wins if the studio key isn't in PROMPT_DEFAULTS.
+    sys_prompt = get_prompt(f"title.{studio}", fallback=TITLE_GEN_SYSTEMS.get(studio, TITLE_GEN_SYSTEMS["VRHush"]))
 
-    def _clean(raw: str) -> str:
-        return raw.split("\n")[0].strip().strip('"').strip("'")
+    # Build the user prompt from whichever script fields are populated. Empty
+    # fields are skipped entirely so the model doesn't anchor on "N/A".
+    lines: list[str] = ["Generate 5 distinct title candidates for this scene.\n\nScript:"]
+    if female:     lines.append(f"- Female performer: {female}")
+    if male:       lines.append(f"- Male performer: {male}")
+    if theme:      lines.append(f"- Theme (internal working name — DO NOT reuse verbatim): {theme}")
+    if location:   lines.append(f"- Location / set: {location}")
+    if wardrobe_f: lines.append(f"- Wardrobe (f): {wardrobe_f}")
+    if wardrobe_m: lines.append(f"- Wardrobe (m): {wardrobe_m}")
+    if props:      lines.append(f"- Props: {props}")
+    if plot:       lines.append(f"- Plot: {plot[:800]}")
+    lines.append(
+        "\nInstructions:\n"
+        "- Each of the 5 titles must hook into a DIFFERENT concrete detail "
+        "(one from wardrobe, one from a prop, one from a beat of action, one from "
+        "tone/mood, one from role/setup) — not all five from the same hook.\n"
+        "- DO NOT restate the theme word-for-word. The theme is an internal working "
+        "name; your job is to replace it, not echo it.\n"
+        "- DO NOT invent content that isn't in the script.\n"
+        "- Output ONLY the 5 titles, one per line, no numbering, no quotes, no commentary."
+    )
+    user_prompt = "\n".join(lines)
+
+    def _clean_one(raw: str) -> str:
+        # Strip numbering like "1. ", "1) ", leading bullets, quotes.
+        import re as _re
+        s = raw.strip()
+        s = _re.sub(r"^[\d]+[\.\)]\s*", "", s)
+        s = _re.sub(r"^[-•·*]\s*", "", s)
+        return s.strip().strip('"').strip("'").strip()
+
+    def _pick_from_candidates(raw: str) -> str:
+        # Take all non-empty lines, clean them, drop dupes, pick the first that
+        # doesn't just echo the theme. Returning a single title keeps the
+        # existing {title: str} API contract — the variety comes from making
+        # each *call* land on a fresh line.
+        import random as _random
+        lines_out = [_clean_one(l) for l in raw.splitlines()]
+        lines_out = [l for l in lines_out if l]
+        # De-duplicate while preserving order
+        seen: set[str] = set()
+        uniq: list[str] = []
+        for l in lines_out:
+            key = l.lower()
+            if key in seen: continue
+            seen.add(key)
+            uniq.append(l)
+        # Deprioritize any candidate that starts with the theme's first word
+        theme_first = (theme.split()[0].lower() if theme else "")
+        if theme_first and len(uniq) > 1:
+            uniq.sort(key=lambda t: t.lower().startswith(theme_first))
+        if not uniq:
+            return ""
+        # Random pick from the top half so repeated clicks produce variety even
+        # when Claude returns the same 5 candidates.
+        top = uniq[:max(3, len(uniq) // 2 + 1)]
+        return _random.choice(top) if top else uniq[0]
 
     # --- Try Claude (haiku — fast, cheap, creative) ---
     try:
@@ -410,22 +476,28 @@ def generate_title_with_fallback(
             client = _anthropic.Anthropic(api_key=settings.anthropic_api_key)
             msg = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=60,
+                max_tokens=200,
+                # Max-creativity sampling. claude-haiku-4-5 rejects temperature
+                # and top_p together (400 invalid_request_error), so only pass
+                # temperature here.
+                temperature=1.0,
                 system=sys_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             )
             text = msg.content[0].text if msg.content else ""
             if text.strip():
-                return _clean(text)
+                picked = _pick_from_candidates(text)
+                if picked:
+                    return picked
     except Exception as exc:
         _log.warning("Claude title generation failed (%s), falling back to Ollama", exc)
 
     # --- Ollama fallback ---
     from api.ollama_client import ollama_generate
     title = ollama_generate(
-        "title", user_prompt, system=sys_prompt, max_tokens=60, temperature=0.7
+        "title", user_prompt, system=sys_prompt, max_tokens=200, temperature=1.0
     )
-    return _clean(title)
+    return _pick_from_candidates(title) or _clean_one(title)
 
 
 # ---------------------------------------------------------------------------
@@ -486,3 +558,69 @@ def build_script_prompt(
         )
 
     return "\n".join(prompt_parts)
+
+
+# ---------------------------------------------------------------------------
+# Editable prompt registry + override-aware getter
+# ---------------------------------------------------------------------------
+# The admin panel exposes a fixed set of prompt keys for editing. Each key
+# maps to a default string bundled in this module; an override row in the
+# `prompt_overrides` SQLite table takes precedence when present.
+#
+# To make a prompt editable: add a (key, label, group, default) entry to
+# PROMPT_REGISTRY below, then have the call site read it via get_prompt(key)
+# instead of accessing the constant directly.
+
+PROMPT_REGISTRY: list[dict[str, str]] = [
+    # Title generation — one per studio
+    {"key": "title.VRHush",     "label": "Title — VRHush",     "group": "Titles",       "default": TITLE_GEN_SYSTEMS["VRHush"]},
+    {"key": "title.FuckPassVR", "label": "Title — FuckPassVR", "group": "Titles",       "default": TITLE_GEN_SYSTEMS["FuckPassVR"]},
+    {"key": "title.VRAllure",   "label": "Title — VRAllure",   "group": "Titles",       "default": TITLE_GEN_SYSTEMS["VRAllure"]},
+    {"key": "title.NaughtyJOI", "label": "Title — NaughtyJOI", "group": "Titles",       "default": TITLE_GEN_SYSTEMS["NaughtyJOI"]},
+    # Scene descriptions — one per studio (regular)
+    {"key": "desc.FPVR",        "label": "Description — FuckPassVR", "group": "Descriptions", "default": DESC_SYSTEMS["FPVR"]},
+    {"key": "desc.VRH",         "label": "Description — VRHush",     "group": "Descriptions", "default": DESC_SYSTEMS["VRH"]},
+    {"key": "desc.VRA",         "label": "Description — VRAllure",   "group": "Descriptions", "default": DESC_SYSTEMS["VRA"]},
+    {"key": "desc.NJOI",        "label": "Description — NaughtyJOI", "group": "Descriptions", "default": DESC_SYSTEMS["NJOI"]},
+    # Compilation descriptions
+    {"key": "desc_comp.FPVR",   "label": "Compilation Desc — FuckPassVR", "group": "Compilations", "default": DESC_COMPILATION_SYSTEMS["FPVR"]},
+    {"key": "desc_comp.VRH",    "label": "Compilation Desc — VRHush",     "group": "Compilations", "default": DESC_COMPILATION_SYSTEMS["VRH"]},
+    {"key": "desc_comp.VRA",    "label": "Compilation Desc — VRAllure",   "group": "Compilations", "default": DESC_COMPILATION_SYSTEMS["VRA"]},
+    {"key": "desc_comp.NJOI",   "label": "Compilation Desc — NaughtyJOI", "group": "Compilations", "default": DESC_COMPILATION_SYSTEMS["NJOI"]},
+    # Script generation — shared system prompt for VRH + FPVR
+    {"key": "script.system",    "label": "Script Generation — System Prompt", "group": "Scripts", "default": SYSTEM_PROMPT},
+]
+
+PROMPT_DEFAULTS: dict[str, str] = {p["key"]: p["default"] for p in PROMPT_REGISTRY}
+
+
+def get_prompt(key: str, fallback: str | None = None) -> str:
+    """
+    Read the active text for a prompt key, preferring the SQLite override.
+
+    The fallback chain is:
+      1. prompt_overrides row content (admin-edited)
+      2. PROMPT_DEFAULTS entry (bundled in this module)
+      3. The fallback argument (caller-provided last resort)
+      4. Empty string
+
+    Reads are dirt cheap — single-row PK lookup against an in-process SQLite
+    DB — but we still hold the connection open for as little time as possible
+    so concurrent writers (which there aren't right now, but might be later)
+    don't get queued behind us.
+    """
+    try:
+        from api.database import get_db
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT content FROM prompt_overrides WHERE prompt_key=?",
+                (key,),
+            ).fetchone()
+        if row:
+            return dict(row)["content"]
+    except Exception:
+        # Schema not migrated yet, or table empty — fall through to defaults.
+        pass
+    if key in PROMPT_DEFAULTS:
+        return PROMPT_DEFAULTS[key]
+    return fallback if fallback is not None else ""

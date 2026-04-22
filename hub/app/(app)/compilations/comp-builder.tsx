@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { useStream } from "@/lib/sse"
 import { api, API_BASE_URL, type Scene, type ExistingComp } from "@/lib/api"
 import { StudioBadge } from "@/components/ui/studio-badge"
@@ -9,6 +9,8 @@ import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 import { PageHeader } from "@/components/ui/page-header"
+import { ExistingCompModal } from "@/components/ui/existing-comp-modal"
+import { studioAbbr } from "@/lib/studio-colors"
 
 type Mode = "ideas" | "builder" | "existing"
 
@@ -26,6 +28,14 @@ interface ParsedIdea {
   title: string
   concept: string
   talent: string
+}
+
+const STUDIO_COMP_PREFIX: Record<string, string> = {
+  FuckPassVR: "FPVR", VRHush: "VRH", VRAllure: "VRA", NaughtyJOI: "NNJOI",
+}
+
+function photosetCompId(studio: string): string {
+  return `${STUDIO_COMP_PREFIX[studio] ?? "FPVR"}-COMP-XXXX`
 }
 
 function parseIdeas(raw: string): ParsedIdea[] {
@@ -112,6 +122,9 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
 
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
+  const [grailSaving, setGrailSaving] = useState(false)
+  const [grailMsg, setGrailMsg] = useState<string | null>(null)
+  const [photosetOpen, setPhotosetOpen] = useState(false)
 
   // Detect volume series: given an idea title, scan existing comps whose
   // titles share a root (after stripping "Vol. N" / "Best X" suffixes) and
@@ -198,36 +211,81 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
     }
   }
 
+  async function saveToGrail() {
+    if (selected.length === 0) return
+    setGrailSaving(true)
+    setGrailMsg(null)
+    try {
+      const res = await api(idToken ?? null).compilations.grailWrite({
+        studio,
+        title: title || "Untitled Compilation",
+        scene_ids: selected,
+      })
+      setGrailMsg(`✓ Flagged ${res.scene_count} scene${res.scene_count === 1 ? "" : "s"} as compilation.`)
+    } catch (e) {
+      setGrailMsg(e instanceof Error ? e.message : "Grail write failed")
+    } finally {
+      setGrailSaving(false)
+    }
+  }
+
   const studioColor = STUDIO_COLOR[studio]
 
-  const modeLabel = mode === "ideas" ? "Suggest Ideas" : mode === "builder" ? "Build Comp" : "Existing"
+  const modeLabel = mode === "ideas" ? "IDEAS" : mode === "builder" ? "BUILDER" : "EXISTING"
+  // V2 subtitle — one line that tells the user the state of this tab.
+  const subtitle = mode === "ideas"
+    ? `${parsedIdeas.length > 0 ? `${parsedIdeas.length} ideas generated` : "Generate themed compilation concepts"}`
+    : mode === "builder"
+      ? `${selected.length} scene${selected.length === 1 ? "" : "s"} selected${title ? ` · ${title}` : ""}`
+      : `${existingComps.length} ${studioAbbr(studio)} compilation${existingComps.length === 1 ? "" : "s"} on file`
 
   return (
     <div>
       <PageHeader
         title="Compilations"
-        eyebrow={modeLabel}
+        eyebrow={`PACKAGING · ${modeLabel} · ${studioAbbr(studio)}`}
+        subtitle={subtitle}
         studioAccent={studio}
         actions={
           <>
             <StudioSelector value={studio} onChange={(s) => { setStudio(s); setSelected([]) }} />
             <div
-              className="flex rounded overflow-hidden"
-              style={{ border: "1px solid var(--color-border)" }}
+              className="ec-seg"
+              role="tablist"
+              aria-label="Compilation mode"
+              style={{
+                display: "inline-flex",
+                border: "1px solid var(--color-border)",
+                background: "var(--color-surface)",
+                borderRadius: 4,
+                overflow: "hidden",
+              }}
             >
-              {(["ideas", "builder", "existing"] as Mode[]).map(m => (
-                <button
-                  key={m}
-                  onClick={() => setMode(m)}
-                  className="px-3 py-1 text-xs transition-colors capitalize"
-                  style={{
-                    background: mode === m ? "var(--color-elevated)" : "transparent",
-                    color: mode === m ? "var(--color-text)" : "var(--color-text-muted)",
-                  }}
-                >
-                  {m === "ideas" ? "Suggest Ideas" : m === "builder" ? "Build Comp" : "Existing"}
-                </button>
-              ))}
+              {(["ideas", "builder", "existing"] as Mode[]).map((m, i, arr) => {
+                const active = mode === m
+                return (
+                  <button
+                    key={m}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setMode(m)}
+                    style={{
+                      padding: "6px 14px",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: "0.1em",
+                      textTransform: "uppercase",
+                      background: active ? "var(--color-text)" : "transparent",
+                      color: active ? "var(--color-base)" : "var(--color-text-muted)",
+                      border: "none",
+                      borderRight: i < arr.length - 1 ? "1px solid var(--color-border)" : undefined,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {m === "ideas" ? "Ideas" : m === "builder" ? "Builder" : "Existing"}
+                  </button>
+                )
+              })}
             </div>
           </>
         }
@@ -273,7 +331,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                 className="w-full px-3 py-2 rounded text-xs font-semibold transition-colors"
                 style={{
                   background: ideasStream.streaming ? "var(--color-elevated)" : "var(--color-lime)",
-                  color: ideasStream.streaming ? "var(--color-text-muted)" : "#0d0d0d",
+                  color: ideasStream.streaming ? "var(--color-text-muted)" : "var(--color-lime-ink)",
                   cursor: ideasStream.streaming ? "wait" : "pointer",
                 }}
               >
@@ -511,7 +569,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
               className="w-full mt-4 px-3 py-2 rounded text-xs font-semibold transition-colors"
               style={{
                 background: descStream.streaming ? "var(--color-elevated)" : "var(--color-lime)",
-                color: descStream.streaming ? "var(--color-text-muted)" : "#0d0d0d",
+                color: descStream.streaming ? "var(--color-text-muted)" : "var(--color-lime-ink)",
                 cursor: descStream.streaming ? "wait" : "pointer",
                 opacity: (selected.length === 0 && !descStream.streaming) ? 0.5 : 1,
               }}
@@ -547,20 +605,90 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                 </div>
 
                 {!descStream.streaming && descStream.output && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={saveCompilation}
-                      disabled={saving}
-                      className="px-3 py-1.5 rounded text-xs font-semibold"
-                      style={{ background: "var(--color-lime)", color: "#0d0d0d", opacity: saving ? 0.5 : 1 }}
-                    >
-                      {saving ? "Saving…" : "Save Compilation"}
-                    </button>
-                    {saveMsg && (
-                      <span style={{ fontSize: 11, color: saveMsg === "Saved." ? "var(--color-ok)" : "var(--color-err)" }}>
-                        {saveMsg}
-                      </span>
-                    )}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={saveCompilation}
+                        disabled={saving}
+                        className="px-3 py-1.5 rounded text-xs font-semibold"
+                        style={{ background: "var(--color-lime)", color: "var(--color-lime-ink)", opacity: saving ? 0.5 : 1 }}
+                      >
+                        {saving ? "Saving…" : "Save to Planning Sheet"}
+                      </button>
+                      <button
+                        onClick={saveToGrail}
+                        disabled={grailSaving || selected.length === 0}
+                        title="Flag selected scenes as is_compilation in the Grail DB"
+                        className="px-3 py-1.5 rounded text-xs font-semibold"
+                        style={{
+                          background: "transparent",
+                          color: "var(--color-text)",
+                          border: "1px solid var(--color-border)",
+                          cursor: grailSaving ? "wait" : "pointer",
+                          opacity: grailSaving || selected.length === 0 ? 0.5 : 1,
+                        }}
+                      >
+                        {grailSaving ? "Writing…" : "Add to Grail Sheet"}
+                      </button>
+                      {saveMsg && (
+                        <span style={{ fontSize: 11, color: saveMsg.startsWith("Saved") ? "var(--color-ok)" : "var(--color-err)" }}>
+                          {saveMsg}
+                        </span>
+                      )}
+                      {grailMsg && (
+                        <span style={{ fontSize: 11, color: grailMsg.startsWith("✓") ? "var(--color-ok)" : "var(--color-err)" }}>
+                          {grailMsg}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Photoset build helper — copy-paste command for the local Mac script */}
+                    <div style={{ border: "1px solid var(--color-border)", borderRadius: 4, background: "var(--color-surface)" }}>
+                      <button
+                        type="button"
+                        onClick={() => setPhotosetOpen(o => !o)}
+                        aria-expanded={photosetOpen}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          width: "100%",
+                          padding: "6px 10px",
+                          background: "transparent",
+                          border: "none",
+                          color: "var(--color-text-muted)",
+                          fontSize: 11,
+                          cursor: "pointer",
+                          textAlign: "left",
+                        }}
+                      >
+                        <span aria-hidden style={{ fontSize: 9, color: "var(--color-text-faint)", transform: photosetOpen ? "rotate(90deg)" : undefined, transition: "transform 150ms" }}>▶</span>
+                        🖼 Build Photoset (Mac command)
+                      </button>
+                      {photosetOpen && (
+                        <div style={{ padding: "6px 10px 10px", borderTop: "1px solid var(--color-border-subtle)" }}>
+                          <pre
+                            style={{
+                              fontFamily: "var(--font-mono)",
+                              fontSize: 11,
+                              color: "var(--color-text)",
+                              background: "var(--color-elevated)",
+                              padding: "8px 10px",
+                              borderRadius: 4,
+                              margin: 0,
+                              overflow: "auto",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-all",
+                            }}
+                          >
+{`python3 ~/Scripts/comp_photoset.py --comp-id ${photosetCompId(studio)} --scenes ${selected.join(",") || "<scene-ids>"} --output ~/Desktop/Compilations --zip`}
+                          </pre>
+                          <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 6 }}>
+                            Save to Grail first to get the real comp ID.
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </>
@@ -576,10 +704,22 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
           loading={existingLoading}
           studio={studio}
           studioColor={studioColor}
-          expanded={expandedComp}
-          onToggle={(id) => setExpandedComp(prev => prev === id ? null : id)}
+          onOpen={(id) => setExpandedComp(id)}
         />
       )}
+
+      {/* Existing-comp detail modal — lifted out of the inline accordion. */}
+      {expandedComp && (() => {
+        const comp = existingComps.find(c => c.comp_id === expandedComp)
+        if (!comp) return null
+        return (
+          <ExistingCompModal
+            comp={comp}
+            studioColor={studioColor}
+            onClose={() => setExpandedComp(null)}
+          />
+        )
+      })()}
     </div>
   )
 }
@@ -601,11 +741,10 @@ interface ExistingCompsTableProps {
   loading: boolean
   studio: string
   studioColor: string
-  expanded: string | null
-  onToggle: (compId: string) => void
+  onOpen: (compId: string) => void
 }
 
-function ExistingCompsTable({ comps, loading, studio, studioColor, expanded, onToggle }: ExistingCompsTableProps) {
+function ExistingCompsTable({ comps, loading, studio, studioColor, onOpen }: ExistingCompsTableProps) {
   if (loading) {
     return <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Loading existing compilations…</p>
   }
@@ -623,123 +762,68 @@ function ExistingCompsTable({ comps, loading, studio, studioColor, expanded, onT
   }
   return (
     <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-      <table className="w-full" style={{ borderCollapse: "collapse" }}>
+      <table className="ec-ctab w-full" style={{ borderCollapse: "collapse" }}>
         <thead>
-          <tr style={{ background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)", width: 32 }}></th>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Comp ID</th>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Title</th>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Vol.</th>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Status</th>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Scenes</th>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Created</th>
+          <tr style={{ background: "var(--color-elevated)", borderBottom: "1px solid var(--color-border)" }}>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Comp ID</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Title</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Vol.</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Status</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Scenes</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Created</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)", width: 24 }} aria-hidden="true"></th>
           </tr>
         </thead>
         <tbody>
           {comps.map((comp) => {
-            const isOpen = expanded === comp.comp_id
             const statCol = statusColors(comp.status)
             return (
-              <Fragment key={comp.comp_id}>
-                <tr
-                  onClick={() => onToggle(comp.comp_id)}
-                  style={{
-                    borderBottom: "1px solid var(--color-border)",
-                    cursor: "pointer",
-                    background: isOpen ? "var(--color-surface)" : "transparent",
-                  }}
-                >
-                  <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-                    {isOpen ? "▾" : "▸"}
-                  </td>
-                  <td className="px-3 py-2 font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                    {comp.comp_id}
-                  </td>
-                  <td className="px-3 py-2" style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500 }}>
-                    {comp.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}
-                  </td>
-                  <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                    {comp.volume || "—"}
-                  </td>
-                  <td className="px-3 py-2" style={{ fontSize: 11 }}>
-                    <span style={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      letterSpacing: "0.04em",
-                      textTransform: "uppercase",
-                      padding: "2px 7px",
-                      borderRadius: 9,
-                      color: statCol.fg,
-                      background: statCol.bg,
-                      border: `1px solid ${statCol.border}`,
-                    }}>
-                      {comp.status || "Draft"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                    {comp.scene_count}
-                  </td>
-                  <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-                    {comp.created || "—"}
-                  </td>
-                </tr>
-                {isOpen && (
-                  <tr style={{ background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
-                    <td colSpan={7} className="px-4 py-3">
-                      {comp.description && (
-                        <div className="mb-3 rounded" style={{ background: "var(--color-elevated)", padding: "8px 10px" }}>
-                          <p style={{ fontSize: 10, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Description</p>
-                          <p style={{ fontSize: 12, color: "var(--color-text)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{comp.description}</p>
-                        </div>
-                      )}
-                      <p style={{ fontSize: 10, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                        Scenes (click MEGA link to download source)
-                      </p>
-                      <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-                        <table className="w-full" style={{ borderCollapse: "collapse" }}>
-                          <thead>
-                            <tr style={{ background: "var(--color-bg, var(--color-surface))" }}>
-                              <th className="text-left px-2 py-1" style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 500, width: 28 }}>#</th>
-                              <th className="text-left px-2 py-1" style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 500 }}>Scene ID</th>
-                              <th className="text-left px-2 py-1" style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 500 }}>Title</th>
-                              <th className="text-left px-2 py-1" style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 500 }}>Performers</th>
-                              <th className="text-left px-2 py-1" style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 500 }}>MEGA</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {comp.scenes.map((sc) => (
-                              <tr key={`${comp.comp_id}-${sc.scene_num}`} style={{ borderTop: "1px solid var(--color-border)" }}>
-                                <td className="px-2 py-1.5" style={{ fontSize: 10, color: "var(--color-text-faint)" }}>{sc.scene_num}</td>
-                                <td className="px-2 py-1.5 font-mono" style={{ fontSize: 10, color: "var(--color-text-muted)" }}>{sc.scene_id}</td>
-                                <td className="px-2 py-1.5" style={{ fontSize: 11, color: "var(--color-text)" }}>{sc.title || <span style={{ color: "var(--color-text-faint)" }}>—</span>}</td>
-                                <td className="px-2 py-1.5" style={{ fontSize: 10, color: "var(--color-text-muted)" }}>{sc.performers || "—"}</td>
-                                <td className="px-2 py-1.5" style={{ fontSize: 10 }}>
-                                  {sc.mega_link ? (
-                                    <a
-                                      href={sc.mega_link}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      style={{ color: studioColor, textDecoration: "underline" }}
-                                    >
-                                      open
-                                    </a>
-                                  ) : (
-                                    <span style={{ color: "var(--color-text-faint)" }}>pending</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                      <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 8 }}>
-                        Created by {comp.created_by || "—"}
-                        {comp.updated && comp.updated !== comp.created && ` · Updated ${comp.updated}`}
-                      </p>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
+              <tr
+                key={comp.comp_id}
+                tabIndex={0}
+                role="button"
+                aria-label={`Open ${comp.title || comp.comp_id}`}
+                onClick={() => onOpen(comp.comp_id)}
+                onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(comp.comp_id) } }}
+                style={{
+                  borderBottom: "1px solid var(--color-border)",
+                  cursor: "pointer",
+                }}
+              >
+                <td className="px-3 py-2 font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  {comp.comp_id}
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500 }}>
+                  {comp.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  {comp.volume || "—"}
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 11 }}>
+                  <span style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                    padding: "2px 7px",
+                    borderRadius: 9,
+                    color: statCol.fg,
+                    background: statCol.bg,
+                    border: `1px solid ${statCol.border}`,
+                  }}>
+                    {comp.status || "Draft"}
+                  </span>
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  {comp.scene_count}
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                  {comp.created || "—"}
+                </td>
+                <td className="px-3 py-2" aria-hidden="true" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                  ›
+                </td>
+              </tr>
             )
           })}
         </tbody>

@@ -32,6 +32,58 @@ function wait<T>(value: T, ms = MOCK_DELAY): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(value), ms))
 }
 
+// In-memory calendar events for dev-mock. Keeps create/delete flows working
+// without a backend, and resets on hard reload (unlike localStorage — which
+// is exactly what we're migrating AWAY from).
+type MockCalEvent = {
+  event_id: string
+  date: string
+  title: string
+  kind: string
+  color: string
+  notes: string
+  created_by: string
+  created_at: string
+}
+const MOCK_CAL_EVENTS: MockCalEvent[] = []
+
+// Stateful prompt overrides for dev-mock. Each entry mirrors the backend
+// PromptEntry shape so the editor exercises the full save/revert flow.
+type MockPrompt = {
+  key: string
+  label: string
+  group: string
+  content: string
+  default: string
+  is_overridden: boolean
+  updated_by: string
+  updated_at: string
+}
+const T_VRH = "You are a creative title writer for VRHush, a premium VR adult content studio. Generate exactly ONE scene title that reflects the actual plot/theme you're given. The title MUST hook into a concrete hook from the script — the setup, the setting, a prop, the wardrobe, the role, or a beat of the action. Form: 2-4 words, title case, clever wordplay/double-entendre preferred over literal description, no performer names, no all-caps. Respond with ONLY the title — no explanation, no quotes."
+const T_FPVR = "You are a creative title writer for FuckPassVR, a premium VR travel-and-intimacy studio. If the script names a destination or city, lean into it. Form: 2-5 words, title case, clever wordplay preferred. Respond with ONLY the title."
+const T_VRA = "You are a creative title writer for VRAllure. Sensual, intimate, soft tone. Each title MUST reference something concrete from the script — wardrobe, prop, gesture, or mood. Form: 2-4 words, title case."
+const T_NJOI = "You are a creative title writer for NaughtyJOI. Generate a PAIRED title using the performer's first name. Two lines: line 1 soft/intimate, line 2 more commanding."
+const D_FPVR = "# PERSONALITY:\nYou are an expert adult copywriter for FuckPassVR. Write sexual, filthy, deeply arousing scene descriptions optimized for SEO and VR immersion.\n\n# WRITING STANDARDS:\n1. Active voice, visceral verbs.\n2. 2-paragraph format with bold subheadings.\n3. Reference 8K VR naturally."
+const D_VRH = "# PERSONALITY:\nYou are a copywriter for VRHush — raw, kinetic, no wasted words. Single-paragraph 100-140 words. 2nd-person POV throughout. Close with 'Taste her on VRHush now.'"
+const D_VRA = "# PERSONALITY:\nYou are a sensual copywriter for VRAllure. Intimate, whisper-close. 60-90 words. Focus on breath, warmth, fingertips."
+const D_NJOI = "# PERSONALITY:\nYou are a teasing copywriter for NaughtyJOI. Must include at least one short performer quote. Tease-build-countdown-release rhythm."
+const SCRIPT_SYS = "You are a professional VR adult film script writer for VRHush and FuckPassVR. Cinematic, intimate, director-ready. Use exactly these section headers: THEME, PLOT, SHOOT LOCATION, SET DESIGN, PROPS, WARDROBE - FEMALE, WARDROBE - MALE."
+const MOCK_PROMPTS: MockPrompt[] = [
+  { key: "title.VRHush",     label: "Title — VRHush",     group: "Titles",       content: T_VRH,  default: T_VRH,  is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "title.FuckPassVR", label: "Title — FuckPassVR", group: "Titles",       content: T_FPVR, default: T_FPVR, is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "title.VRAllure",   label: "Title — VRAllure",   group: "Titles",       content: T_VRA,  default: T_VRA,  is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "title.NaughtyJOI", label: "Title — NaughtyJOI", group: "Titles",       content: T_NJOI, default: T_NJOI, is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc.FPVR",        label: "Description — FuckPassVR", group: "Descriptions", content: D_FPVR, default: D_FPVR, is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc.VRH",         label: "Description — VRHush",     group: "Descriptions", content: D_VRH,  default: D_VRH,  is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc.VRA",         label: "Description — VRAllure",   group: "Descriptions", content: D_VRA,  default: D_VRA,  is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc.NJOI",        label: "Description — NaughtyJOI", group: "Descriptions", content: D_NJOI, default: D_NJOI, is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc_comp.FPVR",   label: "Compilation Desc — FuckPassVR", group: "Compilations", content: D_FPVR, default: D_FPVR, is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc_comp.VRH",    label: "Compilation Desc — VRHush",     group: "Compilations", content: D_VRH,  default: D_VRH,  is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc_comp.VRA",    label: "Compilation Desc — VRAllure",   group: "Compilations", content: D_VRA,  default: D_VRA,  is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "desc_comp.NJOI",   label: "Compilation Desc — NaughtyJOI", group: "Compilations", content: D_NJOI, default: D_NJOI, is_overridden: false, updated_by: "", updated_at: "" },
+  { key: "script.system",    label: "Script Generation — System Prompt", group: "Scripts", content: SCRIPT_SYS, default: SCRIPT_SYS, is_overridden: false, updated_by: "", updated_at: "" },
+]
+
 function parseQuery(path: string): { base: string; params: URLSearchParams } {
   const qIdx = path.indexOf("?")
   if (qIdx === -1) return { base: path, params: new URLSearchParams() }
@@ -50,7 +102,34 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
 
   // ── Users ─────────────────────────────────────────────────────────────
   if (base === "/users/me") return wait(MOCK_USER as unknown as T)
-  if (base === "/users/")   return wait(MOCK_ALL_USERS as unknown as T)
+  if (base === "/users/") {
+    const method = (_options.method || "GET").toUpperCase()
+    if (method === "GET") return wait(MOCK_ALL_USERS as unknown as T)
+    if (method === "POST") {
+      const body = _options.body ? JSON.parse(_options.body as string) : {}
+      const u = {
+        email: (body.email ?? "").toLowerCase(),
+        name: body.name ?? "",
+        role: body.role ?? "editor",
+        allowed_tabs: body.allowed_tabs ?? "ALL",
+      }
+      ;(MOCK_ALL_USERS as Array<typeof u>).push(u)
+      return wait(u as unknown as T)
+    }
+  }
+  // /users/{email} — DELETE removes from the mock array
+  if (base.startsWith("/users/") && (_options.method || "").toUpperCase() === "DELETE") {
+    const email = decodeURIComponent(base.slice("/users/".length)).toLowerCase()
+    const arr = MOCK_ALL_USERS as Array<{ email: string }>
+    const idx = arr.findIndex(u => u.email.toLowerCase() === email)
+    if (idx >= 0) arr.splice(idx, 1)
+    return wait(undefined as unknown as T)
+  }
+  // ── Per-source sync (admin) ───────────────────────────────────────────
+  if (base.startsWith("/sync/trigger/")) {
+    const source = decodeURIComponent(base.slice("/sync/trigger/".length))
+    return wait({ source, row_count: 42, status: "ok" } as unknown as T)
+  }
 
   // ── Scenes ────────────────────────────────────────────────────────────
   if (base === "/scenes/stats") return wait(MOCK_SCENE_STATS as unknown as T)
@@ -66,6 +145,27 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
   const namingMatch = base.match(/^\/scenes\/([^/]+)\/naming-issues$/)
   if (namingMatch) {
     return wait({ scene_id: namingMatch[1], issues: [], ok: true } as unknown as T)
+  }
+  const generateTitleMatch = base.match(/^\/scenes\/([^/]+)\/generate-title$/)
+  if (generateTitleMatch) {
+    // Deterministic-feeling mock — the point is to exercise the UI flow, not
+    // actually be creative. Hash the scene id into one of a dozen canned titles.
+    const sid = generateTitleMatch[1]
+    const pool = [
+      "Under Her Spell", "Stay After Class", "The Long Game", "Behind Closed Doors",
+      "Private Practice", "Perfectly Still", "Heat By Design", "Earning It",
+      "Deep Focus", "The Right Fit", "All In", "Nailing the Interview",
+    ]
+    let h = 0
+    for (const ch of sid) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+    return wait({ title: pool[h % pool.length] } as unknown as T)
+  }
+  const updateTitleMatch = base.match(/^\/scenes\/([^/]+)\/title$/)
+  if (updateTitleMatch) {
+    return wait({ ok: true } as unknown as T)
+  }
+  if (base === "/scripts/title-generate") {
+    return wait({ title: "Checked In" } as unknown as T)
   }
 
   // ── Approvals ─────────────────────────────────────────────────────────
@@ -83,14 +183,132 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
 
   // ── Scripts ───────────────────────────────────────────────────────────
   if (base === "/scripts/tabs") return wait(MOCK_SCRIPT_TABS as unknown as T)
+  if (base === "/scripts/validate") {
+    // Parity mock: flag the same classic "slop" phrases the real validator
+    // catches so the UI rule-panel has something to render.
+    const input = (_options?.body ?? "") as string
+    const text = typeof input === "string" ? input : ""
+    const violations: string[] = []
+    if (/\bimpossibly\b/i.test(text)) violations.push("Drop vague intensifier: 'impossibly'")
+    if (/\belectric\s+charge\b/i.test(text)) violations.push("Cliché metaphor: 'electric charge'")
+    if (/\btension\s+in\s+the\s+air\b/i.test(text)) violations.push("Cliché: 'tension in the air'")
+    return wait({ violations, passed: violations.length === 0 } as unknown as T)
+  }
+  if (base === "/scripts/save") return wait({ id: 1, status: "saved" } as unknown as T)
   if (base === "/scripts/") {
     const needs = params.get("needs_script") === "true"
     return wait((needs ? MOCK_SCRIPTS : MOCK_SCRIPTS) as unknown as T)
   }
 
   // ── Tickets ───────────────────────────────────────────────────────────
-  if (base === "/tickets/") return wait(MOCK_TICKETS as unknown as T)
+  if (base === "/tickets/") {
+    const typeFilter = params.get("type")
+    const statusFilter = params.get("status")
+    const limit = params.get("limit") ? parseInt(params.get("limit")!) : undefined
+    let list = MOCK_TICKETS as typeof MOCK_TICKETS
+    if (typeFilter) list = list.filter(t => t.type === typeFilter)
+    if (statusFilter) list = list.filter(t => t.status === statusFilter)
+    if (limit) list = list.slice(0, limit)
+    return wait(list as unknown as T)
+  }
   if (base === "/tickets/stats") return wait(MOCK_TICKET_STATS as unknown as T)
+
+  // ── AI Prompts ────────────────────────────────────────────────────────
+  if (base === "/prompts/") {
+    return wait(MOCK_PROMPTS as unknown as T)
+  }
+  if (base.startsWith("/prompts/")) {
+    const method = (_options.method || "GET").toUpperCase()
+    const key = decodeURIComponent(base.slice("/prompts/".length))
+    if (method === "GET") {
+      const p = MOCK_PROMPTS.find(x => x.key === key)
+      if (!p) return wait(null as unknown as T)
+      return wait(p as unknown as T)
+    }
+    if (method === "PUT") {
+      const body = _options.body ? JSON.parse(_options.body as string) : {}
+      const idx = MOCK_PROMPTS.findIndex(x => x.key === key)
+      if (idx >= 0) {
+        MOCK_PROMPTS[idx] = {
+          ...MOCK_PROMPTS[idx],
+          content: body.content ?? "",
+          is_overridden: true,
+          updated_by: "Dev Admin",
+          updated_at: new Date().toISOString(),
+        }
+        return wait(MOCK_PROMPTS[idx] as unknown as T)
+      }
+      return wait(null as unknown as T)
+    }
+    if (method === "DELETE") {
+      const idx = MOCK_PROMPTS.findIndex(x => x.key === key)
+      if (idx >= 0) {
+        MOCK_PROMPTS[idx] = {
+          ...MOCK_PROMPTS[idx],
+          content: MOCK_PROMPTS[idx].default,
+          is_overridden: false,
+          updated_by: "",
+          updated_at: "",
+        }
+      }
+      return wait(undefined as unknown as T)
+    }
+  }
+
+  // ── Background tasks ──────────────────────────────────────────────────
+  if (base === "/tasks/") {
+    const statusFilter = params.get("status")
+    const limit = params.get("limit") ? parseInt(params.get("limit")!) : 50
+    const all = [
+      { task_id: "task-aa11bb22cc33", task_type: "script_gen",  status: "running",   progress: 0.62, created_at: "2026-04-21T16:42:00Z", started_at: "2026-04-21T16:42:01Z", completed_at: "", created_by: "Drew",   error: "" },
+      { task_id: "task-44dd55ee66ff", task_type: "desc_gen",    status: "running",   progress: 0.18, created_at: "2026-04-21T16:41:30Z", started_at: "2026-04-21T16:41:31Z", completed_at: "", created_by: "Editor", error: "" },
+      { task_id: "task-7788aabbccdd", task_type: "mega_scan",   status: "completed", progress: 1.0,  created_at: "2026-04-21T16:30:00Z", started_at: "2026-04-21T16:30:01Z", completed_at: "2026-04-21T16:38:12Z", created_by: "system", error: "" },
+      { task_id: "task-eeff00112233", task_type: "title_gen",   status: "completed", progress: 1.0,  created_at: "2026-04-21T16:18:00Z", started_at: "2026-04-21T16:18:00Z", completed_at: "2026-04-21T16:19:05Z", created_by: "Drew",   error: "" },
+      { task_id: "task-44556677ee99", task_type: "comp_export", status: "failed",    progress: 0.45, created_at: "2026-04-21T15:55:00Z", started_at: "2026-04-21T15:55:01Z", completed_at: "2026-04-21T15:56:30Z", created_by: "Editor", error: "MEGA timeout after 60s" },
+      { task_id: "task-998877665544", task_type: "script_gen",  status: "completed", progress: 1.0,  created_at: "2026-04-21T15:42:00Z", started_at: "2026-04-21T15:42:01Z", completed_at: "2026-04-21T15:43:50Z", created_by: "Drew",   error: "" },
+      { task_id: "task-aabbccdd1122", task_type: "desc_gen",    status: "pending",   progress: 0,    created_at: "2026-04-21T16:43:10Z", started_at: "", completed_at: "", created_by: "Drew", error: "" },
+    ]
+    let list = all
+    if (statusFilter) list = list.filter(t => t.status === statusFilter)
+    return wait(list.slice(0, limit) as unknown as T)
+  }
+  if (base === "/tasks/stats") {
+    return wait({ pending: 1, running: 2, completed: 3, failed: 1, total: 7 } as unknown as T)
+  }
+
+  // ── Calendar events ───────────────────────────────────────────────────
+  if (base === "/calendar-events/") {
+    const method = (_options.method || "GET").toUpperCase()
+    if (method === "GET") {
+      const from = params.get("from")
+      const to = params.get("to")
+      const filtered = MOCK_CAL_EVENTS.filter(e =>
+        (!from || e.date >= from) && (!to || e.date <= to),
+      )
+      return wait(filtered as unknown as T)
+    }
+    if (method === "POST") {
+      const body = _options.body ? JSON.parse(_options.body as string) : {}
+      const ev: MockCalEvent = {
+        event_id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        date: body.date ?? "",
+        title: (body.title ?? "").trim(),
+        kind: (body.kind ?? "").trim(),
+        color: (body.color ?? "").trim(),
+        notes: (body.notes ?? "").trim(),
+        created_by: "Dev Admin",
+        created_at: new Date().toISOString(),
+      }
+      MOCK_CAL_EVENTS.push(ev)
+      return wait(ev as unknown as T)
+    }
+  }
+  if (base.startsWith("/calendar-events/") && (_options.method || "").toUpperCase() === "DELETE") {
+    const id = decodeURIComponent(base.slice("/calendar-events/".length))
+    const idx = MOCK_CAL_EVENTS.findIndex(e => e.event_id === id)
+    if (idx >= 0) MOCK_CAL_EVENTS.splice(idx, 1)
+    return wait(undefined as unknown as T)
+  }
 
   // ── Notifications ─────────────────────────────────────────────────────
   if (base === "/notifications/") return wait(MOCK_NOTIFICATIONS as unknown as T)
@@ -101,10 +319,44 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
 
   // ── Models ────────────────────────────────────────────────────────────
   if (base === "/models/") return wait(MOCK_MODELS as unknown as T)
+  if (base === "/models/trending") {
+    // Small fixture so /research doesn't show the "could not load" banner
+    // in mock mode. Real backend serves SLR/VRP scrape results.
+    return wait([
+      { name: "Liv Wilder",   platform: "SLR", scenes: "48", followers: "12.4k", views: "3.2M",  photo_url: "https://picsum.photos/seed/liv/160/200",   profile_url: "#" },
+      { name: "Nova Reign",   platform: "VRP", scenes: "31", followers: "8.7k",  views: "1.1M",  photo_url: "https://picsum.photos/seed/nova/160/200",  profile_url: "#" },
+      { name: "Cass Monroe",  platform: "SLR", scenes: "22", followers: "6.2k",  views: "740k",  photo_url: "https://picsum.photos/seed/cass/160/200",  profile_url: "#" },
+      { name: "River Black",  platform: "VRP", scenes: "17", followers: "4.1k",  views: "520k",  photo_url: "https://picsum.photos/seed/river/160/200", profile_url: "#" },
+      { name: "Sable Storm",  platform: "SLR", scenes: "12", followers: "3.6k",  views: "390k",  photo_url: "https://picsum.photos/seed/sable/160/200", profile_url: "#" },
+    ] as unknown as T)
+  }
 
   // ── Call sheets ───────────────────────────────────────────────────────
+  // ── Titles — Model Name PNG ───────────────────────────────────────
+  if (base === "/titles/model-name") {
+    // 1x1 transparent PNG — enough for the UI to render without the
+    // real PIL renderer, which needs local fonts.
+    const pixel =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+    return wait({ data_url: `data:image/png;base64,${pixel}` } as unknown as T)
+  }
+
+  // ── Descriptions regen ────────────────────────────────────────────
+  if (base === "/descriptions/regenerate-paragraph") {
+    return wait({
+      paragraph:
+        "Her gaze finds yours through the dim light — deliberate, unhurried — and every thought you arrived with evaporates the moment she steps closer.",
+    } as unknown as T)
+  }
+
   if (base === "/call-sheets/tabs")   return wait(MOCK_CALLSHEET_TABS as unknown as T)
   if (base === "/call-sheets/dates")  return wait(MOCK_SHOOT_DATES as unknown as T)
+  if (base === "/call-sheets/generate") {
+    return wait({
+      doc_url: "https://docs.google.com/document/d/mock-call-sheet",
+      title: "Mock Call Sheet",
+    } as unknown as T)
+  }
 
   // ── Compilations ──────────────────────────────────────────────────────
   if (base === "/compilations/scenes") return wait(MOCK_SCENES as unknown as T)
@@ -186,7 +438,25 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
   }
 
   // ── Sync ──────────────────────────────────────────────────────────────
-  if (base === "/sync/status") return wait([] as unknown as T)
+  if (base === "/sync/status") {
+    // Return rows so the SyncPanel doesn't blank itself in dev mode after
+    // its mount-time refresh — initial data comes from /health.syncs.
+    return wait([
+      { source: "scenes",        last_synced_at: "2026-04-21T18:00:00Z", row_count: 1274, status: "ok",    error: "" },
+      { source: "scripts",       last_synced_at: "2026-04-21T17:55:00Z", row_count: 186,  status: "ok",    error: "" },
+      { source: "tickets",       last_synced_at: "2026-04-21T17:50:00Z", row_count: 47,   status: "ok",    error: "" },
+      { source: "notifications", last_synced_at: "2026-04-21T17:48:00Z", row_count: 23,   status: "ok",    error: "" },
+      { source: "approvals",     last_synced_at: "2026-04-21T17:42:00Z", row_count: 5,    status: "ok",    error: "" },
+      { source: "users",         last_synced_at: "2026-04-21T17:30:00Z", row_count: 4,    status: "ok",    error: "" },
+      { source: "bookings",      last_synced_at: "2026-04-21T17:00:00Z", row_count: 412,  status: "ok",    error: "" },
+    ] as unknown as T)
+  }
+  if (base === "/sync/trigger") {
+    return wait({
+      status: "completed",
+      results: { scenes: 1274, scripts: 482, models: 1830, shoots: 12 },
+    } as unknown as T)
+  }
 
   // eslint-disable-next-line no-console
   console.warn(`[dev-mock-api] Unmapped path: ${path}`)

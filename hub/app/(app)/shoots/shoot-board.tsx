@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { CheckCircle2, AlertTriangle, Circle, Clock, X, RefreshCcw, Film } from "lucide-react"
+import { createPortal } from "react-dom"
+import { CheckCircle2, AlertTriangle, Circle, Clock, X, RefreshCcw, Film, Wand2, Check } from "lucide-react"
 import {
   api,
   type Shoot,
@@ -114,19 +115,50 @@ interface Props {
   initialShoots: Shoot[]
   error: string | null
   idToken: string | undefined
+  /** Eclatech v2 layout: clean roster rows (talent / progress / status),
+   *  per-asset cell matrix hidden behind a click-to-expand. Default "v1"
+   *  renders the legacy always-visible-cells layout. */
+  variant?: "v1" | "v2"
+  /** When the board is embedded under ShootsV2View, the page owns the
+   *  studio filter so one pick drives both the calendar and the roster.
+   *  When this prop is set the local filter state is ignored. */
+  studioFilter?: string
+  /** Hide the PageHeader when the parent already renders one. */
+  hideHeader?: boolean
 }
 
-export function ShootBoard({ initialShoots, error: initialError, idToken: serverToken }: Props) {
+export function ShootBoard({
+  initialShoots,
+  error: initialError,
+  idToken: serverToken,
+  variant = "v1",
+  studioFilter: externalStudioFilter,
+  hideHeader,
+}: Props) {
   const idToken = useIdToken(serverToken)
   const client = useMemo(() => api(idToken ?? null), [idToken])
 
   const [shoots, setShoots] = useState<Shoot[]>(initialShoots)
   const [error, setError] = useState<string | null>(initialError)
-  const [studioFilter, setStudioFilter] = useState<string>("All")
+  const [internalStudioFilter, setInternalStudioFilter] = useState<string>("All")
+  const studioFilter = externalStudioFilter ?? internalStudioFilter
+  const setStudioFilter = externalStudioFilter !== undefined ? () => {} : setInternalStudioFilter
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const toggleExpanded = useCallback((shootId: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(shootId)) next.delete(shootId); else next.add(shootId)
+      return next
+    })
+  }, [])
   // Month filter key: "" = default window (current + next month), or a
   // specific month in YYYY-MM form for a custom 1-month view.
   const [monthFilter, setMonthFilter] = useState<string>("")
   const [selectedShootId, setSelectedShootId] = useState<string | null>(null)
+  // Separate state for the modal-based details view so it doesn't fight with
+  // the slide-in panel (used by v1 row-click). "Open details" on v2 rows
+  // opens the modal; v1's row click still opens the slide-in.
+  const [modalShootId, setModalShootId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshFailures, setRefreshFailures] = useState(0)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
@@ -140,6 +172,11 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
   const selected = useMemo(
     () => shoots.find(s => s.shoot_id === selectedShootId) ?? null,
     [shoots, selectedShootId],
+  )
+
+  const modalShoot = useMemo(
+    () => shoots.find(s => s.shoot_id === modalShootId) ?? null,
+    [shoots, modalShootId],
   )
 
   const refresh = useCallback(async () => {
@@ -197,68 +234,70 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
 
   return (
     <div>
-      <PageHeader
-        title="Shoot Tracker"
-        eyebrow={`${filtered.length} in window · ${refreshing ? "refreshing" : "auto-refresh 30s"}`}
-        studioAccent={studioFilter !== "All" ? studioFilter : undefined}
-        actions={
-          <>
-            <div
-              className="flex items-center gap-1 rounded-md"
-              style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "3px" }}
-            >
-              {(["All", ...STUDIOS] as const).map(st => {
-                const active = studioFilter === st
-                const color = st === "All" ? "var(--color-lime)" : studioColor(st)
-                return (
-                  <button
-                    key={st}
-                    onClick={() => setStudioFilter(st)}
-                    aria-pressed={active}
-                    className="rounded px-2 py-1 transition-colors"
-                    style={{
-                      fontSize: 11,
-                      fontWeight: active ? 600 : 400,
-                      background: active ? "var(--color-elevated)" : "transparent",
-                      color: active ? color : "var(--color-text-muted)",
-                      border: "none",
-                    }}
-                  >
-                    {st} <span className="tabular-nums" style={{ opacity: 0.7 }}>{counts[st] ?? 0}</span>
-                  </button>
-                )
-              })}
-            </div>
-            <MonthFilter value={monthFilter} onChange={setMonthFilter} />
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-              <button
-                onClick={() => { void refresh() }}
-                disabled={refreshing}
-                className="px-2.5 py-1 rounded text-xs transition-colors"
-                style={{
-                  display: "flex", alignItems: "center", gap: 4,
-                  background: "transparent",
-                  color: "var(--color-text-muted)",
-                  border: "1px solid var(--color-border)",
-                  cursor: refreshing ? "not-allowed" : "pointer",
-                }}
+      {!hideHeader && (
+        <PageHeader
+          title="Shoot Tracker"
+          eyebrow={`${filtered.length} in window · ${refreshing ? "refreshing" : "auto-refresh 30s"}`}
+          studioAccent={studioFilter !== "All" ? studioFilter : undefined}
+          actions={
+            <>
+              <div
+                className="flex items-center gap-1 rounded-md"
+                style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "3px" }}
               >
-                <RefreshCcw
-                  size={11}
-                  aria-hidden="true"
-                  style={{ animation: refreshing ? "spin 0.8s linear infinite" : undefined }}
-                />
-                {refreshing ? "Refreshing…" : "Refresh"}
-              </button>
-              {lastRefreshed && !refreshing && (
-                <span style={{ fontSize: 9, color: "var(--color-text-faint)", letterSpacing: "0.02em" }}>
-                  updated {lastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                </span>
-              )}
-            </div>
-          </>
-        }
-      />
+                {(["All", ...STUDIOS] as const).map(st => {
+                  const active = studioFilter === st
+                  const color = st === "All" ? "var(--color-lime)" : studioColor(st)
+                  return (
+                    <button
+                      key={st}
+                      onClick={() => setStudioFilter(st)}
+                      aria-pressed={active}
+                      className="rounded px-2 py-1 transition-colors"
+                      style={{
+                        fontSize: 11,
+                        fontWeight: active ? 600 : 400,
+                        background: active ? "var(--color-elevated)" : "transparent",
+                        color: active ? color : "var(--color-text-muted)",
+                        border: "none",
+                      }}
+                    >
+                      {st} <span className="tabular-nums" style={{ opacity: 0.7 }}>{counts[st] ?? 0}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <MonthFilter value={monthFilter} onChange={setMonthFilter} />
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                <button
+                  onClick={() => { void refresh() }}
+                  disabled={refreshing}
+                  className="px-2.5 py-1 rounded text-xs transition-colors"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 4,
+                    background: "transparent",
+                    color: "var(--color-text-muted)",
+                    border: "1px solid var(--color-border)",
+                    cursor: refreshing ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <RefreshCcw
+                    size={11}
+                    aria-hidden="true"
+                    style={{ animation: refreshing ? "spin 0.8s linear infinite" : undefined }}
+                  />
+                  {refreshing ? "Refreshing…" : "Refresh"}
+                </button>
+                {lastRefreshed && !refreshing && (
+                  <span style={{ fontSize: 9, color: "var(--color-text-faint)", letterSpacing: "0.02em" }}>
+                    updated {lastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                )}
+              </div>
+            </>
+          }
+        />
+      )}
 
       {error && <ErrorAlert className="mb-3">{error}</ErrorAlert>}
 
@@ -281,21 +320,38 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
               display: "flex", flexDirection: "column", gap: 8,
               paddingBottom: 4,
             }}>
-            <AssetLegend />
+            {variant === "v1" && <AssetLegend />}
             {filtered.map(shoot => (
-              <ShootRow
-                key={shoot.shoot_id}
-                shoot={shoot}
-                selected={shoot.shoot_id === selectedShootId}
-                onSelect={() => setSelectedShootId(shoot.shoot_id)}
-                onCellClick={(sceneIdx, assetType) =>
-                  setPopoverCell({
-                    shootId: shoot.shoot_id,
-                    position: shoot.scenes[sceneIdx].position,
-                    assetType,
-                  })
-                }
-              />
+              variant === "v2" ? (
+                <ShootRowV2
+                  key={shoot.shoot_id}
+                  shoot={shoot}
+                  expanded={expanded.has(shoot.shoot_id)}
+                  onToggle={() => toggleExpanded(shoot.shoot_id)}
+                  onOpenDetails={() => setModalShootId(shoot.shoot_id)}
+                  onCellClick={(sceneIdx, assetType) =>
+                    setPopoverCell({
+                      shootId: shoot.shoot_id,
+                      position: shoot.scenes[sceneIdx].position,
+                      assetType,
+                    })
+                  }
+                />
+              ) : (
+                <ShootRow
+                  key={shoot.shoot_id}
+                  shoot={shoot}
+                  selected={shoot.shoot_id === selectedShootId}
+                  onSelect={() => setSelectedShootId(shoot.shoot_id)}
+                  onCellClick={(sceneIdx, assetType) =>
+                    setPopoverCell({
+                      shootId: shoot.shoot_id,
+                      position: shoot.scenes[sceneIdx].position,
+                      assetType,
+                    })
+                  }
+                />
+              )
             ))}
             </div>
             {/* Right-fade scroll affordance */}
@@ -319,6 +375,7 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
               {selected && (
                 <ShootDetail
                   shoot={selected}
+                  idToken={idToken}
                   onClose={() => setSelectedShootId(null)}
                   onRevalidate={async (position, assetType) => {
                     if (!idToken) return
@@ -348,6 +405,37 @@ export function ShootBoard({ initialShoots, error: initialError, idToken: server
             </div>
           </div>
         </div>
+      )}
+
+      {modalShoot && (
+        <ShootDetailsModal
+          shoot={modalShoot}
+          idToken={idToken}
+          onClose={() => setModalShootId(null)}
+          onRevalidate={async (position, assetType) => {
+            if (!idToken) return
+            const key = `${modalShoot.shoot_id}|${position}|${assetType}`
+            if (inFlightRef.current.has(key)) return
+            inFlightRef.current.add(key)
+            try {
+              const newState = await client.shoots.revalidate(modalShoot.shoot_id, position, assetType)
+              setShoots(prev => prev.map(s => {
+                if (s.shoot_id !== modalShoot.shoot_id) return s
+                return {
+                  ...s,
+                  scenes: s.scenes.map(sc => sc.position !== position ? sc : {
+                    ...sc,
+                    assets: sc.assets.map(a => a.asset_type === assetType ? newState : a),
+                  }),
+                }
+              }))
+            } catch (e) {
+              setError(formatApiError(e, "Revalidate"))
+            } finally {
+              inFlightRef.current.delete(key)
+            }
+          }}
+        />
       )}
 
       {popoverCell && (
@@ -460,6 +548,178 @@ function ShootRow({ shoot, selected, onSelect, onCellClick }: ShootRowProps) {
         ))}
       </div>
     </button>
+  )
+}
+
+// ── Shoot row (v2 — clean roster, cells behind click-to-expand) ──────
+interface ShootRowV2Props {
+  shoot: Shoot
+  expanded: boolean
+  onToggle: () => void
+  onOpenDetails: () => void
+  onCellClick: (sceneIdx: number, assetType: AssetType) => void
+}
+
+function ShootRowV2({ shoot, expanded, onToggle, onOpenDetails, onCellClick }: ShootRowV2Props) {
+  const primaryStudio = shoot.scenes[0]?.studio ?? "FuckPassVR"
+  const accent = studioColor(primaryStudio)
+  const alert = isAlert(shoot)
+  const { validated, total } = shootCompleteness(shoot)
+  const progress = total > 0 ? Math.round((validated / total) * 100) : 0
+  const abbr = (shoot.scenes[0]?.grail_tab || primaryStudio.slice(0, 4)).toUpperCase()
+  const statusKey = progress === 100 ? "ok" : alert ? "err" : progress > 0 ? "progress" : "warn"
+  const statusLabel = progress === 100 ? "WRAPPED" : alert ? "OVERDUE" : progress > 0 ? "ACTIVE" : "PREP"
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${expanded ? "var(--color-border)" : alert ? "var(--color-err)" : "var(--color-border-subtle)"}`,
+        background: expanded
+          ? "var(--color-elevated)"
+          : alert
+            ? "color-mix(in srgb, var(--color-err) 6%, var(--color-surface))"
+            : "var(--color-surface)",
+        transition: "background 120ms ease",
+      }}
+    >
+      {/* Clickable summary row */}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        style={{
+          width: "100%",
+          display: "grid",
+          gridTemplateColumns: "72px 140px minmax(0, 1fr) 160px 110px 80px 20px",
+          columnGap: 14,
+          alignItems: "center",
+          padding: "12px 14px",
+          background: "transparent",
+          border: "none",
+          textAlign: "left",
+          cursor: "pointer",
+          color: "inherit",
+        }}
+      >
+        {/* Studio chip */}
+        <span className={`ec-studio-chip ${abbr.toLowerCase()}`} style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: accent,
+        }}>
+          {abbr}
+        </span>
+
+        {/* Date */}
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)", fontVariantNumeric: "tabular-nums" }}>
+          {formatShootDate(shoot.shoot_date)}
+        </div>
+
+        {/* Talent (flex column) */}
+        <div style={{ minWidth: 0 }}>
+          <div style={{
+            fontSize: 13, color: "var(--color-text)", overflow: "hidden",
+            textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {shoot.female_talent || "—"}
+            {shoot.male_talent && <span style={{ color: "var(--color-text-muted)" }}> / {shoot.male_talent}</span>}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 2 }}>
+            {shoot.scenes.length} scene{shoot.scenes.length === 1 ? "" : "s"} · {relativeFromHours(shoot.aging_hours)}
+          </div>
+        </div>
+
+        {/* Progress bar + count */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{
+            fontSize: 12, fontVariantNumeric: "tabular-nums",
+            color: "var(--color-text)", minWidth: 48, textAlign: "right",
+          }}>
+            {validated}/{total}
+          </span>
+          <div style={{
+            flex: 1, height: 4, borderRadius: 2,
+            background: "var(--color-border-subtle)", overflow: "hidden",
+          }}>
+            <div style={{
+              width: "100%",
+              height: "100%",
+              background: alert ? "var(--color-err)" : accent,
+              transform: `scaleX(${progress / 100})`,
+              transformOrigin: "left center",
+              transition: "transform 180ms var(--ease-out-quart)",
+            }} />
+          </div>
+          <span style={{
+            fontSize: 11, fontVariantNumeric: "tabular-nums",
+            color: "var(--color-text-muted)", minWidth: 34, textAlign: "right",
+          }}>
+            {progress}%
+          </span>
+        </div>
+
+        {/* Status pill */}
+        <span className="ec-pill" data-s={statusKey} style={{ justifySelf: "start" }}>
+          <span className="d" />
+          {statusLabel}
+        </span>
+
+        {/* Aging */}
+        {alert ? (
+          <span className="ec-age" data-hot style={{ justifySelf: "start" }}>
+            {Math.floor(shoot.aging_hours / 24)}d
+          </span>
+        ) : (
+          <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+            {shoot.aging_hours > 0 ? `${Math.floor(shoot.aging_hours / 24)}d` : "fresh"}
+          </span>
+        )}
+
+        {/* Expand chevron */}
+        <span aria-hidden="true" style={{
+          fontSize: 10, color: "var(--color-text-muted)",
+          transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+          transition: "transform 120ms ease",
+          justifySelf: "center",
+        }}>
+          ▶
+        </span>
+      </button>
+
+      {/* Expanded: per-asset cells (one strip per scene) + details link */}
+      {expanded && (
+        <div style={{
+          padding: "10px 14px 14px 14px",
+          borderTop: "1px solid var(--color-border-subtle)",
+          display: "flex", flexDirection: "column", gap: 8,
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            fontSize: 9, letterSpacing: "0.14em", color: "var(--color-text-faint)",
+            textTransform: "uppercase",
+          }}>
+            <span>Asset phases · click a cell to revalidate</span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onOpenDetails() }}
+              style={{
+                background: "transparent", border: "none", cursor: "pointer",
+                fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase",
+                color: "var(--color-lime)", padding: 0,
+              }}
+            >
+              Open details →
+            </button>
+          </div>
+          {shoot.scenes.map((scene, idx) => (
+            <AssetStrip
+              key={scene.position}
+              scene={scene}
+              onCellClick={(at) => onCellClick(idx, at)}
+              showLabels
+            />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -592,9 +852,28 @@ function AssetLegend() {
 interface AssetStripProps {
   scene: BoardShootScene
   onCellClick: (assetType: AssetType) => void
+  /** V2 mode: render a short 2–3 char asset code below each cell so users
+   *  don't have to click to learn what a cell represents. */
+  showLabels?: boolean
 }
 
-function AssetStrip({ scene, onCellClick }: AssetStripProps) {
+/** Short, reader-glanceable labels for each asset cell when rendered below
+ *  the 16px square. 2–3 chars fits without truncation. */
+const ASSET_SHORT: Record<AssetType, string> = {
+  script_done:          "SCR",
+  call_sheet_sent:      "CS",
+  legal_run:            "LEG",
+  grail_run:            "GR",
+  bg_edit_uploaded:     "BG",
+  solo_uploaded:        "SOLO",
+  title_done:           "TTL",
+  encoded_uploaded:     "ENC",
+  photoset_uploaded:    "PHO",
+  storyboard_uploaded:  "STB",
+  legal_docs_uploaded:  "DOC",
+}
+
+function AssetStrip({ scene, onCellClick, showLabels = false }: AssetStripProps) {
   const assetsByType = new Map(scene.assets.map(a => [a.asset_type, a]))
   const accent = studioColor(scene.studio)
 
@@ -629,29 +908,29 @@ function AssetStrip({ scene, onCellClick }: AssetStripProps) {
               const hasWarn = !!a && a.validity.some(v => v.status === "warn")
               const color = statusColor(status, hasWarn)
               const applies = cellApplies(at, scene.scene_type)
-              // Irrelevant cells: dashed placeholder, no click, muted — keeps
-              // the 11-cell grid aligned with the legend but signals N/A.
-              if (!applies) {
-                return (
-                  <span
-                    key={at}
-                    aria-label={`${SHOOT_ASSET_LABELS[at]} (not applicable for ${scene.scene_type})`}
-                    title={`${SHOOT_ASSET_LABELS[at]} — N/A for ${scene.scene_type}`}
-                    style={{
-                      width: 16,
-                      height: 16,
-                      borderRadius: 3,
-                      border: "1px dashed var(--color-border)",
-                      background: "transparent",
-                      opacity: 0.3,
-                      flexShrink: 0,
-                    }}
-                  />
-                )
-              }
-              return (
+              const shortLabel = ASSET_SHORT[at]
+              // Wrap the cell in a vertical column when labels are shown so the
+              // short code sits directly under its cell. Width grows to 28px so
+              // 3–4 char codes ("SOLO") don't truncate.
+              const wrapperStyle: React.CSSProperties = showLabels
+                ? { display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: 28, flexShrink: 0 }
+                : { display: "contents" }
+              const cellNode = !applies ? (
                 <span
-                  key={at}
+                  aria-label={`${SHOOT_ASSET_LABELS[at]} (not applicable for ${scene.scene_type})`}
+                  title={`${SHOOT_ASSET_LABELS[at]} — N/A for ${scene.scene_type}`}
+                  style={{
+                    width: 16,
+                    height: 16,
+                    borderRadius: 3,
+                    border: "1px dashed var(--color-border)",
+                    background: "transparent",
+                    opacity: 0.3,
+                    flexShrink: 0,
+                  }}
+                />
+              ) : (
+                <span
                   role="button"
                   tabIndex={0}
                   onClick={(e) => { e.stopPropagation(); onCellClick(at) }}
@@ -678,6 +957,26 @@ function AssetStrip({ scene, onCellClick }: AssetStripProps) {
                 >
                   {statusIcon(status, hasWarn)}
                 </span>
+              )
+              if (!showLabels) return <span key={at} style={{ display: "contents" }}>{cellNode}</span>
+              return (
+                <div key={at} style={wrapperStyle}>
+                  {cellNode}
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      fontSize: 8,
+                      lineHeight: 1,
+                      letterSpacing: "0.06em",
+                      fontWeight: 600,
+                      color: applies ? "var(--color-text-muted)" : "var(--color-text-faint)",
+                      textTransform: "uppercase",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {shortLabel}
+                  </span>
+                </div>
               )
             })}
           </div>
@@ -709,134 +1008,331 @@ function ValidityPopover({ shoot, position, assetType, onClose, onRevalidate }: 
   const scene = shoot.scenes.find(s => s.position === position)
   const state = scene?.assets.find(a => a.asset_type === assetType)
   const [busy, setBusy] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose() }
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      document.body.style.overflow = prev
+    }
   }, [onClose])
 
-  if (!scene || !state) return null
+  if (!scene || !state || !mounted) return null
 
-  return (
+  const accent = statusColor(state.status, state.validity.some(v => v.status === "warn"))
+
+  return createPortal(
     <div
-      className="fixed inset-0 flex items-center justify-center"
-      style={{ background: "oklch(0% 0 0 / 55%)", zIndex: 60 }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="asset-modal-title"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 100,
+        background: "rgba(0, 0, 0, 0.72)",
+        backdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+        animation: "fadeIn var(--duration-base) var(--ease-out-expo) both",
+      }}
     >
       <div
-        ref={ref}
-        className="rounded-lg"
+        onClick={e => e.stopPropagation()}
         style={{
-          background: "var(--color-base)",
+          width: "min(480px, 100%)",
+          maxHeight: "min(85vh, 100dvh - 40px)",
+          display: "flex",
+          flexDirection: "column",
+          background: "var(--color-surface)",
           border: "1px solid var(--color-border)",
-          width: 420,
-          maxWidth: "calc(100vw - 32px)",
-          padding: "18px 22px",
+          boxShadow: "0 24px 60px rgba(0,0,0,0.5)",
         }}
       >
-        <div className="flex items-center justify-between mb-3">
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 16,
+            padding: "20px 24px 16px",
+            borderBottom: "1px solid var(--color-border)",
+          }}
+        >
           <div>
-            <div style={{ fontSize: 10, color: "var(--color-text-faint)", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+            <div
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: "0.16em",
+                textTransform: "uppercase",
+                color: accent,
+                marginBottom: 6,
+              }}
+            >
               {scene.studio} · {scene.scene_type} · {scene.scene_id || "pending Grail"}
             </div>
-            <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--color-text)", margin: "2px 0 0" }}>
+            <h2
+              id="asset-modal-title"
+              style={{
+                fontFamily: "var(--font-display-hero)",
+                fontWeight: 800,
+                fontSize: 22,
+                lineHeight: 1.1,
+                letterSpacing: "-0.02em",
+                color: "var(--color-text)",
+                margin: 0,
+              }}
+            >
               {SHOOT_ASSET_LABELS[assetType]}
             </h2>
           </div>
-          <button onClick={onClose} aria-label="Close" style={{ color: "var(--color-text-muted)" }}>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              padding: 6,
+              background: "transparent",
+              border: "1px solid var(--color-border)",
+              color: "var(--color-text-muted)",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
             <X size={14} />
           </button>
         </div>
 
-        <div
-          className="rounded"
-          style={{
-            padding: "6px 10px",
-            fontSize: 11,
-            background: "var(--color-surface)",
-            border: "1px solid var(--color-border)",
-            color: "var(--color-text-muted)",
-            marginBottom: 12,
-          }}
-        >
-          <div>Status: <strong style={{ color: statusColor(state.status, state.validity.some(v => v.status === "warn")) }}>{STATUS_LABEL[state.status]}</strong></div>
-          {state.first_seen_at && <div>First seen: <span style={{ fontFamily: "var(--font-mono)" }}>{state.first_seen_at.slice(0, 19)}</span></div>}
-          {state.validated_at && <div>Validated: <span style={{ fontFamily: "var(--font-mono)" }}>{state.validated_at.slice(0, 19)}</span></div>}
+        <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 14, overflowY: "auto", flex: "1 1 auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 4, fontSize: 11 }}>
+            <MetaRow label="Status" value={STATUS_LABEL[state.status]} valueColor={accent} />
+            {state.first_seen_at && <MetaRow label="First seen" value={state.first_seen_at.slice(0, 19)} mono />}
+            {state.validated_at && <MetaRow label="Validated" value={state.validated_at.slice(0, 19)} mono />}
+          </div>
+
+          <div>
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: "0.16em",
+                textTransform: "uppercase",
+                color: "var(--color-text-faint)",
+                marginBottom: 6,
+              }}
+            >
+              Validity checks
+            </div>
+            {state.validity.length === 0 ? (
+              <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0, lineHeight: 1.5 }}>
+                {state.status === "validated"
+                  ? "All checks passed."
+                  : state.status === "not_present"
+                    ? "Not yet uploaded to MEGA."
+                    : "No validity issues to report."}
+              </p>
+            ) : (
+              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+                {state.validity.map((v, i) => {
+                  const color = v.status === "fail" ? "var(--color-err)" : v.status === "warn" ? "var(--color-warn)" : "var(--color-ok)"
+                  return (
+                    <li
+                      key={i}
+                      style={{
+                        padding: "8px 10px",
+                        fontSize: 12,
+                        color,
+                        background: `color-mix(in srgb, ${color} 8%, transparent)`,
+                        border: `1px solid color-mix(in srgb, ${color} 22%, transparent)`,
+                      }}
+                    >
+                      <strong style={{ fontWeight: 700 }}>{v.check}</strong>: {v.message}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
         </div>
 
-        {state.validity.length === 0 ? (
-          <div style={{ fontSize: 12, color: "var(--color-text-muted)", padding: "8px 0" }}>
-            {state.status === "validated"
-              ? "All checks passed."
-              : state.status === "not_present"
-                ? "Not yet uploaded to MEGA."
-                : "No validity issues to report."}
-          </div>
-        ) : (
-          <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
-            {state.validity.map((v, i) => {
-              const color = v.status === "fail" ? "var(--color-err)" : v.status === "warn" ? "var(--color-warn)" : "var(--color-ok)"
-              return (
-                <li
-                  key={i}
-                  className="rounded"
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: 11,
-                    color,
-                    background: `color-mix(in srgb, ${color} 8%, transparent)`,
-                    border: `1px solid color-mix(in srgb, ${color} 22%, transparent)`,
-                  }}
-                >
-                  <strong style={{ fontWeight: 600 }}>{v.check}</strong>: {v.message}
-                </li>
-              )
-            })}
-          </ul>
-        )}
-
-        <div className="flex justify-end gap-2 mt-4">
-          <button
-            onClick={async () => { setBusy(true); try { await onRevalidate() } finally { setBusy(false) } }}
-            disabled={busy}
-            className="px-3 py-1.5 rounded text-xs font-semibold"
-            style={{
-              background: "var(--color-lime)",
-              color: "var(--color-base)",
-              opacity: busy ? 0.5 : 1,
-              cursor: busy ? "not-allowed" : "pointer",
-              border: "none",
-            }}
-          >
-            {busy ? "Checking…" : "Retry check"}
-          </button>
+        <div
+          style={{
+            padding: "14px 24px",
+            borderTop: "1px solid var(--color-border)",
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            background: "var(--color-surface)",
+          }}
+        >
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded text-xs"
             style={{
+              padding: "6px 14px",
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
               background: "transparent",
               color: "var(--color-text-muted)",
               border: "1px solid var(--color-border)",
+              cursor: "pointer",
             }}
           >
             Close
           </button>
+          <button
+            onClick={async () => { setBusy(true); try { await onRevalidate() } finally { setBusy(false) } }}
+            disabled={busy}
+            style={{
+              padding: "6px 14px",
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              background: "var(--color-lime)",
+              color: "var(--color-lime-ink)",
+              border: "1px solid var(--color-lime)",
+              opacity: busy ? 0.6 : 1,
+              cursor: busy ? "wait" : "pointer",
+            }}
+          >
+            {busy ? "Checking…" : "Retry check"}
+          </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
+  )
+}
+
+function MetaRow({ label, value, mono, valueColor }: { label: string; value: string; mono?: boolean; valueColor?: string }) {
+  return (
+    <>
+      <span
+        style={{
+          color: "var(--color-text-faint)",
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          fontSize: 9,
+          fontWeight: 700,
+          alignSelf: "center",
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          color: valueColor ?? "var(--color-text)",
+          fontFamily: mono ? "var(--font-mono)" : undefined,
+          fontSize: 12,
+          fontWeight: valueColor ? 700 : 500,
+        }}
+      >
+        {value}
+      </span>
+    </>
+  )
+}
+
+// ── Shoot details modal ───────────────────────────────────────────────
+// Wraps the same ShootDetail content used by the v1 slide-in panel in a
+// centered modal shell. Triggered by "Open details →" on v2 roster rows.
+// Portals to <body> to escape main's transformed ancestor (page fadeIn)
+// and pins the header while the body scrolls.
+function ShootDetailsModal({
+  shoot,
+  idToken,
+  onClose,
+  onRevalidate,
+}: {
+  shoot: Shoot
+  idToken?: string
+  onClose: () => void
+  onRevalidate: (position: number, assetType: AssetType) => Promise<void>
+}) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    document.addEventListener("keydown", onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.body.style.overflow = prev
+    }
+  }, [onClose])
+
+  if (!mounted) return null
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Shoot ${shoot.shoot_id} details`}
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 100,
+        background: "rgba(0, 0, 0, 0.72)",
+        backdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+        animation: "fadeIn var(--duration-base) var(--ease-out-expo) both",
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: "min(820px, 100%)",
+          maxHeight: "min(85vh, 100dvh - 40px)",
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+          boxShadow: "0 24px 60px rgba(0,0,0,0.5)",
+        }}
+      >
+        {/* Re-using ShootDetail — it already handles scenes, asset grid, and
+            title regeneration. We swap its outer container style so it fits
+            the modal rather than the slide-in panel. */}
+        <ShootDetail
+          shoot={shoot}
+          idToken={idToken}
+          onClose={onClose}
+          onRevalidate={onRevalidate}
+        />
+      </div>
+    </div>,
+    document.body,
   )
 }
 
 // ── Shoot detail panel ────────────────────────────────────────────────
 interface ShootDetailProps {
   shoot: Shoot
+  idToken?: string
   onClose: () => void
   onRevalidate: (position: number, assetType: AssetType) => Promise<void>
 }
 
-function ShootDetail({ shoot, onClose, onRevalidate }: ShootDetailProps) {
+function ShootDetail({ shoot, idToken, onClose, onRevalidate }: ShootDetailProps) {
   const color = studioColor(shoot.scenes[0]?.studio ?? "FuckPassVR")
   return (
     <div
@@ -890,6 +1386,7 @@ function ShootDetail({ shoot, onClose, onRevalidate }: ShootDetailProps) {
           <SceneAssetTable
             key={scene.position}
             scene={scene}
+            idToken={idToken}
             onRevalidate={(at) => onRevalidate(scene.position, at)}
           />
         ))}
@@ -900,12 +1397,51 @@ function ShootDetail({ shoot, onClose, onRevalidate }: ShootDetailProps) {
 
 function SceneAssetTable({
   scene,
+  idToken,
   onRevalidate,
 }: {
   scene: BoardShootScene
+  idToken?: string
   onRevalidate: (assetType: AssetType) => Promise<void>
 }) {
   const color = studioColor(scene.studio)
+  const [title, setTitle] = useState(scene.title)
+  const [genTitle, setGenTitle] = useState("")
+  const [genBusy, setGenBusy] = useState<"idle" | "loading" | "saving">("idle")
+  const [genErr, setGenErr] = useState<string | null>(null)
+
+  // Scene-level title-gen only applies once the scene has a Grail row; until
+  // then there's no `id` the backend can resolve to a scene record.
+  const canGenerate = !!scene.scene_id
+
+  async function runGenerate() {
+    if (!scene.scene_id) return
+    setGenBusy("loading")
+    setGenErr(null)
+    try {
+      const { title: t } = await api(idToken ?? null).scenes.generateTitle(scene.scene_id, {})
+      setGenTitle(t)
+    } catch (e) {
+      setGenErr(formatApiError(e, "Title"))
+    } finally {
+      setGenBusy("idle")
+    }
+  }
+
+  async function runApply() {
+    if (!scene.scene_id || !genTitle) return
+    setGenBusy("saving")
+    try {
+      await api(idToken ?? null).scenes.updateTitle(scene.scene_id, genTitle)
+      setTitle(genTitle)
+      setGenTitle("")
+    } catch (e) {
+      setGenErr(formatApiError(e, "Save"))
+    } finally {
+      setGenBusy("idle")
+    }
+  }
+
   return (
     <div style={{ marginBottom: 16 }}>
       <div className="flex items-center gap-2 mb-2">
@@ -924,6 +1460,109 @@ function SceneAssetTable({
           {scene.scene_id || "(pending Grail row)"}
         </span>
       </div>
+
+      {/* Title row with inline generator */}
+      <div
+        className="flex items-center gap-2 mb-2"
+        style={{
+          padding: "6px 8px",
+          borderRadius: 4,
+          background: "var(--color-surface)",
+          border: "1px solid var(--color-border)",
+        }}
+      >
+        <span style={{ fontSize: 10, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, flexShrink: 0 }}>
+          Title
+        </span>
+        <span style={{ flex: 1, fontSize: 12, color: title ? "var(--color-text)" : "var(--color-text-faint)", fontStyle: title ? "normal" : "italic", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {title || "—"}
+        </span>
+        <button
+          onClick={runGenerate}
+          disabled={!canGenerate || genBusy !== "idle"}
+          title={canGenerate ? "Generate title from script" : "Scene needs a Grail row first"}
+          aria-label="Generate title"
+          style={{
+            flexShrink: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            fontSize: 10,
+            padding: "2px 7px",
+            borderRadius: 3,
+            background: "transparent",
+            color: !canGenerate ? "var(--color-text-faint)" : genBusy === "loading" ? "var(--color-text-faint)" : color,
+            border: `1px solid ${!canGenerate ? "var(--color-border)" : `color-mix(in srgb, ${color} 35%, transparent)`}`,
+            cursor: !canGenerate || genBusy !== "idle" ? "not-allowed" : "pointer",
+          }}
+        >
+          <Wand2 size={10} aria-hidden="true" />
+          {genBusy === "loading" ? "…" : "Generate"}
+        </button>
+      </div>
+
+      {(genTitle || genErr) && (
+        <div
+          className="flex items-center gap-2 mb-2"
+          style={{
+            padding: "6px 8px",
+            borderRadius: 4,
+            background: "var(--color-elevated)",
+            border: `1px solid color-mix(in srgb, ${color} 30%, var(--color-border))`,
+          }}
+        >
+          {genErr ? (
+            <>
+              <span style={{ flex: 1, fontSize: 11, color: "var(--color-err)" }}>{genErr}</span>
+              <button onClick={() => { setGenErr(null); setGenTitle("") }} aria-label="Dismiss" style={{ color: "var(--color-text-faint)" }}>
+                <X size={11} aria-hidden="true" />
+              </button>
+            </>
+          ) : (
+            <>
+              <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "var(--color-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={genTitle}>
+                {genTitle}
+              </span>
+              <button
+                onClick={runApply}
+                disabled={genBusy === "saving"}
+                aria-label="Apply title"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 3,
+                  fontSize: 10,
+                  padding: "2px 7px",
+                  borderRadius: 3,
+                  background: "var(--color-lime)",
+                  color: "var(--color-lime-ink)",
+                  fontWeight: 600,
+                  border: "none",
+                  cursor: genBusy === "saving" ? "wait" : "pointer",
+                }}
+              >
+                <Check size={10} aria-hidden="true" />
+                {genBusy === "saving" ? "…" : "Apply"}
+              </button>
+              <button
+                onClick={() => setGenTitle("")}
+                aria-label="Discard"
+                style={{
+                  fontSize: 10,
+                  padding: "2px 6px",
+                  borderRadius: 3,
+                  background: "transparent",
+                  color: "var(--color-text-faint)",
+                  border: "1px solid var(--color-border)",
+                  cursor: "pointer",
+                }}
+              >
+                Discard
+              </button>
+            </>
+          )}
+        </div>
+      )}
       <table className="w-full" style={{ borderCollapse: "collapse" }}>
         <tbody>
           {scene.assets.filter(a => cellApplies(a.asset_type, scene.scene_type)).map(a => {

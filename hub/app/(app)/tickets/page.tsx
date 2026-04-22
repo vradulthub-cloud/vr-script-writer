@@ -1,37 +1,37 @@
 import { auth } from "@/auth"
-import { api, cachedUsersMe, type Approval, type Ticket, type UserProfile } from "@/lib/api"
+import { api, cachedUsersMe, type Ticket, type UserProfile } from "@/lib/api"
 import { requireTab } from "@/lib/rbac"
-import { PageHeader } from "@/components/ui/page-header"
-import { TicketsTabs } from "./tickets-tabs"
+import { TicketList } from "./ticket-list"
 
 export const dynamic = "force-dynamic"
 
+/**
+ * Tickets page — server entry.
+ *
+ * The redundant Open Tickets / In Review / Closed tab strip that used to
+ * live above the list got cut. The status pill row inside <TicketList>
+ * (Active / All / New / In Progress / In Review / Closed) covers the same
+ * states with finer granularity, so the tab strip was just chrome.
+ *
+ * Approvals are intentionally not fetched — the workflow is paused; see
+ * /approvals which renders a "Paused" notice for direct visitors.
+ */
 export default async function TicketsPage() {
   const session = await auth()
   const idToken = (session as { idToken?: string } | null)?.idToken
   await requireTab("Tickets", idToken)
   const client = api(session)
 
-  let approvals: Approval[]        = []
-  let approvalsError: string | null = null
   let tickets: Ticket[]            = []
   let ticketsError: string | null   = null
   let users: UserProfile[]         = []
   let userRole = "editor"
 
-  const [approvalsRes, ticketsRes, usersRes, meRes] = await Promise.allSettled([
-    client.approvals.list(),
+  const [ticketsRes, usersRes, meRes] = await Promise.allSettled([
     client.tickets.list(),
     client.users.list(),
     cachedUsersMe(idToken),
   ])
-
-  if (approvalsRes.status === "fulfilled") {
-    approvals = approvalsRes.value
-  } else {
-    approvalsError = approvalsRes.reason instanceof Error
-      ? approvalsRes.reason.message : "Failed to load approvals"
-  }
 
   if (ticketsRes.status === "fulfilled") {
     tickets = ticketsRes.value
@@ -40,55 +40,18 @@ export default async function TicketsPage() {
       ? ticketsRes.reason.message : "Failed to load tickets"
   }
 
-  if (usersRes.status  === "fulfilled") users    = usersRes.value
-  if (meRes.status     === "fulfilled" && meRes.value) {
+  if (usersRes.status === "fulfilled") users = usersRes.value
+  if (meRes.status    === "fulfilled" && meRes.value) {
     userRole = (meRes.value.role ?? "editor").toLowerCase()
   }
 
-  const pendingCount = approvals.filter(a => a.status === "Pending").length
-  const openCount    = tickets.filter(t => ["New", "Approved", "In Progress"].includes(t.status)).length
-  const totalCount   = pendingCount + openCount
-
   return (
-    <div>
-      <PageHeader
-        title="Tickets"
-        eyebrow={
-          [
-            totalCount   ? `${totalCount} items`        : null,
-            pendingCount ? `${pendingCount} approvals`  : null,
-            openCount    ? `${openCount} open`          : null,
-          ].filter(Boolean).join(" · ") || "Queue"
-        }
-        actions={
-          <button
-            style={{
-              padding: "7px 14px",
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              background: "var(--color-lime)",
-              color: "#000",
-              border: "none",
-              borderRadius: 4,
-              cursor: "pointer",
-            }}
-          >
-            + New Ticket
-          </button>
-        }
-      />
-
-      <TicketsTabs
-        approvals={approvals}
-        approvalsError={approvalsError}
-        tickets={tickets}
-        ticketsError={ticketsError}
-        users={users}
-        idToken={idToken}
-        userRole={userRole}
-      />
-    </div>
+    <TicketList
+      tickets={tickets}
+      users={users}
+      error={ticketsError}
+      idToken={idToken}
+      userRole={userRole}
+    />
   )
 }

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo, useRef, useEffect } from "react"
+import { Wand2 } from "lucide-react"
 import { useStream } from "@/lib/sse"
 import { api, API_BASE_URL, type Scene } from "@/lib/api"
 import { formatApiError } from "@/lib/errors"
@@ -10,6 +11,9 @@ import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
 import { PageHeader } from "@/components/ui/page-header"
+import { studioAbbr } from "@/lib/studio-colors"
+import { ApprovedTagsReference } from "@/components/ui/approved-tags-reference"
+import { SeoModal } from "@/components/ui/seo-modal"
 
 // ---------------------------------------------------------------------------
 // Per-studio category lists — grouped for visual structure
@@ -59,14 +63,19 @@ function EditableParagraph({
   index,
   studioColor,
   onSave,
+  onRegenerate,
 }: {
   text: string
   index: number
   studioColor: string
   onSave: (index: number, newText: string) => void
+  onRegenerate?: (index: number, feedback: string) => Promise<string | null>
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(text)
+  const [feedback, setFeedback] = useState("")
+  const [regenerating, setRegenerating] = useState(false)
+  const [regenError, setRegenError] = useState<string | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -80,6 +89,26 @@ function EditableParagraph({
       taRef.current.style.height = taRef.current.scrollHeight + "px"
     }
   }, [editing])
+
+  async function handleRegenerate() {
+    if (!onRegenerate) return
+    setRegenerating(true)
+    setRegenError(null)
+    try {
+      const next = await onRegenerate(index, feedback.trim())
+      if (next != null) {
+        setDraft(next)
+        if (taRef.current) {
+          taRef.current.style.height = "auto"
+          taRef.current.style.height = taRef.current.scrollHeight + "px"
+        }
+      }
+    } catch (e) {
+      setRegenError(e instanceof Error ? e.message : "Regeneration failed")
+    } finally {
+      setRegenerating(false)
+    }
+  }
 
   if (editing) {
     return (
@@ -101,16 +130,53 @@ function EditableParagraph({
             minHeight: 60,
           }}
         />
-        <div className="flex gap-2 mt-1.5">
+        {onRegenerate && (
+          <div className="mt-1.5">
+            <input
+              type="text"
+              value={feedback}
+              onChange={e => setFeedback(e.target.value)}
+              placeholder="Optional nudge for regenerate (e.g. 'more tension, less dialogue')"
+              className="w-full px-2.5 py-1 rounded text-xs outline-none"
+              style={{
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text)",
+              }}
+            />
+          </div>
+        )}
+        {regenError && (
+          <p style={{ fontSize: 10, color: "var(--color-err)", marginTop: 4 }}>{regenError}</p>
+        )}
+        <div className="flex gap-2 mt-1.5 flex-wrap">
           <button
-            onClick={() => { onSave(index, draft); setEditing(false) }}
+            onClick={() => { onSave(index, draft); setEditing(false); setFeedback("") }}
+            disabled={regenerating}
             className="px-2.5 py-1 rounded text-xs font-semibold"
-            style={{ background: "var(--color-lime)", color: "#0d0d0d" }}
+            style={{ background: "var(--color-lime)", color: "var(--color-lime-ink)", opacity: regenerating ? 0.5 : 1 }}
           >
             Save
           </button>
+          {onRegenerate && (
+            <button
+              onClick={handleRegenerate}
+              disabled={regenerating}
+              className="px-2.5 py-1 rounded text-xs"
+              style={{
+                color: "var(--color-text)",
+                background: "var(--color-elevated)",
+                border: "1px solid var(--color-border)",
+                cursor: regenerating ? "wait" : "pointer",
+              }}
+              title="Ask Claude to rewrite just this paragraph"
+            >
+              {regenerating ? "Regenerating…" : "↻ Regenerate"}
+            </button>
+          )}
           <button
-            onClick={() => { setDraft(text); setEditing(false) }}
+            onClick={() => { setDraft(text); setEditing(false); setFeedback(""); setRegenError(null) }}
+            disabled={regenerating}
             className="px-2.5 py-1 rounded text-xs"
             style={{ color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
           >
@@ -168,11 +234,19 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   // Scene picker for saving
   const [selectedSceneId, setSelectedSceneId] = useState("")
 
+  // Inline scene-title generator — wired to the selected scene so editors
+  // can rename a scene without leaving the Descriptions view.
+  const [genTitle, setGenTitle] = useState("")
+  const [genTitleLoading, setGenTitleLoading] = useState(false)
+  const [genTitleErr, setGenTitleErr] = useState<string | null>(null)
+  const [genTitleSaving, setGenTitleSaving] = useState(false)
+
   const stream = useStream()
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const [docxLoading, setDocxLoading] = useState(false)
   const [docxError, setDocxError] = useState<string | null>(null)
+  const [seoOpen, setSeoOpen] = useState(false)
 
   const client = api(idToken ?? null)
 
@@ -195,16 +269,25 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
     [scenes, studio]
   )
 
-  // Scenes missing descriptions — sorted by readiness
-  const missingDescScenes = useMemo(() => {
-    return studioScenes
+  // Scenes missing descriptions, sorted newest-first (by scene id). We show
+  // the latest 10 by default — editors almost always want to write the
+  // newest scene. For older ones they use the search box below (grail id or
+  // performer), which lifts the cap.
+  const missingAllDesc = useMemo(
+    () => studioScenes
       .filter(s => !s.has_description)
-      .sort((a, b) => {
-        const readyA = (a.title ? 1 : 0) + (a.performers ? 1 : 0) + (a.plot ? 1 : 0) + (a.categories ? 1 : 0)
-        const readyB = (b.title ? 1 : 0) + (b.performers ? 1 : 0) + (b.plot ? 1 : 0) + (b.categories ? 1 : 0)
-        return readyB - readyA // Most ready first
-      })
-  }, [studioScenes])
+      .sort((a, b) => b.id.localeCompare(a.id)),
+    [studioScenes],
+  )
+
+  const [queueSearch, setQueueSearch] = useState("")
+  const missingDescScenes = useMemo(() => {
+    if (!queueSearch.trim()) return missingAllDesc.slice(0, 10)
+    const q = queueSearch.trim().toLowerCase()
+    return missingAllDesc.filter(
+      s => s.id.toLowerCase().includes(q) || (s.performers ?? "").toLowerCase().includes(q),
+    )
+  }, [missingAllDesc, queueSearch])
 
   const [showQueue, setShowQueue] = useState(true)
   const [grailSaving, setGrailSaving] = useState(false)
@@ -231,6 +314,48 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
     if (scene.title && !metaTitle) {
       // Pre-seed the SEO meta title with the scene title (user can override)
       setMetaTitle(scene.title)
+    }
+  }
+
+  const selectedScene = useMemo(
+    () => scenes.find(s => s.id === selectedSceneId) ?? null,
+    [scenes, selectedSceneId],
+  )
+
+  async function generateSceneTitle() {
+    if (!selectedScene) return
+    setGenTitleLoading(true)
+    setGenTitleErr(null)
+    try {
+      const { title } = await client.scenes.generateTitle(selectedScene.id, {
+        female: selectedScene.female,
+        male: selectedScene.male,
+        theme: selectedScene.theme,
+        plot: selectedScene.plot,
+        // Editor-in-progress wardrobe wins over any stale scene row value
+        wardrobe_f: wardrobe || undefined,
+      })
+      setGenTitle(title)
+    } catch (e) {
+      setGenTitleErr(formatApiError(e, "Title"))
+    } finally {
+      setGenTitleLoading(false)
+    }
+  }
+
+  async function applySceneTitle() {
+    if (!genTitle || !selectedScene) return
+    setGenTitleSaving(true)
+    setGenTitleErr(null)
+    try {
+      await client.scenes.updateTitle(selectedScene.id, genTitle)
+      setGenTitle("")
+      setSaveMsg("Title saved.")
+      setTimeout(() => setSaveMsg(null), 1500)
+    } catch (e) {
+      setGenTitleErr(formatApiError(e, "Save"))
+    } finally {
+      setGenTitleSaving(false)
     }
   }
 
@@ -390,37 +515,99 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
 
   const studioColor = STUDIO_COLOR[studio]
 
+  // V2 header stats — shown in eyebrow and subtitle.
+  const missingCount = missingAllDesc.length
+  const totalStudio = studioScenes.length
+  const outputWords = stream.output
+    ? stream.output.split(/\s+/).filter(Boolean).length
+    : 0
+  const subtitle = selectedScene
+    ? `${selectedScene.id} · ${selectedScene.performers || "—"}${selectedScene.title ? ` · ${selectedScene.title}` : ""}`
+    : `${missingCount} missing of ${totalStudio} ${studioAbbr(studio)} scenes`
+
   return (
     <div>
       <PageHeader
         title="Descriptions"
-        eyebrow={isCompilation ? "Compilation write-up" : "Scene write-up"}
+        eyebrow={`WRITING ROOM · ${isCompilation ? "COMPILATION" : "SCENE"} · ${studioAbbr(studio)}`}
+        subtitle={subtitle}
         studioAccent={studio}
+        actions={
+          <button
+            onClick={() => setIsCompilation(v => !v)}
+            role="switch"
+            aria-checked={isCompilation}
+            style={{
+              padding: "5px 11px",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              background: isCompilation
+                ? "color-mix(in srgb, var(--color-lime) 14%, transparent)"
+                : "transparent",
+              color: isCompilation ? "var(--color-lime)" : "var(--color-text-muted)",
+              border: `1px solid ${isCompilation
+                ? "color-mix(in srgb, var(--color-lime) 32%, transparent)"
+                : "var(--color-border)"}`,
+              borderRadius: 4,
+              cursor: "pointer",
+            }}
+          >
+            Compilation
+          </button>
+        }
       />
       <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
         {/* ── Left — inputs ── */}
         <div style={{ width: 300, flexShrink: 0 }}>
 
-        {/* Missing descriptions queue */}
-        {missingDescScenes.length > 0 && (
+        {/* Missing descriptions queue — latest 10 by default; search to expand. */}
+        {missingAllDesc.length > 0 && (
           <div className="mb-4">
             <button
               onClick={() => setShowQueue(v => !v)}
               className="flex items-center justify-between w-full mb-2"
               style={{ fontSize: 11, color: "var(--color-text-muted)", fontWeight: 600 }}
             >
-              <span>Missing Descriptions ({missingDescScenes.length})</span>
+              <span>
+                Missing Descriptions
+                <span style={{ color: "var(--color-text-faint)", fontWeight: 400, marginLeft: 4 }}>
+                  {queueSearch.trim()
+                    ? `${missingDescScenes.length} match${missingDescScenes.length === 1 ? "" : "es"}`
+                    : `latest ${Math.min(10, missingAllDesc.length)} of ${missingAllDesc.length}`}
+                </span>
+              </span>
               <span style={{ fontSize: 10 }}>{showQueue ? "▾" : "▸"}</span>
             </button>
             {showQueue && (
-              <div
-                className="rounded overflow-y-auto"
-                style={{
-                  border: "1px solid var(--color-border)",
-                  maxHeight: 200,
-                }}
-              >
-                {missingDescScenes.slice(0, 30).map((s, i) => {
+              <>
+                <input
+                  type="search"
+                  value={queueSearch}
+                  onChange={e => setQueueSearch(e.target.value)}
+                  placeholder="Search by scene id or performer…"
+                  className="w-full px-2.5 py-1.5 rounded mb-1.5 outline-none"
+                  style={{
+                    fontSize: 11,
+                    background: "var(--color-surface)",
+                    border: "1px solid var(--color-border)",
+                    color: "var(--color-text)",
+                  }}
+                />
+                <div
+                  className="rounded overflow-y-auto"
+                  style={{
+                    border: "1px solid var(--color-border)",
+                    maxHeight: 200,
+                  }}
+                >
+                  {missingDescScenes.length === 0 && queueSearch.trim() && (
+                    <div style={{ padding: "10px 12px", fontSize: 11, color: "var(--color-text-faint)", textAlign: "center" }}>
+                      No matches — try a scene id (e.g. VRA0523) or a performer.
+                    </div>
+                  )}
+                  {missingDescScenes.map((s, i) => {
                   const readiness = (s.title ? 1 : 0) + (s.performers ? 1 : 0) + (s.plot ? 1 : 0) + (s.categories ? 1 : 0)
                   const dot = readiness >= 3 ? "var(--color-ok)" : readiness >= 1 ? "var(--color-warn)" : "var(--color-err)"
                   return (
@@ -441,12 +628,92 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                     </button>
                   )
                 })}
-              </div>
+                </div>
+              </>
             )}
           </div>
         )}
 
         <div className="flex flex-col gap-3">
+
+          {/* Selected scene — title generator */}
+          {selectedScene && (
+            <div
+              className="rounded px-2.5 py-2"
+              style={{
+                background: "var(--color-surface)",
+                border: `1px solid color-mix(in srgb, ${studioColor} 25%, var(--color-border))`,
+              }}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-mono" style={{ fontSize: 10, color: studioColor }}>
+                  {selectedScene.id}
+                </span>
+                <button
+                  onClick={generateSceneTitle}
+                  disabled={genTitleLoading}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded transition-colors"
+                  style={{
+                    fontSize: 10,
+                    background: "transparent",
+                    color: genTitleLoading ? "var(--color-text-faint)" : studioColor,
+                    border: `1px solid ${genTitleLoading ? "var(--color-border)" : `color-mix(in srgb, ${studioColor} 35%, transparent)`}`,
+                    cursor: genTitleLoading ? "wait" : "pointer",
+                  }}
+                  title="Generate a title from the scene's script"
+                >
+                  <Wand2 size={10} aria-hidden="true" />
+                  {genTitleLoading ? "…" : "Title"}
+                </button>
+              </div>
+              <p style={{ fontSize: 12, color: "var(--color-text)", lineHeight: 1.35 }}>
+                {selectedScene.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}
+              </p>
+              {genTitleErr && (
+                <p style={{ fontSize: 10, color: "var(--color-err)", marginTop: 4 }}>{genTitleErr}</p>
+              )}
+              {genTitle && (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <span
+                    className="flex-1 truncate"
+                    style={{
+                      fontSize: 11,
+                      color: "var(--color-text)",
+                      fontWeight: 600,
+                    }}
+                    title={genTitle}
+                  >
+                    {genTitle}
+                  </span>
+                  <button
+                    onClick={applySceneTitle}
+                    disabled={genTitleSaving}
+                    className="px-2 py-0.5 rounded"
+                    style={{
+                      fontSize: 10,
+                      background: "var(--color-lime)",
+                      color: "var(--color-lime-ink)",
+                      fontWeight: 600,
+                      cursor: genTitleSaving ? "wait" : "pointer",
+                    }}
+                  >
+                    {genTitleSaving ? "…" : "Apply"}
+                  </button>
+                  <button
+                    onClick={() => setGenTitle("")}
+                    className="px-1.5 py-0.5 rounded"
+                    style={{
+                      fontSize: 10,
+                      color: "var(--color-text-faint)",
+                      border: "1px solid var(--color-border)",
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Studio */}
           <div>
@@ -467,23 +734,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
             />
           </div>
 
-          {/* Is compilation */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsCompilation(v => !v)}
-              className="px-2.5 py-1 rounded text-xs transition-colors"
-              style={{
-                background: isCompilation ? "color-mix(in srgb, var(--color-lime) 15%, transparent)" : "transparent",
-                color: isCompilation ? "var(--color-lime)" : "var(--color-text-muted)",
-                border: `1px solid ${isCompilation ? "color-mix(in srgb, var(--color-lime) 30%, transparent)" : "var(--color-border)"}`,
-              }}
-            >
-              Compilation
-            </button>
-            <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-              {isCompilation ? "Compilation desc" : "Single scene"}
-            </span>
-          </div>
+          {/* Compilation toggle lives in the PageHeader actions now. */}
 
           {/* Performers */}
           <div>
@@ -522,17 +773,22 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
 
           {/* Categories — grouped chips */}
           <div>
-            <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-              Categories
-              {selectedCats.length > 0 && (
-                <button
-                  onClick={() => setSelectedCats([])}
-                  style={{ marginLeft: 6, color: "var(--color-text-faint)", fontSize: 10 }}
-                >
-                  clear
-                </button>
-              )}
-            </label>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+              <label style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                Categories
+                {selectedCats.length > 0 && (
+                  <button
+                    onClick={() => setSelectedCats([])}
+                    style={{ marginLeft: 6, color: "var(--color-text-faint)", fontSize: 10 }}
+                  >
+                    clear
+                  </button>
+                )}
+              </label>
+            </div>
+            <div style={{ marginBottom: 6 }}>
+              <ApprovedTagsReference studio={studio} />
+            </div>
             <div className="grid grid-cols-2 gap-2">
               {(STUDIO_CATEGORY_GROUPS[studio] ?? []).map(({ label, cats }) => (
                 <div key={label}>
@@ -624,7 +880,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
           className="w-full mt-4 px-3 py-2 rounded text-xs font-semibold transition-colors"
           style={{
             background: stream.streaming ? "var(--color-elevated)" : "var(--color-lime)",
-            color: stream.streaming ? "var(--color-text-muted)" : "#0d0d0d",
+            color: stream.streaming ? "var(--color-text-muted)" : "var(--color-lime-ink)",
             cursor: stream.streaming ? "wait" : "pointer",
             opacity: (!performers && !stream.streaming) ? 0.5 : 1,
           }}
@@ -647,8 +903,76 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
         )}
       </div>
 
-      {/* ── Right — output ── */}
+      {/* ── Right — output (V2 ec-block frame) ── */}
       <div style={{ flex: 1, minWidth: 0 }}>
+        <section
+          className="ec-block"
+          style={{
+            border: "1px solid var(--color-border)",
+            background: "var(--color-surface)",
+            borderRadius: 4,
+          }}
+        >
+          <header
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "9px 16px",
+              borderBottom: "1px solid var(--color-border)",
+            }}
+          >
+            <h2
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                gap: 8,
+                fontFamily: "var(--font-sans)",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "var(--color-text-muted)",
+                margin: 0,
+              }}
+            >
+              <span
+                className="num"
+                style={{
+                  fontWeight: 800,
+                  fontSize: 16,
+                  letterSpacing: "-0.02em",
+                  color: "var(--color-text)",
+                }}
+              >
+                {studioAbbr(studio)}
+              </span>
+              {isCompilation ? "Compilation" : "Description"}
+            </h2>
+            <div
+              className="act"
+              style={{
+                display: "flex",
+                gap: 12,
+                alignItems: "center",
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                color: "var(--color-text-muted)",
+              }}
+            >
+              {outputWords > 0 && (
+                <span className="tabular-nums">{outputWords.toLocaleString()} words</span>
+              )}
+              {stream.streaming && <span style={{ color: "var(--color-lime)" }}>Streaming</span>}
+              {!stream.streaming && stream.output && (
+                <CopyButton text={getFullDescription()} label="Copy" />
+              )}
+            </div>
+          </header>
+
+          <div style={{ padding: "14px 16px" }}>
         {stream.error && <ErrorAlert className="mb-3">{stream.error}</ErrorAlert>}
 
         {!stream.output && !stream.streaming && (
@@ -671,6 +995,18 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
 
         {(stream.output || stream.streaming) && (
           <>
+            {/* Paragraph count + read time — words now live in the ec-block header. */}
+            {stream.output && !stream.streaming && paragraphs.length > 0 && (() => {
+              const words = stream.output.split(/\s+/).filter(Boolean).length
+              const mins = Math.max(1, Math.round(words / 200))
+              return (
+                <div className="flex items-center gap-3 mb-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                  <span className="tabular-nums">{paragraphs.length} paragraph{paragraphs.length === 1 ? "" : "s"}</span>
+                  <span aria-hidden style={{ opacity: 0.5 }}>·</span>
+                  <span className="tabular-nums">~{mins} min read</span>
+                </div>
+              )
+            })()}
             {/* Description body */}
             <div
               className="rounded mb-4 px-4 py-3"
@@ -709,79 +1045,77 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                       onSave={(idx, newText) =>
                         setEditedParagraphs(prev => ({ ...prev, [idx]: newText }))
                       }
+                      onRegenerate={async (idx, feedbackText) => {
+                        const res = await client.descriptions.regenerateParagraph({
+                          studio,
+                          paragraph: para,
+                          paragraph_index: idx,
+                          performer: performers || selectedScene?.female || "",
+                          title: selectedScene?.title ?? "",
+                          plot: selectedScene?.theme ?? "",
+                          feedback: feedbackText,
+                        })
+                        const next = res.paragraph?.trim() ?? ""
+                        if (next) {
+                          setEditedParagraphs(prev => ({ ...prev, [idx]: next }))
+                          return next
+                        }
+                        return null
+                      }}
                     />
                   ))}
                 </>
               )}
             </div>
 
-            {/* SEO section */}
+            {/* SEO summary chip — opens the full editor in a modal. */}
             {!stream.streaming && stream.output && (
-              <div
-                className="rounded mb-4 px-4 py-3"
+              <button
+                type="button"
+                onClick={() => setSeoOpen(true)}
+                className="mb-4"
                 style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 14px",
                   background: "var(--color-surface)",
                   border: "1px solid var(--color-border)",
+                  cursor: "pointer",
+                  textAlign: "left",
                 }}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <span style={{ fontSize: 11, color: "var(--color-text-muted)", fontWeight: 600 }}>SEO Tags</span>
-                  <button
-                    onClick={generateSeo}
-                    disabled={seoLoading}
-                    className="px-2.5 py-1 rounded text-xs transition-colors"
-                    style={{
-                      background: "transparent",
-                      color: seoLoading ? "var(--color-text-faint)" : studioColor,
-                      border: `1px solid ${seoLoading ? "var(--color-border)" : `color-mix(in srgb, ${studioColor} 35%, transparent)`}`,
-                      cursor: seoLoading ? "wait" : "pointer",
-                    }}
-                  >
-                    {seoLoading ? "Generating…" : "Generate SEO Tags"}
-                  </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+                    SEO Tags
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {metaTitle || metaDesc ? (
+                      <>
+                        {metaTitle || <span style={{ color: "var(--color-text-faint)" }}>No title</span>}
+                        {metaDesc && <span style={{ color: "var(--color-text-muted)" }}> · {metaDesc.slice(0, 80)}{metaDesc.length > 80 ? "…" : ""}</span>}
+                      </>
+                    ) : (
+                      <span style={{ color: "var(--color-text-faint)" }}>Not generated yet — click to open editor</span>
+                    )}
+                  </span>
                 </div>
-                {seoError && <p style={{ fontSize: 11, color: "var(--color-err)", marginBottom: 6 }}>{seoError}</p>}
-
-                {/* Meta Title */}
-                <div className="mb-2">
-                  <label className="block mb-1" style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
-                    Meta Title <span style={{ opacity: 0.6 }}>({metaTitle.length}/60)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={metaTitle}
-                    onChange={e => setMetaTitle(e.target.value.slice(0, 60))}
-                    placeholder="Auto-generated on click above…"
-                    maxLength={60}
-                    className="w-full px-2.5 py-1.5 rounded text-xs outline-none"
-                    style={{
-                      background: "var(--color-elevated)",
-                      border: "1px solid var(--color-border)",
-                      color: "var(--color-text)",
-                    }}
-                  />
-                </div>
-
-                {/* Meta Description */}
-                <div>
-                  <label className="block mb-1" style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
-                    Meta Description <span style={{ opacity: 0.6, color: metaDesc.length > 145 ? "var(--color-warn)" : undefined }}>({metaDesc.length}/155)</span>
-                  </label>
-                  <textarea
-                    value={metaDesc}
-                    onChange={e => setMetaDesc(e.target.value.slice(0, 155))}
-                    rows={2}
-                    placeholder="Auto-generated on click above…"
-                    maxLength={155}
-                    className="w-full px-2.5 py-1.5 rounded text-xs outline-none resize-none"
-                    style={{
-                      background: "var(--color-elevated)",
-                      border: "1px solid var(--color-border)",
-                      color: "var(--color-text)",
-                    }}
-                  />
-                </div>
-              </div>
+                <span
+                  style={{
+                    flexShrink: 0,
+                    padding: "3px 9px",
+                    fontSize: 9,
+                    fontWeight: 700,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    color: studioColor,
+                    border: `1px solid color-mix(in srgb, ${studioColor} 32%, transparent)`,
+                  }}
+                >
+                  {metaTitle || metaDesc ? "Edit" : "Open"} →
+                </span>
+              </button>
             )}
 
             {/* Save / Download row */}
@@ -812,7 +1146,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                   className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
                   style={{
                     background: "var(--color-lime)",
-                    color: "#0d0d0d",
+                    color: "var(--color-lime-ink)",
                     opacity: (saving || !selectedSceneId) ? 0.5 : 1,
                   }}
                 >
@@ -865,8 +1199,24 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
             )}
           </>
         )}
+          </div>
+        </section>
       </div>
     </div>
+
+    {seoOpen && (
+      <SeoModal
+        metaTitle={metaTitle}
+        metaDesc={metaDesc}
+        studioColor={studioColor}
+        loading={seoLoading}
+        error={seoError}
+        onChangeTitle={setMetaTitle}
+        onChangeDesc={setMetaDesc}
+        onGenerate={generateSeo}
+        onClose={() => setSeoOpen(false)}
+      />
+    )}
     </div>
   )
 }

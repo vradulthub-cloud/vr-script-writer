@@ -230,6 +230,33 @@ CREATE TABLE IF NOT EXISTS model_profiles (
     profile_json TEXT NOT NULL DEFAULT '{}',
     cached_at TEXT NOT NULL
 );
+
+-- Calendar events (custom events on the Shoot Tracker calendar — shared
+-- across the team, not synced to Sheets). Each row is one event on one date.
+-- We do NOT scope events per-user; the team sees the same calendar.
+CREATE TABLE IF NOT EXISTS calendar_events (
+    event_id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,        -- YYYY-MM-DD
+    title TEXT NOT NULL DEFAULT '',
+    kind TEXT DEFAULT '',       -- short tag, e.g. "MEETING"
+    color TEXT DEFAULT '',      -- swatch id from EVENT_COLORS, e.g. "lime"
+    notes TEXT DEFAULT '',
+    created_by TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cal_events_date ON calendar_events(date);
+
+-- Editable AI prompt overrides. The bundled defaults live in api/prompts.py;
+-- writing a row here causes get_prompt(key) to return the override instead.
+-- Deleting a row reverts to the bundled default. The admin UI surfaces this
+-- table directly — every editable prompt has a stable string key (e.g.
+-- "title.VRHush", "desc.FPVR") that downstream callers pass to get_prompt.
+CREATE TABLE IF NOT EXISTS prompt_overrides (
+    prompt_key TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    updated_by TEXT DEFAULT '',
+    updated_at TEXT NOT NULL
+);
 """
 
 

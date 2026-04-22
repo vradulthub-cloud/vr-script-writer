@@ -2,25 +2,25 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Bell, Check, Ticket, CheckSquare } from "lucide-react"
+import { Bell, Check, Ticket } from "lucide-react"
 import type { Notification } from "@/lib/api"
 import { API_BASE_URL } from "@/lib/api"
 import { showToast } from "@/components/ui/toast"
 
+// Approval icons + the /approvals link mapping were removed when the team
+// paused the approvals workflow. If a legacy notification with link "Approvals"
+// arrives, it falls through to "#" rather than navigating to a dead route.
 const TYPE_ICON: Record<string, React.ComponentType<{ size?: number; style?: React.CSSProperties }>> = {
-  ticket_created:     Ticket,
-  ticket_status:      Ticket,
-  approval_submitted: CheckSquare,
-  approval_decided:   CheckSquare,
+  ticket_created: Ticket,
+  ticket_status:  Ticket,
 }
 
-// Legacy rows wrote bare tab names ("Tickets", "Approvals"); map to real routes.
+// Legacy rows wrote bare tab names ("Tickets"); map to real routes.
 function normalizeNotifLink(link: string | null | undefined): string {
   if (!link) return "#"
   if (link.startsWith("/")) return link
   const map: Record<string, string> = {
     Tickets: "/tickets",
-    Approvals: "/approvals",
     Scripts: "/scripts",
     Missing: "/missing",
     "Model Research": "/research",

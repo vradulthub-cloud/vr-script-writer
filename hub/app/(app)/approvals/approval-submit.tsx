@@ -171,7 +171,7 @@ export function ApprovalSubmit({ idToken: serverToken }: Props) {
             className="px-4 py-2 rounded text-xs font-semibold transition-colors"
             style={{
               background: "var(--color-lime)",
-              color: "#0d0d0d",
+              color: "var(--color-lime-ink)",
               opacity: (submitting || !sceneId || !content) ? 0.5 : 1,
             }}
           >
