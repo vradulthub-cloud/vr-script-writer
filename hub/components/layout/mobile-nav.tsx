@@ -12,7 +12,6 @@ import {
   Users,
   Phone,
   Layers,
-  CheckSquare,
   Ticket,
   MoreHorizontal,
 } from "lucide-react"
@@ -30,7 +29,6 @@ const OVERFLOW_ITEMS = [
   { href: "/descriptions", label: "Descriptions", icon: AlignLeft },
   { href: "/research",     label: "Research",     icon: Users },
   { href: "/compilations", label: "Comps",        icon: Layers },
-  { href: "/approvals",    label: "Approvals",    icon: CheckSquare },
   { href: "/tickets",      label: "Tickets",      icon: Ticket },
 ]
 

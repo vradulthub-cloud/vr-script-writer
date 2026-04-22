@@ -1,22 +1,21 @@
 "use client"
 
 import { useState } from "react"
-import { type Approval, type Ticket, type UserProfile } from "@/lib/api"
-import { ApprovalList } from "../approvals/approval-list"
-import { ApprovalSubmit } from "../approvals/approval-submit"
+import { type Ticket, type UserProfile } from "@/lib/api"
 import { TicketList } from "./ticket-list"
 
 /**
- * V2 dropped its permanent right-column "Submit Ticket" form — it ate ~30%
- * of the viewport on every page load even though most users open the page
- * to read/triage, not submit. The form lives on the "Submit" surface
- * instead (linked from the New Ticket buttons), and the day-to-day list
- * gets the full canvas.
+ * Approvals + Submit tabs were removed from /tickets per product call —
+ * the team isn't using approvals yet, so a tab leading to an empty
+ * surface (and a Submit form whose target is unused) just adds chrome.
+ *
+ * Approvals is still reachable at its own /approvals route for
+ * notification deep-links and a future re-introduction. The two tabs
+ * here can be added back by reverting this file plus the page.tsx
+ * data fetch.
  */
 
 interface Props {
-  approvals: Approval[]
-  approvalsError: string | null
   tickets: Ticket[]
   ticketsError: string | null
   users: UserProfile[]
@@ -25,28 +24,15 @@ interface Props {
   v2?: boolean
 }
 
-const TABS_V1 = [
-  { key: "approvals",  label: "Approvals" },
-  { key: "open",       label: "Open Tickets" },
-  { key: "in-review",  label: "In Review" },
-  { key: "closed",     label: "Closed" },
-  { key: "submit",     label: "Submit" },
+const TABS = [
+  { key: "open",      label: "Open Tickets" },
+  { key: "in-review", label: "In Review" },
+  { key: "closed",    label: "Closed" },
 ] as const
 
-const TABS_V2 = [
-  { key: "approvals",  label: "Approvals" },
-  { key: "open",       label: "Open Tickets" },
-  { key: "in-review",  label: "In Review" },
-  { key: "closed",     label: "Closed" },
-  { key: "submit",     label: "Submit" },
-] as const
-
-type TabKeyV1 = (typeof TABS_V1)[number]["key"]
-type TabKeyV2 = (typeof TABS_V2)[number]["key"]
+type TabKey = (typeof TABS)[number]["key"]
 
 export function TicketsTabs({
-  approvals,
-  approvalsError,
   tickets,
   ticketsError,
   users,
@@ -54,55 +40,49 @@ export function TicketsTabs({
   userRole,
   v2 = false,
 }: Props) {
-  return v2 ? (
-    <V2Layout
-      approvals={approvals}
-      approvalsError={approvalsError}
-      tickets={tickets}
-      ticketsError={ticketsError}
-      users={users}
-      idToken={idToken}
-      userRole={userRole}
-    />
-  ) : (
-    <V1Layout
-      approvals={approvals}
-      approvalsError={approvalsError}
-      tickets={tickets}
-      ticketsError={ticketsError}
-      users={users}
-      idToken={idToken}
-      userRole={userRole}
-    />
-  )
-}
+  const [tab, setTab] = useState<TabKey>("open")
 
-/* ─── v1 (existing) ────────────────────────────────────────────────────────── */
-function V1Layout({
-  approvals,
-  approvalsError,
-  tickets,
-  ticketsError,
-  users,
-  idToken,
-  userRole,
-}: Omit<Props, "v2">) {
-  const [tab, setTab] = useState<TabKeyV1>("approvals")
+  const openCount   = tickets.filter(t => t.status === "New" || t.status === "Approved" || t.status === "In Progress").length
+  const reviewCount = tickets.filter(t => t.status === "In Review").length
+  const closedCount = tickets.filter(t => t.status === "Closed" || t.status === "Rejected").length
 
-  const pendingCount  = approvals.filter(a => a.status === "Pending").length
-  const openCount     = tickets.filter(t => t.status === "New" || t.status === "Approved" || t.status === "In Progress").length
-  const reviewCount   = tickets.filter(t => t.status === "In Review").length
-  const closedCount   = tickets.filter(t => t.status === "Closed" || t.status === "Rejected").length
-
-  const counts: Record<TabKeyV1, number | null> = {
-    approvals:  pendingCount  || null,
-    open:       openCount     || null,
-    "in-review": reviewCount  || null,
-    closed:     closedCount   || null,
-    submit:     null,
+  const counts: Record<TabKey, number> = {
+    open: openCount,
+    "in-review": reviewCount,
+    closed: closedCount,
   }
 
-  return (
+  // V2 keeps the segmented-control look-and-feel from the redesign;
+  // V1 keeps the original underline-tab look. Same content either way.
+  return v2 ? (
+    <div>
+      <div className="ec-seg" role="tablist" aria-label="Tickets" style={{ marginBottom: 18 }}>
+        {TABS.map(t => (
+          <button
+            key={t.key}
+            role="tab"
+            aria-selected={tab === t.key}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+            {counts[t.key] ? <span className="c">{counts[t.key]}</span> : null}
+          </button>
+        ))}
+      </div>
+      <TicketList
+        tickets={tickets}
+        users={users}
+        error={ticketsError}
+        idToken={idToken}
+        userRole={userRole}
+        defaultStatusFilter={
+          tab === "open"      ? "open"      :
+          tab === "in-review" ? "In Review" :
+          "closed"
+        }
+      />
+    </div>
+  ) : (
     <div>
       <div
         style={{
@@ -112,7 +92,7 @@ function V1Layout({
           marginBottom: 20,
         }}
       >
-        {TABS_V1.map(t => {
+        {TABS.map(t => {
           const active = tab === t.key
           const count = counts[t.key]
           return (
@@ -138,14 +118,14 @@ function V1Layout({
               }}
             >
               {t.label}
-              {count ? (
+              {count > 0 && (
                 <span
                   style={{
                     fontSize: 9,
                     fontWeight: 700,
-                    background: t.key === "approvals" ? "color-mix(in srgb, var(--color-warn) 18%, transparent)" : "var(--color-elevated)",
-                    color: t.key === "approvals" ? "var(--color-warn)" : "var(--color-text-muted)",
-                    border: t.key === "approvals" ? "1px solid color-mix(in srgb, var(--color-warn) 30%, transparent)" : "1px solid var(--color-border)",
+                    background: "var(--color-elevated)",
+                    color: "var(--color-text-muted)",
+                    border: "1px solid var(--color-border)",
                     borderRadius: 10,
                     padding: "1px 6px",
                     fontVariantNumeric: "tabular-nums",
@@ -153,111 +133,23 @@ function V1Layout({
                 >
                   {count}
                 </span>
-              ) : null}
+              )}
             </button>
           )
         })}
       </div>
-
-      {tab === "approvals" && (
-        <ApprovalList
-          initialApprovals={approvals}
-          error={approvalsError}
-          idToken={idToken}
-        />
-      )}
-
-      {(tab === "open" || tab === "in-review" || tab === "closed") && (
-        <TicketList
-          tickets={tickets}
-          users={users}
-          error={ticketsError}
-          idToken={idToken}
-          userRole={userRole}
-          defaultStatusFilter={
-            tab === "open"      ? "open"      :
-            tab === "in-review" ? "In Review" :
-            "closed"
-          }
-        />
-      )}
-
-      {tab === "submit" && (
-        <ApprovalSubmit idToken={idToken} />
-      )}
-    </div>
-  )
-}
-
-/* ─── v2 (prototype-inspired) ──────────────────────────────────────────────── */
-function V2Layout({
-  approvals,
-  approvalsError,
-  tickets,
-  ticketsError,
-  users,
-  idToken,
-  userRole,
-}: Omit<Props, "v2">) {
-  const [tab, setTab] = useState<TabKeyV2>("approvals")
-
-  const pendingCount = approvals.filter(a => a.status === "Pending").length
-  const openCount    = tickets.filter(t => t.status === "New" || t.status === "Approved" || t.status === "In Progress").length
-  const reviewCount  = tickets.filter(t => t.status === "In Review").length
-  const closedCount  = tickets.filter(t => t.status === "Closed" || t.status === "Rejected").length
-
-  const counts: Record<TabKeyV2, number> = {
-    approvals: pendingCount,
-    open: openCount,
-    "in-review": reviewCount,
-    closed: closedCount,
-    submit: 0,
-  }
-
-  return (
-    <div>
-      <div className="ec-seg" role="tablist" aria-label="Tickets" style={{ marginBottom: 18 }}>
-        {TABS_V2.map(t => (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
-          >
-            {t.label}
-            {counts[t.key] ? <span className="c">{counts[t.key]}</span> : null}
-          </button>
-        ))}
-      </div>
-
-      {tab === "approvals" && (
-        <ApprovalList
-          initialApprovals={approvals}
-          error={approvalsError}
-          idToken={idToken}
-        />
-      )}
-
-      {(tab === "open" || tab === "in-review" || tab === "closed") && (
-        <TicketList
-          tickets={tickets}
-          users={users}
-          error={ticketsError}
-          idToken={idToken}
-          userRole={userRole}
-          defaultStatusFilter={
-            tab === "open"      ? "open"      :
-            tab === "in-review" ? "In Review" :
-            "closed"
-          }
-        />
-      )}
-
-      {tab === "submit" && (
-        <div style={{ maxWidth: 720 }}>
-          <ApprovalSubmit idToken={idToken} />
-        </div>
-      )}
+      <TicketList
+        tickets={tickets}
+        users={users}
+        error={ticketsError}
+        idToken={idToken}
+        userRole={userRole}
+        defaultStatusFilter={
+          tab === "open"      ? "open"      :
+          tab === "in-review" ? "In Review" :
+          "closed"
+        }
+      />
     </div>
   )
 }

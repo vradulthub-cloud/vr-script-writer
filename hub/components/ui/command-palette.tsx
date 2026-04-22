@@ -11,7 +11,6 @@ import {
   AlignLeft,
   Layers,
   Ticket,
-  CheckSquare,
   Search,
 } from "lucide-react"
 
@@ -24,8 +23,7 @@ const COMMANDS = [
   { id: "compilations", label: "Compilations",   href: "/compilations", icon: Layers,       shortcut: "6" },
   { id: "missing",      label: "Grail Assets",   href: "/missing",      icon: LayoutGrid,  shortcut: "7" },
   { id: "titles",       label: "Titles",         href: "/titles",       icon: Image,        shortcut: "8" },
-  { id: "approvals",    label: "Approvals",      href: "/approvals",    icon: CheckSquare,  shortcut: "9" },
-  { id: "tickets",      label: "Tickets",        href: "/tickets",      icon: Ticket,       shortcut: "" },
+  { id: "tickets",      label: "Tickets",        href: "/tickets",      icon: Ticket,       shortcut: "9" },
   { id: "admin",        label: "Admin",          href: "/admin",        icon: Users,        shortcut: "0" },
 ]
 

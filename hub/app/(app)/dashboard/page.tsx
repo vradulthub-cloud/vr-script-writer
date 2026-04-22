@@ -20,8 +20,10 @@ export default async function DashboardPage() {
   const idToken = (session as { idToken?: string } | null)?.idToken
   const v2 = await isEclatechV2()
 
+  // Approvals removed from the dashboard for now — the team isn't using
+  // the approvals workflow yet. The /approvals route + API are gone too;
+  // bring them back via git when the workflow's needed.
   const [
-    approvalRes,
     sceneStatsRes,
     scriptsRes,
     notificationsRes,
@@ -29,7 +31,6 @@ export default async function DashboardPage() {
     shootsRes,
     ...missingResults
   ] = await Promise.allSettled([
-    client.approvals.list("Pending"),
     client.scenes.stats(),
     client.scripts.list({ needs_script: true }),
     client.notifications.list(12),
@@ -38,7 +39,6 @@ export default async function DashboardPage() {
     ...STUDIOS.map(s => client.scenes.list({ studio: s, limit: 3, missing_only: true })),
   ])
 
-  const approvals      = approvalRes.status      === "fulfilled" ? approvalRes.value      : []
   const sceneStats     = sceneStatsRes.status    === "fulfilled" ? sceneStatsRes.value    : null
   const scripts        = scriptsRes.status       === "fulfilled" ? scriptsRes.value       : []
   const notifications  = notificationsRes.status === "fulfilled" ? notificationsRes.value : []
@@ -100,14 +100,13 @@ export default async function DashboardPage() {
         <div className="flex flex-col gap-3.5">
           {sceneStats && Object.keys(sceneStats.by_studio).length > 0 && (
             v2
-              ? <ProductionScopeStripV2 stats={sceneStats} shootCount={shoots.length} approvalCount={approvals.length} />
+              ? <ProductionScopeStripV2 stats={sceneStats} shootCount={shoots.length} />
               : <ProductionScopeStrip stats={sceneStats} />
           )}
 
           {v2 && shoots.length > 0 && <WeekCalendar shoots={shoots} />}
 
           <TriageFeed
-            initialApprovals={approvals}
             missingScenes={missingScenes}
             missingTotal={sceneStats?.missing_any ?? 0}
             scripts={scripts}
@@ -137,7 +136,7 @@ export default async function DashboardPage() {
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function ProductionScopeStripV2({ stats, shootCount, approvalCount }: { stats: SceneStats; shootCount: number; approvalCount: number }) {
+function ProductionScopeStripV2({ stats, shootCount }: { stats: SceneStats; shootCount: number }) {
   const entries = Object.entries(stats.by_studio).sort(([, a], [, b]) => b - a)
   const max = Math.max(1, ...entries.map(([, n]) => n))
   return (
@@ -152,11 +151,6 @@ function ProductionScopeStripV2({ stats, shootCount, approvalCount }: { stats: S
           <div className="k">Shoots</div>
           <div className="v">{shootCount}<span className="unit">active</span></div>
           <div className="d">Across 4 studios</div>
-        </div>
-        <div className="s">
-          <div className="k">Approvals</div>
-          <div className="v">{approvalCount}</div>
-          <div className="d">Pending decision</div>
         </div>
         <div className="s">
           <div className="k">Studios</div>

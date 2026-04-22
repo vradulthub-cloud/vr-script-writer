@@ -16,7 +16,6 @@ const PAGE_NAMES: Record<string, string> = {
   "/titles":       "Titles",
   "/descriptions": "Descriptions",
   "/compilations": "Compilations",
-  "/approvals":    "Approvals",
   "/tickets":      "Tickets",
 }
 
