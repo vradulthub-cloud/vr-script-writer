@@ -539,8 +539,8 @@ function TalentRow({
 }) {
   const resolvedPayTo = paymentName || w9Name || null
   const w9Pending = !resolvedPayTo && !rate
-  // W9 files: any PDF with "w9" in the name (case-insensitive)
-  const w9Files = (legalFiles ?? []).filter(f => /w9/i.test(f.name))
+  // Any PDF in the legal folder is the W9 (files aren't always named "w9")
+  const w9Files = (legalFiles ?? []).filter(f => f.mime_type === "application/pdf" || /w9/i.test(f.name))
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "baseline" }}>
