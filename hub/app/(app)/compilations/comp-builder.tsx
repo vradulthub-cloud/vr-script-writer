@@ -9,6 +9,7 @@ import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 import { PageHeader } from "@/components/ui/page-header"
+import { studioAbbr } from "@/lib/studio-colors"
 
 type Mode = "ideas" | "builder" | "existing"
 
@@ -229,34 +230,61 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
 
   const studioColor = STUDIO_COLOR[studio]
 
-  const modeLabel = mode === "ideas" ? "Suggest Ideas" : mode === "builder" ? "Build Comp" : "Existing"
+  const modeLabel = mode === "ideas" ? "IDEAS" : mode === "builder" ? "BUILDER" : "EXISTING"
+  // V2 subtitle — one line that tells the user the state of this tab.
+  const subtitle = mode === "ideas"
+    ? `${parsedIdeas.length > 0 ? `${parsedIdeas.length} ideas generated` : "Generate themed compilation concepts"}`
+    : mode === "builder"
+      ? `${selected.length} scene${selected.length === 1 ? "" : "s"} selected${title ? ` · ${title}` : ""}`
+      : `${existingComps.length} ${studioAbbr(studio)} compilation${existingComps.length === 1 ? "" : "s"} on file`
 
   return (
     <div>
       <PageHeader
         title="Compilations"
-        eyebrow={modeLabel}
+        eyebrow={`PACKAGING · ${modeLabel} · ${studioAbbr(studio)}`}
+        subtitle={subtitle}
         studioAccent={studio}
         actions={
           <>
             <StudioSelector value={studio} onChange={(s) => { setStudio(s); setSelected([]) }} />
             <div
-              className="flex rounded overflow-hidden"
-              style={{ border: "1px solid var(--color-border)" }}
+              className="ec-seg"
+              role="tablist"
+              aria-label="Compilation mode"
+              style={{
+                display: "inline-flex",
+                border: "1px solid var(--color-border)",
+                background: "var(--color-surface)",
+                borderRadius: 4,
+                overflow: "hidden",
+              }}
             >
-              {(["ideas", "builder", "existing"] as Mode[]).map(m => (
-                <button
-                  key={m}
-                  onClick={() => setMode(m)}
-                  className="px-3 py-1 text-xs transition-colors capitalize"
-                  style={{
-                    background: mode === m ? "var(--color-elevated)" : "transparent",
-                    color: mode === m ? "var(--color-text)" : "var(--color-text-muted)",
-                  }}
-                >
-                  {m === "ideas" ? "Suggest Ideas" : m === "builder" ? "Build Comp" : "Existing"}
-                </button>
-              ))}
+              {(["ideas", "builder", "existing"] as Mode[]).map((m, i, arr) => {
+                const active = mode === m
+                return (
+                  <button
+                    key={m}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setMode(m)}
+                    style={{
+                      padding: "6px 14px",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: "0.1em",
+                      textTransform: "uppercase",
+                      background: active ? "var(--color-text)" : "transparent",
+                      color: active ? "var(--color-base)" : "var(--color-text-muted)",
+                      border: "none",
+                      borderRight: i < arr.length - 1 ? "1px solid var(--color-border)" : undefined,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {m === "ideas" ? "Ideas" : m === "builder" ? "Builder" : "Existing"}
+                  </button>
+                )
+              })}
             </div>
           </>
         }
@@ -722,16 +750,16 @@ function ExistingCompsTable({ comps, loading, studio, studioColor, expanded, onT
   }
   return (
     <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-      <table className="w-full" style={{ borderCollapse: "collapse" }}>
+      <table className="ec-ctab w-full" style={{ borderCollapse: "collapse" }}>
         <thead>
-          <tr style={{ background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)", width: 32 }}></th>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Comp ID</th>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Title</th>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Vol.</th>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Status</th>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Scenes</th>
-            <th className="text-left px-3 py-2 font-medium" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Created</th>
+          <tr style={{ background: "var(--color-elevated)", borderBottom: "1px solid var(--color-border)" }}>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)", width: 32 }}></th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Comp ID</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Title</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Vol.</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Status</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Scenes</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Created</th>
           </tr>
         </thead>
         <tbody>

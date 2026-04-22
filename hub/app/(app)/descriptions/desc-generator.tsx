@@ -11,6 +11,7 @@ import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
 import { PageHeader } from "@/components/ui/page-header"
+import { studioAbbr } from "@/lib/studio-colors"
 import { ApprovedTagsReference } from "@/components/ui/approved-tags-reference"
 
 // ---------------------------------------------------------------------------
@@ -512,12 +513,48 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
 
   const studioColor = STUDIO_COLOR[studio]
 
+  // V2 header stats — shown in eyebrow and subtitle.
+  const missingCount = missingAllDesc.length
+  const totalStudio = studioScenes.length
+  const outputWords = stream.output
+    ? stream.output.split(/\s+/).filter(Boolean).length
+    : 0
+  const subtitle = selectedScene
+    ? `${selectedScene.id} · ${selectedScene.performers || "—"}${selectedScene.title ? ` · ${selectedScene.title}` : ""}`
+    : `${missingCount} missing of ${totalStudio} ${studioAbbr(studio)} scenes`
+
   return (
     <div>
       <PageHeader
         title="Descriptions"
-        eyebrow={isCompilation ? "Compilation write-up" : "Scene write-up"}
+        eyebrow={`WRITING ROOM · ${isCompilation ? "COMPILATION" : "SCENE"} · ${studioAbbr(studio)}`}
+        subtitle={subtitle}
         studioAccent={studio}
+        actions={
+          <button
+            onClick={() => setIsCompilation(v => !v)}
+            role="switch"
+            aria-checked={isCompilation}
+            style={{
+              padding: "5px 11px",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              background: isCompilation
+                ? "color-mix(in srgb, var(--color-lime) 14%, transparent)"
+                : "transparent",
+              color: isCompilation ? "var(--color-lime)" : "var(--color-text-muted)",
+              border: `1px solid ${isCompilation
+                ? "color-mix(in srgb, var(--color-lime) 32%, transparent)"
+                : "var(--color-border)"}`,
+              borderRadius: 4,
+              cursor: "pointer",
+            }}
+          >
+            Compilation
+          </button>
+        }
       />
       <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
         {/* ── Left — inputs ── */}
@@ -695,23 +732,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
             />
           </div>
 
-          {/* Is compilation */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsCompilation(v => !v)}
-              className="px-2.5 py-1 rounded text-xs transition-colors"
-              style={{
-                background: isCompilation ? "color-mix(in srgb, var(--color-lime) 15%, transparent)" : "transparent",
-                color: isCompilation ? "var(--color-lime)" : "var(--color-text-muted)",
-                border: `1px solid ${isCompilation ? "color-mix(in srgb, var(--color-lime) 30%, transparent)" : "var(--color-border)"}`,
-              }}
-            >
-              Compilation
-            </button>
-            <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-              {isCompilation ? "Compilation desc" : "Single scene"}
-            </span>
-          </div>
+          {/* Compilation toggle lives in the PageHeader actions now. */}
 
           {/* Performers */}
           <div>
@@ -880,8 +901,76 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
         )}
       </div>
 
-      {/* ── Right — output ── */}
+      {/* ── Right — output (V2 ec-block frame) ── */}
       <div style={{ flex: 1, minWidth: 0 }}>
+        <section
+          className="ec-block"
+          style={{
+            border: "1px solid var(--color-border)",
+            background: "var(--color-surface)",
+            borderRadius: 4,
+          }}
+        >
+          <header
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "9px 16px",
+              borderBottom: "1px solid var(--color-border)",
+            }}
+          >
+            <h2
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                gap: 8,
+                fontFamily: "var(--font-sans)",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "var(--color-text-muted)",
+                margin: 0,
+              }}
+            >
+              <span
+                className="num"
+                style={{
+                  fontWeight: 800,
+                  fontSize: 16,
+                  letterSpacing: "-0.02em",
+                  color: "var(--color-text)",
+                }}
+              >
+                {studioAbbr(studio)}
+              </span>
+              {isCompilation ? "Compilation" : "Description"}
+            </h2>
+            <div
+              className="act"
+              style={{
+                display: "flex",
+                gap: 12,
+                alignItems: "center",
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                color: "var(--color-text-muted)",
+              }}
+            >
+              {outputWords > 0 && (
+                <span className="tabular-nums">{outputWords.toLocaleString()} words</span>
+              )}
+              {stream.streaming && <span style={{ color: "var(--color-lime)" }}>Streaming</span>}
+              {!stream.streaming && stream.output && (
+                <CopyButton text={getFullDescription()} label="Copy" />
+              )}
+            </div>
+          </header>
+
+          <div style={{ padding: "14px 16px" }}>
         {stream.error && <ErrorAlert className="mb-3">{stream.error}</ErrorAlert>}
 
         {!stream.output && !stream.streaming && (
@@ -904,27 +993,15 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
 
         {(stream.output || stream.streaming) && (
           <>
-            {/* Editor metadata strip: words · paragraphs · estimated read */}
-            {stream.output && (() => {
+            {/* Paragraph count + read time — words now live in the ec-block header. */}
+            {stream.output && !stream.streaming && paragraphs.length > 0 && (() => {
               const words = stream.output.split(/\s+/).filter(Boolean).length
-              const paraCount = paragraphs.length
-              // ~200 WPM is typical silent reading speed for marketing copy;
-              // matches the estimate used in the Streamlit descriptions view.
               const mins = Math.max(1, Math.round(words / 200))
               return (
                 <div className="flex items-center gap-3 mb-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-                  <span className="tabular-nums">{words.toLocaleString()} words</span>
-                  {paraCount > 0 && !stream.streaming && (
-                    <>
-                      <span aria-hidden style={{ opacity: 0.5 }}>·</span>
-                      <span className="tabular-nums">{paraCount} paragraph{paraCount === 1 ? "" : "s"}</span>
-                    </>
-                  )}
+                  <span className="tabular-nums">{paragraphs.length} paragraph{paragraphs.length === 1 ? "" : "s"}</span>
                   <span aria-hidden style={{ opacity: 0.5 }}>·</span>
                   <span className="tabular-nums">~{mins} min read</span>
-                  {stream.streaming && (
-                    <span style={{ opacity: 0.5, marginLeft: 4 }}>generating...</span>
-                  )}
                 </div>
               )
             })()}
@@ -1139,6 +1216,8 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
             )}
           </>
         )}
+          </div>
+        </section>
       </div>
     </div>
     </div>

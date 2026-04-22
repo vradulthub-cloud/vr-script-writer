@@ -11,6 +11,7 @@ import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
 import { PageHeader } from "@/components/ui/page-header"
+import { studioAbbr } from "@/lib/studio-colors"
 import { BatchPanel } from "./batch-panel"
 const SCENE_TYPES = ["BG", "BGCP"]
 
@@ -327,52 +328,86 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream.streaming, stream.output, female, selectedRow, saving])
 
+  // V2 header derived state — stats for the eyebrow/subtitle ribbon.
+  const queueLabel = mode === "sheet"
+    ? (sheetLoading ? "loading tabs…" : selectedTab ? `${sheetRows.length} need scripts in ${selectedTab}` : `${tabs.length} tabs available`)
+    : female ? `${female}${male ? ` / ${male}` : ""} — ${sceneType}` : "awaiting talent"
+  const outputStats = stream.output
+    ? (() => {
+        const words = stream.output.split(/\s+/).filter(Boolean).length
+        const mins = Math.max(1, Math.round(words / 150))
+        return `${words.toLocaleString()} words · ~${mins} min read${stream.streaming ? " · streaming" : ""}`
+      })()
+    : (stream.streaming ? "streaming…" : "no output yet")
+
   return (
     <div>
       <PageHeader
         title="Scripts"
-        eyebrow={mode === "manual" ? "Manual mode" : "From Sheet"}
+        eyebrow={`WRITING ROOM · ${mode === "manual" ? "MANUAL" : "FROM SHEET"} · ${studioAbbr(studio)}`}
+        subtitle={queueLabel}
         studioAccent={studio}
+        actions={
+          <div
+            className="ec-seg"
+            role="tablist"
+            aria-label="Scripts input mode"
+            style={{
+              display: "inline-flex",
+              border: "1px solid var(--color-border)",
+              background: "var(--color-surface)",
+              borderRadius: 4,
+              overflow: "hidden",
+            }}
+          >
+            {(["manual", "sheet"] as const).map(m => {
+              const active = mode === m
+              const showDirtyDot = m === "manual" && mode !== "manual" && manualIsDirty
+              return (
+                <button
+                  key={m}
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => switchMode(m)}
+                  title={showDirtyDot ? "You have unsaved manual inputs" : undefined}
+                  style={{
+                    padding: "6px 14px",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    background: active ? "var(--color-text)" : "transparent",
+                    color: active ? "var(--color-base)" : "var(--color-text-muted)",
+                    border: "none",
+                    borderRight: m === "manual" ? "1px solid var(--color-border)" : undefined,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {m === "manual" ? "Manual" : "From Sheet"}
+                  {showDirtyDot && (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        display: "inline-block",
+                        width: 5,
+                        height: 5,
+                        borderRadius: "50%",
+                        background: "var(--color-lime)",
+                      }}
+                    />
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        }
       />
       <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
-        {/* Left panel — inputs */}
+        {/* Left panel — inputs. Mode tabs moved into PageHeader actions (V2). */}
         <div style={{ width: 300, flexShrink: 0 }}>
-          {/* Mode tabs */}
-          <div className="flex gap-1 mb-5">
-          {(["manual", "sheet"] as const).map(m => {
-            const showDirtyDot = m === "manual" && mode !== "manual" && manualIsDirty
-            return (
-              <button
-                key={m}
-                onClick={() => switchMode(m)}
-                className="px-3 py-1.5 rounded text-xs transition-colors capitalize relative"
-                style={{
-                  background: mode === m ? "var(--color-elevated)" : "transparent",
-                  color: mode === m ? "var(--color-text)" : "var(--color-text-muted)",
-                  border: `1px solid ${mode === m ? "var(--color-border)" : "transparent"}`,
-                }}
-                title={showDirtyDot ? "You have unsaved manual inputs" : undefined}
-              >
-                {m === "manual" ? "Manual" : "From Sheet"}
-                {showDirtyDot && (
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      display: "inline-block",
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: "var(--color-lime)",
-                      marginLeft: 6,
-                      verticalAlign: "middle",
-                    }}
-                  />
-                )}
-              </button>
-            )
-          })}
-        </div>
-
         {mode === "sheet" ? (
           <div>
             {tabsError && (
@@ -644,7 +679,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
         )}
       </div>
 
-      {/* Right panel — output */}
+      {/* Right panel — output (V2 ec-block frame) */}
       <div style={{ flex: 1, minWidth: 0 }}>
         {mode === "sheet" && batchMode ? (
           <BatchPanel
@@ -653,7 +688,71 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
             isAdmin={isAdmin}
           />
         ) : (
-        <>
+        <section
+          className="ec-block"
+          style={{
+            border: "1px solid var(--color-border)",
+            background: "var(--color-surface)",
+            borderRadius: 4,
+          }}
+        >
+          <header
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "9px 16px",
+              borderBottom: "1px solid var(--color-border)",
+            }}
+          >
+            <h2
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                gap: 8,
+                fontFamily: "var(--font-sans)",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "var(--color-text-muted)",
+                margin: 0,
+              }}
+            >
+              <span
+                className="num"
+                style={{
+                  fontWeight: 800,
+                  fontSize: 16,
+                  letterSpacing: "-0.02em",
+                  color: "var(--color-text)",
+                }}
+              >
+                {studioAbbr(studio)}
+              </span>
+              Output
+            </h2>
+            <div
+              className="act"
+              style={{
+                display: "flex",
+                gap: 12,
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                color: "var(--color-text-muted)",
+                alignItems: "center",
+              }}
+            >
+              <span>{outputStats}</span>
+              {!stream.streaming && stream.output && (
+                <CopyButton text={stream.output} label="Copy" />
+              )}
+            </div>
+          </header>
+
+          <div style={{ padding: "14px 16px" }}>
         {/* Stream error */}
         {stream.error && <ErrorAlert className="mb-3">{stream.error}</ErrorAlert>}
 
@@ -677,42 +776,20 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
 
         {(stream.output || stream.streaming) && (
           <>
-            {/* Editor metadata strip: words · beats · estimated read · copy */}
-            <div className="flex items-center gap-3 mb-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-              {stream.output && (() => {
-                const words = stream.output.split(/\s+/).filter(Boolean).length
-                const beats = Object.keys(sections).length
-                // ~150 words per spoken minute is a reasonable midpoint for
-                // dialog-driven scripts — matches Streamlit app's read estimate.
-                const mins = Math.max(1, Math.round(words / 150))
-                return (
-                  <>
-                    <span className="tabular-nums">{words.toLocaleString()} words</span>
-                    {beats > 0 && (
-                      <>
-                        <span aria-hidden style={{ opacity: 0.5 }}>·</span>
-                        <span className="tabular-nums">{beats} beat{beats === 1 ? "" : "s"}</span>
-                      </>
-                    )}
-                    <span aria-hidden style={{ opacity: 0.5 }}>·</span>
-                    <span className="tabular-nums">~{mins} min read</span>
-                  </>
-                )
-              })()}
-              {stream.streaming && (
-                <span style={{ opacity: 0.5 }}>generating...</span>
-              )}
-              {!stream.streaming && stream.output && (
-                <CopyButton text={stream.output} label="Copy script" />
-              )}
-            </div>
+            {/* Beats counter when sections parsed — rest of the stat strip
+                lives in the ec-block header now. */}
+            {stream.output && Object.keys(sections).length > 0 && (
+              <div className="flex items-center gap-3 mb-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                <span className="tabular-nums">{Object.keys(sections).length} beat{Object.keys(sections).length === 1 ? "" : "s"}</span>
+              </div>
+            )}
 
             {/* Raw streaming output */}
             <div
               className="rounded mb-4 overflow-auto"
               style={{
-                background: "var(--color-surface)",
-                border: "1px solid var(--color-border)",
+                background: "var(--color-base)",
+                border: "1px solid var(--color-border-subtle)",
                 padding: "12px 14px",
                 maxHeight: 400,
               }}
@@ -940,7 +1017,8 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
             )}
           </>
         )}
-        </>
+          </div>
+        </section>
         )}
       </div>
     </div>
