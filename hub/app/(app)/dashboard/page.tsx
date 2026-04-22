@@ -117,10 +117,6 @@ export default async function DashboardPage() {
         </div>
 
         <div className="flex flex-col gap-3.5">
-          {v2 && <DueSoonPanel scenes={missingScenes} />}
-
-          <AgingShootsPanel shoots={shoots} />
-
           <NotificationFeed
             initialNotifications={notifications}
             idToken={idToken}
