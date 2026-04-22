@@ -7,18 +7,21 @@ const DEV_MOCK =
 
 const authProxy = DEV_MOCK ? () => NextResponse.next() : authMiddleware
 
-// Thin wrapper that honors ?eclatech=v2|off by setting/clearing a cookie, then
-// hands off to the auth middleware. Only strips the param and redirects when
-// the param is present — otherwise it's a pass-through.
+// Thin wrapper that honors ?eclatech=v1|v2|off by setting/clearing a cookie,
+// then hands off to the auth middleware. Only strips the param and redirects
+// when the param is present — otherwise it's a pass-through. V2 is the
+// default now; ?eclatech=v1 is the per-user rollback escape hatch.
 export function proxy(req: NextRequest) {
   const v = req.nextUrl.searchParams.get("eclatech")
-  if (v === "v2" || v === "off") {
+  if (v === "v1" || v === "v2" || v === "off") {
     const url = new URL(req.nextUrl)
     url.searchParams.delete("eclatech")
     const res = NextResponse.redirect(url)
-    if (v === "v2") {
-      res.cookies.set("eclatech", "v2", { path: "/", sameSite: "lax" })
+    if (v === "v1") {
+      // Pin old chrome for this browser — default is V2.
+      res.cookies.set("eclatech", "v1", { path: "/", sameSite: "lax" })
     } else {
+      // v2 or off → clear the cookie so the default (V2) takes over.
       res.cookies.delete("eclatech")
     }
     return res
