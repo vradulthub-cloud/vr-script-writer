@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from "r
 import { X, ChevronRight, ChevronDown, Search } from "lucide-react"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { PageHeader } from "@/components/ui/page-header"
+import { StudioFilter } from "@/components/ui/studio-filter"
 import { api, type Ticket, type TicketCreate, type TicketUpdate, type UserProfile } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { formatApiError } from "@/lib/errors"
@@ -52,12 +53,46 @@ type SortKey = "date" | "priority" | "status"
 const COLUMNS: { key: string; label: string; sort?: SortKey }[] = [
   { key: "id", label: "ID" },
   { key: "title", label: "Title" },
+  { key: "studio", label: "Studio" },
   { key: "priority", label: "Priority", sort: "priority" },
   { key: "status", label: "Status", sort: "status" },
   { key: "date", label: "Created", sort: "date" },
 ]
 
 const DATE_FMT = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" })
+
+// Map scene ID prefixes (the leading letters before the 4-digit number) to
+// the canonical studio key used everywhere else in the app. Scene IDs look
+// like "FPVR1284" / "VRH0987" / "VRA0419" / "NJOI0042"; the prefix is the
+// only reliable studio anchor we get on tickets, since the `project` field
+// is freeform ("Hub", "Content", "Other"...) and rarely names a studio.
+const SCENE_PREFIX_TO_STUDIO: Record<string, string> = {
+  FPVR: "FuckPassVR",
+  VRH:  "VRHush",
+  VRA:  "VRAllure",
+  NJOI: "NaughtyJOI",
+  NNJOI: "NaughtyJOI",  // Grail-tab variant — see CLAUDE.md studio mapping table.
+}
+const SCENE_ID_RE = /\b(NNJOI|NJOI|FPVR|VRH|VRA)[-_]?\d{2,5}\b/gi
+
+/**
+ * Extract every studio referenced by a ticket via its linked_items field.
+ * Returns the set of full studio keys ("FuckPassVR", "VRHush", ...).
+ * Empty set when no scene IDs are linked — those tickets pass any studio
+ * filter only when "All" is selected.
+ */
+function studiosFromTicket(t: Ticket): Set<string> {
+  const out = new Set<string>()
+  const haystack = `${t.linked_items ?? ""} ${t.title ?? ""}`
+  let m: RegExpExecArray | null
+  SCENE_ID_RE.lastIndex = 0
+  while ((m = SCENE_ID_RE.exec(haystack)) !== null) {
+    const prefix = m[1].toUpperCase()
+    const studio = SCENE_PREFIX_TO_STUDIO[prefix]
+    if (studio) out.add(studio)
+  }
+  return out
+}
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—"
@@ -87,6 +122,17 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
     if (defaultStatusFilter === "open") return "Active"
     return defaultStatusFilter
   })
+  // Studio filter — null means "All studios". Persisted across page reloads
+  // so a user working primarily in one studio doesn't have to re-select it.
+  const [studioFilter, setStudioFilter] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null
+    const raw = window.localStorage.getItem("hub:tickets:studio")
+    return raw && raw !== "null" ? raw : null
+  })
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem("hub:tickets:studio", studioFilter ?? "null")
+  }, [studioFilter])
   const [searchQuery, setSearchQuery] = useState("")
   const [sortKey, setSortKey] = useState<SortKey>("date")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
@@ -154,6 +200,28 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
   // Defer heavy filter work behind the input — keeps typing snappy
   const deferredSearch = useDeferredValue(searchQuery)
 
+  // Per-studio counts on the chip filter. Computed against the current
+  // status/content scope so the badge reflects "FPVR open tickets", not
+  // "FPVR tickets ever". Otherwise the badges look misleading after the
+  // user narrows the view.
+  const studioCounts = useMemo(() => {
+    const scope = statusFilter === "All"
+      ? tickets
+      : statusFilter === "Active"
+        ? tickets.filter(t => t.status !== "Closed" && t.status !== "Rejected")
+        : tickets.filter(t => t.status === statusFilter)
+    const filtered = contentOnly
+      ? scope.filter(t => !ENGINEERING_PROJECTS.has(t.project) && t.type !== "Audit")
+      : scope
+    const out: Record<string, number> = { FuckPassVR: 0, VRHush: 0, VRAllure: 0, NaughtyJOI: 0 }
+    for (const t of filtered) {
+      for (const s of studiosFromTicket(t)) {
+        if (out[s] !== undefined) out[s] += 1
+      }
+    }
+    return out
+  }, [tickets, statusFilter, contentOnly])
+
   const displayTickets = useMemo(() => {
     let result = statusFilter === "All"
       ? tickets
@@ -164,6 +232,12 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
       // "Content only" hides engineering/audit tickets so the list isn't
       // dominated by AI-generated work about the hub's own code.
       result = result.filter(t => !ENGINEERING_PROJECTS.has(t.project) && t.type !== "Audit")
+    }
+    if (studioFilter) {
+      // Tickets without any linked scene IDs drop out when a studio is
+      // selected — that's the right behavior, since the user explicitly
+      // narrowed scope to one studio's work.
+      result = result.filter(t => studiosFromTicket(t).has(studioFilter))
     }
     if (deferredSearch.trim()) {
       const q = deferredSearch.toLowerCase()
@@ -188,7 +262,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
       }
       return sortDir === "asc" ? cmp : -cmp
     })
-  }, [tickets, statusFilter, contentOnly, deferredSearch, sortKey, sortDir])
+  }, [tickets, statusFilter, contentOnly, studioFilter, deferredSearch, sortKey, sortDir])
 
   // ── Keyboard: Escape ─────────────────────────────────────────────
 
@@ -427,26 +501,42 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
         />
       )}
 
-      {/* Search */}
+      {/* Filter row — search left, studio chips right. Single line so the
+          table starts higher; wraps gracefully on narrow viewports. */}
       {!error && tickets.length > 0 && (
-        <div className="relative mb-3">
-          <Search
-            size={12}
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-            style={{ color: "var(--color-text-faint)" }}
-          />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search by title, ID, or description…"
-            className="w-full pl-7 pr-3 py-1.5 rounded text-xs"
-            style={{
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-text)",
-              maxWidth: 360,
-            }}
+        <div
+          className="mb-3"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+            justifyContent: "space-between",
+          }}
+        >
+          <div className="relative" style={{ flex: "1 1 280px", maxWidth: 360 }}>
+            <Search
+              size={12}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+              style={{ color: "var(--color-text-faint)" }}
+            />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search by title, ID, or description…"
+              className="w-full pl-7 pr-3 py-1.5 rounded text-xs"
+              style={{
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text)",
+              }}
+            />
+          </div>
+          <StudioFilter
+            value={studioFilter}
+            onChange={setStudioFilter}
+            counts={studioCounts}
           />
         </div>
       )}
@@ -690,6 +780,9 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                         <span className="line-clamp-1">{ticket.title}</span>
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap">
+                        <StudioCellChips ticket={ticket} />
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
                         <Badge label={ticket.priority} color={PRIORITY_COLOR[ticket.priority] ?? "var(--color-text-muted)"} />
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap">
@@ -705,7 +798,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                         data-saved={flashId === ticket.ticket_id ? true : undefined}
                         style={{ borderBottom: !isLast ? "1px solid var(--color-border-subtle)" : undefined }}
                       >
-                        <td colSpan={6} className="px-3 pb-4 pt-2" style={{ background: "var(--color-surface)" }}>
+                        <td colSpan={7} className="px-3 pb-4 pt-2" style={{ background: "var(--color-surface)" }}>
                           <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
                             {/* Left: description + meta */}
                             <div style={{ flex: 1, minWidth: 0 }}>
@@ -983,6 +1076,36 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Per-row studio chips. Reuses studiosFromTicket so the column always
+ * agrees with the studio filter — there's never a row visible under
+ * "VRH" that doesn't show a VRH chip here. Renders nothing for tickets
+ * with no scene linkage so the column doesn't get noisy.
+ */
+function StudioCellChips({ ticket }: { ticket: Ticket }) {
+  const studios = studiosFromTicket(ticket)
+  if (studios.size === 0) {
+    return <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>—</span>
+  }
+  return (
+    <span style={{ display: "inline-flex", gap: 4 }}>
+      {[...studios].map(s => (
+        <Badge
+          key={s}
+          label={(s === "FuckPassVR" && "FPVR") || (s === "VRHush" && "VRH") || (s === "VRAllure" && "VRA") || (s === "NaughtyJOI" && "NJOI") || s}
+          color={
+            s === "FuckPassVR" ? "var(--color-fpvr)"
+            : s === "VRHush"   ? "var(--color-vrh)"
+            : s === "VRAllure" ? "var(--color-vra)"
+            : s === "NaughtyJOI" ? "var(--color-njoi)"
+            : "var(--color-text-muted)"
+          }
+        />
+      ))}
+    </span>
   )
 }
 

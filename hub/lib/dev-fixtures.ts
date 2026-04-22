@@ -378,6 +378,40 @@ export const MOCK_TICKETS: Ticket[] = [
     assignee: "dev@eclatech.test", notes: "", resolved_at: "",
     linked_items: "",
   },
+  // Content tickets with scene IDs — exercise the studio filter + Studio
+  // column. Without these the per-studio chip counts all show 0 in dev.
+  {
+    ticket_id: "TKT-0033", title: "FPVR1284 — passport stamp missing on outro",
+    description: "Final scene cuts before the passport stamp lands. Re-edit needed.",
+    project: "Content", type: "Bug", priority: "Medium", status: "In Progress",
+    submitted_by: "Editor Two", submitted_at: "2026-04-19T10:00:00Z",
+    assignee: "dev@eclatech.test", notes: "", resolved_at: "",
+    linked_items: "FPVR1284",
+  },
+  {
+    ticket_id: "TKT-0034", title: "VRH0987 — title art is the wrong treatment",
+    description: "We approved Treatment B but Treatment A shipped.",
+    project: "Content", type: "Bug", priority: "High", status: "New",
+    submitted_by: "Editor One", submitted_at: "2026-04-20T09:15:00Z",
+    assignee: "", notes: "", resolved_at: "",
+    linked_items: "VRH0987",
+  },
+  {
+    ticket_id: "TKT-0035", title: "VRA0419 — meta description below 150 chars",
+    description: "SEO check flagged the description as too short.",
+    project: "Content", type: "Improvement", priority: "Low", status: "In Review",
+    submitted_by: "Editor Three", submitted_at: "2026-04-19T16:42:00Z",
+    assignee: "Editor Two", notes: "", resolved_at: "",
+    linked_items: "VRA0419",
+  },
+  {
+    ticket_id: "TKT-0036", title: "NJOI0042 — countdown audio drift after edit",
+    description: "Voice and on-screen counter desync by ~200ms after the seven mark.",
+    project: "Content", type: "Bug", priority: "High", status: "In Progress",
+    submitted_by: "Editor Two", submitted_at: "2026-04-21T11:20:00Z",
+    assignee: "dev@eclatech.test", notes: "", resolved_at: "",
+    linked_items: "NJOI0042",
+  },
   // ── Audit entries (synthetic tickets written by users-panel.tsx whenever
   //    a permission change is saved). The admin Audit Log panel filters on
   //    type=Audit so these surface there, not in the regular Tickets list.

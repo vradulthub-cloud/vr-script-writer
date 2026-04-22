@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { X, ChevronRight } from "lucide-react"
 import { FilterTabs } from "@/components/ui/filter-tabs"
 import { StudioBadge } from "@/components/ui/studio-badge"
+import { StudioFilter } from "@/components/ui/studio-filter"
 import { api, ApiError, type Approval } from "@/lib/api"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 
@@ -537,6 +538,18 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
   const [error, setError] = useState<string | null>(initialError)
   const [retryFn, setRetryFn] = useState<(() => void) | null>(null)
   const [statusFilter, setStatusFilter] = useState("Pending")
+  // Studio filter — null = all studios. Persisted alongside the tickets
+  // filter so a user scoped to one studio sees consistent scope across
+  // both Approvals and Tickets tabs.
+  const [studioFilter, setStudioFilter] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null
+    const raw = window.localStorage.getItem("hub:tickets:studio")
+    return raw && raw !== "null" ? raw : null
+  })
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem("hub:tickets:studio", studioFilter ?? "null")
+  }, [studioFilter])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set())
   const [undo, setUndo] = useState<UndoEntry | null>(null)
@@ -579,19 +592,40 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
 
   const selectedApproval = approvals.find(a => a.approval_id === selectedId) ?? null
 
-  const filtered = useMemo(() =>
-    statusFilter === "All"
+  const filtered = useMemo(() => {
+    let result = statusFilter === "All"
       ? approvals
-      : approvals.filter(a => a.status === statusFilter),
-    [approvals, statusFilter]
-  )
+      : approvals.filter(a => a.status === statusFilter)
+    if (studioFilter) {
+      result = result.filter(a => a.studio === studioFilter)
+    }
+    return result
+  }, [approvals, statusFilter, studioFilter])
 
-  const statusCounts = useMemo(() => ({
-    All:      approvals.length,
-    Pending:  approvals.filter(a => a.status === "Pending").length,
-    Approved: approvals.filter(a => a.status === "Approved").length,
-    Rejected: approvals.filter(a => a.status === "Rejected").length,
-  }), [approvals])
+  const statusCounts = useMemo(() => {
+    // Counts respect the studio filter so the All/Pending/Approved chips
+    // show "how many in scope", not "how many total".
+    const scope = studioFilter
+      ? approvals.filter(a => a.studio === studioFilter)
+      : approvals
+    return {
+      All:      scope.length,
+      Pending:  scope.filter(a => a.status === "Pending").length,
+      Approved: scope.filter(a => a.status === "Approved").length,
+      Rejected: scope.filter(a => a.status === "Rejected").length,
+    }
+  }, [approvals, studioFilter])
+
+  const studioCounts = useMemo(() => {
+    const scope = statusFilter === "All"
+      ? approvals
+      : approvals.filter(a => a.status === statusFilter)
+    const out: Record<string, number> = { FuckPassVR: 0, VRHush: 0, VRAllure: 0, NaughtyJOI: 0 }
+    for (const a of scope) {
+      if (out[a.studio] !== undefined) out[a.studio] += 1
+    }
+    return out
+  }, [approvals, statusFilter])
 
   // Pending items visible in current filter — used for select-all checkbox
   const pendingInView = useMemo(() =>
@@ -857,13 +891,24 @@ export function ApprovalList({ initialApprovals, error: initialError, idToken }:
 
   return (
     <div style={{ position: "relative" }}>
-      {/* Filter bar */}
-      <div className="mb-4">
+      {/* Filter bar — status tabs left, studio chips right.
+          Studio scope persists across reloads via localStorage and is
+          shared with TicketList, so a user working in one studio sees
+          consistent context everywhere. */}
+      <div
+        className="mb-4"
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}
+      >
         <FilterTabs
           options={STATUSES}
           value={statusFilter}
           onChange={(v) => { setStatusFilter(v); setSelectedId(null); setBulkSelected(new Set()) }}
           counts={statusCounts}
+        />
+        <StudioFilter
+          value={studioFilter}
+          onChange={(v) => { setStudioFilter(v); setSelectedId(null); setBulkSelected(new Set()) }}
+          counts={studioCounts}
         />
       </div>
 

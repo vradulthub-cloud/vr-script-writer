@@ -6,6 +6,14 @@ import { ApprovalList } from "../approvals/approval-list"
 import { ApprovalSubmit } from "../approvals/approval-submit"
 import { TicketList } from "./ticket-list"
 
+/**
+ * V2 dropped its permanent right-column "Submit Ticket" form — it ate ~30%
+ * of the viewport on every page load even though most users open the page
+ * to read/triage, not submit. The form lives on the "Submit" surface
+ * instead (linked from the New Ticket buttons), and the day-to-day list
+ * gets the full canvas.
+ */
+
 interface Props {
   approvals: Approval[]
   approvalsError: string | null
@@ -30,6 +38,7 @@ const TABS_V2 = [
   { key: "open",       label: "Open Tickets" },
   { key: "in-review",  label: "In Review" },
   { key: "closed",     label: "Closed" },
+  { key: "submit",     label: "Submit" },
 ] as const
 
 type TabKeyV1 = (typeof TABS_V1)[number]["key"]
@@ -202,57 +211,53 @@ function V2Layout({
     open: openCount,
     "in-review": reviewCount,
     closed: closedCount,
+    submit: 0,
   }
 
   return (
-    <div className="ec-cols">
-      <div className="ec-col">
-        <div className="ec-seg" role="tablist" aria-label="Tickets">
-          {TABS_V2.map(t => (
-            <button
-              key={t.key}
-              role="tab"
-              aria-selected={tab === t.key}
-              onClick={() => setTab(t.key)}
-            >
-              {t.label}
-              {counts[t.key] ? <span className="c">{counts[t.key]}</span> : null}
-            </button>
-          ))}
-        </div>
-
-        {tab === "approvals" && (
-          <ApprovalList
-            initialApprovals={approvals}
-            error={approvalsError}
-            idToken={idToken}
-          />
-        )}
-
-        {(tab === "open" || tab === "in-review" || tab === "closed") && (
-          <TicketList
-            tickets={tickets}
-            users={users}
-            error={ticketsError}
-            idToken={idToken}
-            userRole={userRole}
-            defaultStatusFilter={
-              tab === "open"      ? "open"      :
-              tab === "in-review" ? "In Review" :
-              "closed"
-            }
-          />
-        )}
+    <div>
+      <div className="ec-seg" role="tablist" aria-label="Tickets" style={{ marginBottom: 18 }}>
+        {TABS_V2.map(t => (
+          <button
+            key={t.key}
+            role="tab"
+            aria-selected={tab === t.key}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+            {counts[t.key] ? <span className="c">{counts[t.key]}</span> : null}
+          </button>
+        ))}
       </div>
 
-      <div className="ec-col">
-        <div className="ec-block">
-          <header><h2>Submit Ticket</h2></header>
-          <div style={{ padding: 14 }}>
-            <ApprovalSubmit idToken={idToken} />
-          </div>
+      {tab === "approvals" && (
+        <ApprovalList
+          initialApprovals={approvals}
+          error={approvalsError}
+          idToken={idToken}
+        />
+      )}
+
+      {(tab === "open" || tab === "in-review" || tab === "closed") && (
+        <TicketList
+          tickets={tickets}
+          users={users}
+          error={ticketsError}
+          idToken={idToken}
+          userRole={userRole}
+          defaultStatusFilter={
+            tab === "open"      ? "open"      :
+            tab === "in-review" ? "In Review" :
+            "closed"
+          }
+        />
+      )}
+
+      {tab === "submit" && (
+        <div style={{ maxWidth: 720 }}>
+          <ApprovalSubmit idToken={idToken} />
         </div>
-      </div>
+      )}
     </div>
   )
 }

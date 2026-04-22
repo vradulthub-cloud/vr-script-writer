@@ -2,11 +2,19 @@ import { auth } from "@/auth"
 import { api, cachedUsersMe, type Approval, type Ticket, type UserProfile } from "@/lib/api"
 import { requireTab } from "@/lib/rbac"
 import { isEclatechV2 } from "@/lib/eclatech-flag"
-import { PageHeader } from "@/components/ui/page-header"
 import { TicketsTabs } from "./tickets-tabs"
 
 export const dynamic = "force-dynamic"
 
+/**
+ * Tickets page — server entry.
+ *
+ * Layout note: the outer page used to render its own <PageHeader> with a
+ * "+ New Ticket" button that had no click handler (a holdover from an
+ * earlier prototype). The TicketList component already owns the page
+ * header, the working create-modal trigger, and all filter UI — so this
+ * page just fetches data and hands it to the tabs.
+ */
 export default async function TicketsPage() {
   const session = await auth()
   const idToken = (session as { idToken?: string } | null)?.idToken
@@ -47,41 +55,8 @@ export default async function TicketsPage() {
     userRole = (meRes.value.role ?? "editor").toLowerCase()
   }
 
-  const pendingCount = approvals.filter(a => a.status === "Pending").length
-  const openCount    = tickets.filter(t => ["New", "Approved", "In Progress"].includes(t.status)).length
-  const totalCount   = pendingCount + openCount
-
   return (
     <div>
-      <PageHeader
-        title="Tickets"
-        eyebrow={
-          [
-            totalCount   ? `${totalCount} items`        : null,
-            pendingCount ? `${pendingCount} approvals`  : null,
-            openCount    ? `${openCount} open`          : null,
-          ].filter(Boolean).join(" · ") || "Queue"
-        }
-        actions={
-          <button
-            style={{
-              padding: "7px 14px",
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              background: "var(--color-lime)",
-              color: "#000",
-              border: "none",
-              borderRadius: 4,
-              cursor: "pointer",
-            }}
-          >
-            + New Ticket
-          </button>
-        }
-      />
-
       <TicketsTabs
         approvals={approvals}
         approvalsError={approvalsError}
