@@ -1,14 +1,14 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import nextDynamic from "next/dynamic"
-import type { Shoot } from "@/lib/api"
+import { api, type Shoot } from "@/lib/api"
 import { PageHeader } from "@/components/ui/page-header"
 import { MonthCalendar } from "@/components/ui/month-calendar"
 import { ShootModal } from "@/components/ui/shoot-modal"
 import { AddEventModal } from "@/components/ui/add-event-modal"
 import { studioColor } from "@/lib/studio-colors"
-import { addEvent, listEvents, removeEvent, type CalendarEvent } from "@/lib/calendar-events"
+import { rowToEvent, type CalendarEvent } from "@/lib/calendar-events"
 
 const ShootBoard = nextDynamic(() => import("./shoot-board").then(m => m.ShootBoard))
 
@@ -34,7 +34,23 @@ export function ShootsV2View({
   const [studioFilter, setStudioFilter] = useState<StudioFilter>("All")
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [addEventDate, setAddEventDate] = useState<string | null>(null)
-  useEffect(() => { setEvents(listEvents()) }, [])
+  const [eventsError, setEventsError] = useState<string | null>(null)
+
+  const client = useMemo(() => api(idToken ?? null), [idToken])
+
+  const refreshEvents = useCallback(async () => {
+    try {
+      const rows = await client.calendarEvents.list()
+      setEvents(rows.map(rowToEvent))
+      setEventsError(null)
+    } catch (err) {
+      // Non-fatal — the calendar still shows shoots + holidays, and the user
+      // can retry by creating/deleting an event (which also refreshes).
+      setEventsError(err instanceof Error ? err.message : "Failed to load events")
+    }
+  }, [client])
+
+  useEffect(() => { refreshEvents() }, [refreshEvents])
 
   // Viewport-aware view mode. The 7×5 month grid is unreadable on a narrow
   // phone — each cell becomes a ~50px postage stamp. On mobile we default
@@ -179,7 +195,13 @@ export function ShootsV2View({
             viewMode={viewMode}
             events={events}
             onAddEvent={(date) => setAddEventDate(date)}
-            onRemoveEvent={(id) => { removeEvent(id); setEvents(listEvents()) }}
+            onRemoveEvent={async (id) => {
+              // Optimistic: drop from UI immediately so the popover row
+              // disappears on click. Reconcile from server on completion.
+              setEvents(prev => prev.filter(e => e.id !== id))
+              try { await client.calendarEvents.remove(id) } catch {}
+              refreshEvents()
+            }}
           />
           {calendarShoots.length === 0 && (
             <div
@@ -196,6 +218,20 @@ export function ShootsV2View({
               {studioFilter === "All"
                 ? "No shoots scheduled this month"
                 : `No ${studioFilter} shoots this month`}
+            </div>
+          )}
+          {eventsError && (
+            <div
+              role="status"
+              style={{
+                padding: "8px 12px",
+                fontSize: 11,
+                color: "var(--color-text-muted)",
+                borderTop: "1px solid var(--color-border-subtle)",
+                background: "color-mix(in srgb, var(--color-red, #ef4444) 6%, transparent)",
+              }}
+            >
+              Calendar events unavailable: {eventsError}
             </div>
           )}
         </div>
@@ -217,7 +253,20 @@ export function ShootsV2View({
       {addEventDate && (
         <AddEventModal
           date={addEventDate}
-          onSave={(ev) => { addEvent(ev); setEvents(listEvents()) }}
+          onSave={async (ev) => {
+            try {
+              const row = await client.calendarEvents.create({
+                date: ev.date,
+                title: ev.title,
+                kind: ev.kind,
+                color: ev.color,
+                notes: ev.notes,
+              })
+              setEvents(prev => [...prev, rowToEvent(row)])
+            } catch (err) {
+              setEventsError(err instanceof Error ? err.message : "Failed to save event")
+            }
+          }}
           onClose={() => setAddEventDate(null)}
         />
       )}

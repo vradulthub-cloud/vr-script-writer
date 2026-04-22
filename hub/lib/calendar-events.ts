@@ -1,10 +1,9 @@
-/** Custom calendar events. localStorage-backed for now — single-user only.
- *  TODO: hoist to backend so events are shared across the team.
- *  Why a versioned storage key: future schema changes won't read garbage from
- *  prior keys; we just bump the version and old entries are ignored.
+/** Custom calendar events. Backed by the FastAPI /calendar-events endpoint
+ *  so the team shares one calendar. This module owns the UI-facing shape
+ *  and the color palette; the network layer lives in lib/api.ts.
  */
 
-const STORAGE_KEY = "hub.calendar.events.v1"
+import type { CalendarEventRow } from "./api"
 
 export type CalendarEvent = {
   id: string
@@ -16,6 +15,19 @@ export type CalendarEvent = {
    *  color so users can scan a busy month by category at a glance. */
   color?: string
   notes?: string
+}
+
+/** Adapt a wire-shape event (snake_case, always-string fields) into the
+ *  UI-facing CalendarEvent (camelCase id, optional strings). */
+export function rowToEvent(r: CalendarEventRow): CalendarEvent {
+  return {
+    id: r.event_id,
+    date: r.date,
+    title: r.title,
+    kind: r.kind || undefined,
+    color: r.color || undefined,
+    notes: r.notes || undefined,
+  }
 }
 
 /** Curated tag palette. Eight options is enough for personal categorisation
@@ -39,35 +51,3 @@ export function eventColorValue(id: string | undefined): string {
   return EVENT_COLORS.find(c => c.id === id)?.value ?? "var(--color-text-muted)"
 }
 
-function read(): CalendarEvent[] {
-  if (typeof window === "undefined") return []
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function write(events: CalendarEvent[]): void {
-  if (typeof window === "undefined") return
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(events))
-}
-
-export function listEvents(): CalendarEvent[] {
-  return read()
-}
-
-export function addEvent(input: Omit<CalendarEvent, "id">): CalendarEvent {
-  const ev: CalendarEvent = { ...input, id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` }
-  const all = read()
-  all.push(ev)
-  write(all)
-  return ev
-}
-
-export function removeEvent(id: string): void {
-  write(read().filter(e => e.id !== id))
-}

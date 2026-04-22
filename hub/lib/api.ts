@@ -444,6 +444,17 @@ export interface Notification {
   link: string
 }
 
+export interface CalendarEventRow {
+  event_id: string
+  date: string           // YYYY-MM-DD
+  title: string
+  kind: string
+  color: string
+  notes: string
+  created_by: string
+  created_at: string
+}
+
 export interface Treatment {
   name: string
   featured: boolean
@@ -523,6 +534,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
   const postVoid = (path: string, body: unknown) =>
     apiFetch<void>(path, token, { method: "POST", body: JSON.stringify(body), expectEmpty: true })
   const del = <T>(path: string) => apiFetch<T>(path, token, { method: "DELETE" })
+  const delVoid = (path: string) =>
+    apiFetch<void>(path, token, { method: "DELETE", expectEmpty: true })
 
   return {
     health: () => get<{ status: string; version: string; syncs: Record<string, unknown> }>("/health"),
@@ -729,6 +742,20 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       list: (limit = 50) => get<Notification[]>(`/notifications/?limit=${limit}`),
       unreadCount: () => get<{ count: number }>("/notifications/unread-count"),
       markRead: () => post<{ updated: number }>("/notifications/mark-read", {}),
+    },
+
+    calendarEvents: {
+      list: (range?: { from?: string; to?: string }) => {
+        const params = new URLSearchParams()
+        if (range?.from) params.set("from", range.from)
+        if (range?.to) params.set("to", range.to)
+        const qs = params.toString()
+        return get<CalendarEventRow[]>(`/calendar-events/${qs ? `?${qs}` : ""}`)
+      },
+      create: (body: { date: string; title: string; kind?: string; color?: string; notes?: string }) =>
+        post<CalendarEventRow>("/calendar-events/", body),
+      remove: (eventId: string) =>
+        delVoid(`/calendar-events/${encodeURIComponent(eventId)}`),
     },
 
     shoots: {

@@ -230,6 +230,21 @@ CREATE TABLE IF NOT EXISTS model_profiles (
     profile_json TEXT NOT NULL DEFAULT '{}',
     cached_at TEXT NOT NULL
 );
+
+-- Calendar events (custom events on the Shoot Tracker calendar — shared
+-- across the team, not synced to Sheets). Each row is one event on one date.
+-- We do NOT scope events per-user; the team sees the same calendar.
+CREATE TABLE IF NOT EXISTS calendar_events (
+    event_id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,        -- YYYY-MM-DD
+    title TEXT NOT NULL DEFAULT '',
+    kind TEXT DEFAULT '',       -- short tag, e.g. "MEETING"
+    color TEXT DEFAULT '',      -- swatch id from EVENT_COLORS, e.g. "lime"
+    notes TEXT DEFAULT '',
+    created_by TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cal_events_date ON calendar_events(date);
 """
 
 

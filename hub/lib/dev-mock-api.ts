@@ -32,6 +32,21 @@ function wait<T>(value: T, ms = MOCK_DELAY): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(value), ms))
 }
 
+// In-memory calendar events for dev-mock. Keeps create/delete flows working
+// without a backend, and resets on hard reload (unlike localStorage — which
+// is exactly what we're migrating AWAY from).
+type MockCalEvent = {
+  event_id: string
+  date: string
+  title: string
+  kind: string
+  color: string
+  notes: string
+  created_by: string
+  created_at: string
+}
+const MOCK_CAL_EVENTS: MockCalEvent[] = []
+
 function parseQuery(path: string): { base: string; params: URLSearchParams } {
   const qIdx = path.indexOf("?")
   if (qIdx === -1) return { base: path, params: new URLSearchParams() }
@@ -124,6 +139,40 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
   // ── Tickets ───────────────────────────────────────────────────────────
   if (base === "/tickets/") return wait(MOCK_TICKETS as unknown as T)
   if (base === "/tickets/stats") return wait(MOCK_TICKET_STATS as unknown as T)
+
+  // ── Calendar events ───────────────────────────────────────────────────
+  if (base === "/calendar-events/") {
+    const method = (_options.method || "GET").toUpperCase()
+    if (method === "GET") {
+      const from = params.get("from")
+      const to = params.get("to")
+      const filtered = MOCK_CAL_EVENTS.filter(e =>
+        (!from || e.date >= from) && (!to || e.date <= to),
+      )
+      return wait(filtered as unknown as T)
+    }
+    if (method === "POST") {
+      const body = _options.body ? JSON.parse(_options.body as string) : {}
+      const ev: MockCalEvent = {
+        event_id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        date: body.date ?? "",
+        title: (body.title ?? "").trim(),
+        kind: (body.kind ?? "").trim(),
+        color: (body.color ?? "").trim(),
+        notes: (body.notes ?? "").trim(),
+        created_by: "Dev Admin",
+        created_at: new Date().toISOString(),
+      }
+      MOCK_CAL_EVENTS.push(ev)
+      return wait(ev as unknown as T)
+    }
+  }
+  if (base.startsWith("/calendar-events/") && (_options.method || "").toUpperCase() === "DELETE") {
+    const id = decodeURIComponent(base.slice("/calendar-events/".length))
+    const idx = MOCK_CAL_EVENTS.findIndex(e => e.event_id === id)
+    if (idx >= 0) MOCK_CAL_EVENTS.splice(idx, 1)
+    return wait(undefined as unknown as T)
+  }
 
   // ── Notifications ─────────────────────────────────────────────────────
   if (base === "/notifications/") return wait(MOCK_NOTIFICATIONS as unknown as T)
