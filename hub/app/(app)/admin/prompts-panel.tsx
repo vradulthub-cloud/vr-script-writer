@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useCallback } from "react"
 import { api, type PromptEntry } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
+import { ConfirmModal } from "@/components/ui/confirm-modal"
 
 /**
  * AI Prompts editor.
@@ -27,6 +28,7 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
   const [draft, setDraft] = useState<string>("")
   const [busy, setBusy] = useState(false)
   const [statusMsg, setStatusMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
+  const [revertOpen, setRevertOpen] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
@@ -91,14 +93,16 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
     }
   }
 
-  async function revert() {
+  function revert() {
     if (!selected) return
-    const ok = window.confirm(
-      `Revert "${selected.label}" to the bundled default?\n\nYour custom version will be discarded. The default is what shipped with the app — you can re-customize after.`,
-    )
-    if (!ok) return
+    setRevertOpen(true)
+  }
+
+  async function doRevert() {
+    if (!selected) return
     setBusy(true)
     setStatusMsg(null)
+    setRevertOpen(false)
     try {
       await client.prompts.revert(selected.key)
       // Optimistically update locally — backend response is 204.
@@ -328,6 +332,25 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
           </>
         )}
       </section>
+
+      {revertOpen && selected && (
+        <ConfirmModal
+          eyebrow="Revert · bundled default"
+          title={`Revert "${selected.label}"?`}
+          tone="warn"
+          confirmLabel="Revert to default"
+          busy={busy}
+          onConfirm={doRevert}
+          onCancel={() => setRevertOpen(false)}
+        >
+          <p style={{ margin: 0 }}>
+            Your custom version will be discarded and replaced with the prompt that shipped with the app.
+          </p>
+          <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>
+            You can re-customize it afterwards — the default isn't locked.
+          </p>
+        </ConfirmModal>
+      )}
     </div>
   )
 }

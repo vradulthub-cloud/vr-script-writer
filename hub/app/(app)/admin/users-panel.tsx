@@ -6,6 +6,7 @@ import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { PageHeader } from "@/components/ui/page-header"
 import { Panel } from "@/components/ui/panel"
+import { ConfirmModal } from "@/components/ui/confirm-modal"
 
 const ALL_TABS = [
   "Tickets",
@@ -34,6 +35,16 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
   const [editTabs, setEditTabs] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState("")
+
+  // Confirmation modal state — tracks which destructive action (if any) is
+  // awaiting confirmation. Having it as a tagged union keeps one modal slot
+  // for both remove-user and role-change prompts.
+  type PendingConfirm =
+    | { kind: "remove"; user: UserProfile; busy: boolean }
+    | { kind: "role"; email: string; newRole: string; oldRole: string }
+    | null
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm>(null)
+  const [pendingSaveAfterRole, setPendingSaveAfterRole] = useState<null | (() => Promise<void>)>(null)
 
   // Add-user form state. Inline rather than a modal so admins see the
   // existing roster while typing — fewer mistakes (e.g. duplicate names).
@@ -65,17 +76,20 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
     }
   }
 
-  async function removeUser(u: UserProfile) {
+  function removeUser(u: UserProfile) {
     const isSelf = u.email.toLowerCase() === (currentEmail ?? "").toLowerCase()
     if (isSelf) { window.alert("You can't remove yourself."); return }
-    const ok = window.confirm(
-      `Remove ${u.name} (${u.email}) from the team?\n\nThey will lose access immediately.`,
-    )
-    if (!ok) return
+    setPendingConfirm({ kind: "remove", user: u, busy: false })
+  }
+
+  async function doRemoveUser(u: UserProfile) {
+    setPendingConfirm(prev => prev && prev.kind === "remove" ? { ...prev, busy: true } : prev)
     try {
       await client.users.remove(u.email)
       setUsers(prev => prev.filter(x => x.email !== u.email))
+      setPendingConfirm(null)
     } catch (e) {
+      setPendingConfirm(null)
       window.alert(e instanceof Error ? e.message : "Failed to remove user")
     }
   }
@@ -131,20 +145,26 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
     }
 
     // Role changes are privileged — require explicit confirmation so a
-    // slip-of-the-finger doesn't promote an editor to admin.
-    if (roleChanged) {
-      const verb = editRole === "admin" ? "PROMOTE to admin" : `DOWNGRADE to ${editRole}`
-      const ok = window.confirm(
-        `${verb} ${editingEmail}?\n\nThis change is logged in the tickets sheet as an audit entry.`,
-      )
-      if (!ok) return
+    // slip-of-the-finger doesn't promote an editor to admin. Modal replaces
+    // the old window.confirm so the change is framed in context.
+    const doSave = async () => {
+      setPendingConfirm(null)
+      setPendingSaveAfterRole(null)
+      await runSave()
     }
+    if (roleChanged) {
+      setPendingConfirm({ kind: "role", email: editingEmail, newRole: editRole, oldRole: prevRole })
+      setPendingSaveAfterRole(() => doSave)
+      return
+    }
+    await runSave()
 
+    async function runSave() {
     setSaving(true)
     setSaveMsg("")
     try {
       const body: UserUpdate = { role: editRole, allowed_tabs: nextTabs }
-      const updated = await client.users.update(editingEmail, body)
+      const updated = await client.users.update(editingEmail!, body)
       setUsers((prev) =>
         prev.map((u) => (u.email === editingEmail ? updated : u))
       )
@@ -175,6 +195,7 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
       setSaveMsg(e instanceof Error ? e.message : "Save failed")
     } finally {
       setSaving(false)
+    }
     }
   }
 
@@ -425,6 +446,49 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
         </tbody>
       </table>
       </Panel>
+
+      {pendingConfirm?.kind === "remove" && (
+        <ConfirmModal
+          eyebrow="Destructive · Remove user"
+          title={`Remove ${pendingConfirm.user.name}?`}
+          tone="danger"
+          confirmLabel="Remove user"
+          busy={pendingConfirm.busy}
+          onConfirm={() => doRemoveUser(pendingConfirm.user)}
+          onCancel={() => setPendingConfirm(null)}
+        >
+          <p style={{ margin: 0 }}>
+            <span style={{ color: "var(--color-text-muted)" }}>{pendingConfirm.user.email}</span>
+            {" "}will lose access immediately.
+          </p>
+          <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>
+            You can re-invite them later from this panel.
+          </p>
+        </ConfirmModal>
+      )}
+
+      {pendingConfirm?.kind === "role" && (
+        <ConfirmModal
+          eyebrow={pendingConfirm.newRole === "admin" ? "Privilege · Promote" : "Privilege · Downgrade"}
+          title={pendingConfirm.newRole === "admin" ? "Promote to admin?" : `Downgrade to ${pendingConfirm.newRole}?`}
+          tone="warn"
+          confirmLabel={pendingConfirm.newRole === "admin" ? "Promote" : "Downgrade"}
+          onConfirm={() => pendingSaveAfterRole?.()}
+          onCancel={() => { setPendingConfirm(null); setPendingSaveAfterRole(null) }}
+        >
+          <p style={{ margin: 0 }}>
+            <span style={{ color: "var(--color-text-muted)" }}>{pendingConfirm.email}</span>
+          </p>
+          <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>
+            Role <span style={{ fontFamily: "var(--font-mono)" }}>{pendingConfirm.oldRole || "(none)"}</span>
+            {" → "}
+            <span style={{ fontFamily: "var(--font-mono)", color: "var(--color-text)" }}>{pendingConfirm.newRole}</span>
+          </p>
+          <p style={{ margin: "10px 0 0", fontSize: 11, color: "var(--color-text-faint)" }}>
+            Logged in the tickets sheet as an audit entry.
+          </p>
+        </ConfirmModal>
+      )}
     </div>
   )
 }

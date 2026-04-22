@@ -1,10 +1,11 @@
 "use client"
 
-import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from "react"
-import { X, ChevronRight, ChevronDown, Search } from "lucide-react"
+import { useState, useMemo, useEffect, useRef, useDeferredValue } from "react"
+import { X, Search } from "lucide-react"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { PageHeader } from "@/components/ui/page-header"
 import { StudioFilter } from "@/components/ui/studio-filter"
+import { TicketDetailModal } from "@/components/ui/ticket-detail-modal"
 import { api, type Ticket, type TicketCreate, type TicketUpdate, type UserProfile } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { formatApiError } from "@/lib/errors"
@@ -381,22 +382,31 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
     }
   }
 
-  async function saveUpdate(ticketId: string) {
+  async function saveUpdate(
+    ticketId: string,
+    draft?: { status: string; assignee: string; note: string },
+  ) {
     setSaving(true)
     setSaveMsg(null)
     const body: TicketUpdate = {}
     const ticket = tickets.find(t => t.ticket_id === ticketId)
     if (!ticket) { setSaving(false); return }
-    if (editStatus !== ticket.status) {
-      if (!isAdmin && ADMIN_ONLY_STATUSES.has(editStatus)) {
+    // Prefer explicit draft values from the modal so we don't race React
+    // state updates. Falls back to the ticket-list's own edit state for
+    // legacy call sites.
+    const nextStatus = draft?.status ?? editStatus
+    const nextAssignee = draft?.assignee ?? editAssignee
+    const nextNote = draft?.note ?? editNote
+    if (nextStatus !== ticket.status) {
+      if (!isAdmin && ADMIN_ONLY_STATUSES.has(nextStatus)) {
         setSaving(false)
-        setSaveMsg(`Only admins can set status to ${editStatus}.`)
+        setSaveMsg(`Only admins can set status to ${nextStatus}.`)
         return
       }
-      body.status = editStatus
+      body.status = nextStatus
     }
-    if (editAssignee !== (ticket.assignee ?? "")) body.assignee = editAssignee
-    if (editNote.trim()) body.note = editNote.trim()
+    if (nextAssignee !== (ticket.assignee ?? "")) body.assignee = nextAssignee
+    if (nextNote.trim()) body.note = nextNote.trim()
     if (Object.keys(body).length === 0) { setSaving(false); setSaveMsg("No changes."); return }
     try {
       const updated = await client.tickets.update(ticketId, body)
@@ -734,208 +744,59 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
             </thead>
             <tbody>
               {displayTickets.map((ticket, i) => {
-                const isExpanded = expanded === ticket.ticket_id
                 const isLast = i === displayTickets.length - 1
                 const isNew = newTicketId === ticket.ticket_id
                 return (
-                  <React.Fragment key={ticket.ticket_id}>
-                    <tr
-                      className={`transition-colors cursor-pointer${isExpanded ? "" : " hover:bg-[--color-elevated]"}`}
-                      onClick={() => openTicket(ticket)}
-                      aria-expanded={isExpanded}
-                      style={{
-                        borderBottom: !isExpanded && !isLast ? "1px solid var(--color-border-subtle)" : undefined,
-                        background: isExpanded ? "var(--color-surface)" : undefined,
-                        animation: isNew ? "fadeIn 350ms var(--ease-out-expo) both" : undefined,
-                      }}
+                  <tr
+                    key={ticket.ticket_id}
+                    className="transition-colors cursor-pointer hover:bg-[--color-elevated]"
+                    onClick={() => openTicket(ticket)}
+                    onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTicket(ticket) } }}
+                    tabIndex={0}
+                    aria-label={`Open ticket ${ticket.ticket_id}`}
+                    style={{
+                      borderBottom: !isLast ? "1px solid var(--color-border-subtle)" : undefined,
+                      animation: isNew ? "fadeIn 350ms var(--ease-out-expo) both" : undefined,
+                    }}
+                  >
+                    <td
+                      className="px-3 py-2.5"
+                      style={{ width: 32 }}
+                      onClick={e => e.stopPropagation()}
                     >
-                      <td
-                        className="px-3 py-2.5"
-                        style={{ width: 32 }}
-                        onClick={e => e.stopPropagation()}
-                      >
-                        <input
-                          type="checkbox"
-                          aria-label={`Select ${ticket.ticket_id}`}
-                          checked={selected.has(ticket.ticket_id)}
-                          onChange={e => {
-                            const next = new Set(selected)
-                            if (e.target.checked) next.add(ticket.ticket_id)
-                            else next.delete(ticket.ticket_id)
-                            setSelected(next)
-                          }}
-                        />
-                      </td>
-                      <td className="px-3 py-2.5" style={{ whiteSpace: "nowrap" }}>
-                        <span className="flex items-center gap-1.5">
-                          <span style={{ color: "var(--color-text-faint)", flexShrink: 0, display: "flex", alignItems: "center" }}>
-                            {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                          </span>
-                          <span className="font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                            {ticket.ticket_id}
-                          </span>
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5" style={{ fontSize: 12 }}>
-                        <span className="line-clamp-1">{ticket.title}</span>
-                      </td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">
-                        <StudioCellChips ticket={ticket} />
-                      </td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">
-                        <Badge label={ticket.priority} color={PRIORITY_COLOR[ticket.priority] ?? "var(--color-text-muted)"} />
-                      </td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">
-                        <Badge label={ticket.status} color={STATUS_COLOR[ticket.status] ?? "var(--color-text-muted)"} />
-                      </td>
-                      <td className="px-3 py-2.5" style={{ fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
-                        <time dateTime={ticket.submitted_at || undefined}>{formatDate(ticket.submitted_at)}</time>
-                      </td>
-                    </tr>
-
-                    {isExpanded && (
-                      <tr
-                        data-saved={flashId === ticket.ticket_id ? true : undefined}
-                        style={{ borderBottom: !isLast ? "1px solid var(--color-border-subtle)" : undefined }}
-                      >
-                        <td colSpan={7} className="px-3 pb-4 pt-2" style={{ background: "var(--color-surface)" }}>
-                          <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
-                            {/* Left: description + meta */}
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              {ticket.description && (
-                                <p style={{ fontSize: 12, color: "var(--color-text)", lineHeight: 1.6, marginBottom: 8 }}>
-                                  {ticket.description}
-                                </p>
-                              )}
-                              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                                {ticket.project && (
-                                  <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                                    Project: <span style={{ color: "var(--color-text)" }}>{ticket.project}</span>
-                                  </span>
-                                )}
-                                {ticket.type && (
-                                  <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                                    Type: <span style={{ color: "var(--color-text)" }}>{ticket.type}</span>
-                                  </span>
-                                )}
-                                {ticket.submitted_by && (
-                                  <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                                    Reporter: <span style={{ color: "var(--color-text)" }}>{ticket.submitted_by}</span>
-                                  </span>
-                                )}
-                                {ticket.assignee && (
-                                  <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                                    Assignee: <span style={{ color: "var(--color-text)" }}>{ticket.assignee}</span>
-                                  </span>
-                                )}
-                                {ticket.linked_items && (
-                                  <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                                    Linked: <span style={{ color: "var(--color-text)" }}>{ticket.linked_items}</span>
-                                  </span>
-                                )}
-                                {ticket.resolved_at && (
-                                  <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                                    Resolved: <span style={{ color: "var(--color-text)" }}><time dateTime={ticket.resolved_at}>{formatDate(ticket.resolved_at)}</time></span>
-                                  </span>
-                                )}
-                              </div>
-                              {ticket.notes && (
-                                <div style={{ marginTop: 8 }}>
-                                  <span style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase" }}>Notes</span>
-                                  <NotesTimeline raw={ticket.notes} />
-                                </div>
-                              )}
-
-                              {/* Quick-action bar — status-aware shortcuts
-                                  mirroring the Streamlit QC / Verify / Approve flows */}
-                              <TicketQuickActions
-                                ticket={ticket}
-                                isAdmin={isAdmin}
-                                busy={saving}
-                                onAction={(update) => applyQuickAction(ticket.ticket_id, update)}
-                              />
-                            </div>
-
-                            {/* Right: edit panel */}
-                            <div style={{ width: "min(260px, 100%)", flexShrink: 1 }}>
-                              <div className="flex flex-col gap-2">
-                                <div>
-                                  <label htmlFor={`edit-status-${ticket.ticket_id}`} style={{ fontSize: 10, color: "var(--color-text-faint)", display: "block", marginBottom: 3 }}>STATUS</label>
-                                  <select
-                                    id={`edit-status-${ticket.ticket_id}`}
-                                    value={editStatus}
-                                    onChange={e => setEditStatus(e.target.value)}
-                                    className="w-full px-2 py-1.5 rounded text-xs"
-                                    style={{ background: "var(--color-elevated)", border: "1px solid var(--color-border)", color: STATUS_COLOR[editStatus] ?? "var(--color-text)" }}
-                                  >
-                                    {TICKET_STATUSES.map(s => {
-                                      // Keep the current status selectable even for non-admins so they see
-                                      // the true state of the ticket; only block *transitioning into* admin-only states.
-                                      const isLocked = !isAdmin && ADMIN_ONLY_STATUSES.has(s) && s !== ticket.status
-                                      return <option key={s} value={s} disabled={isLocked}>{s}{isLocked ? " — admin only" : ""}</option>
-                                    })}
-                                  </select>
-                                </div>
-                                <div>
-                                  <label htmlFor={`edit-assignee-${ticket.ticket_id}`} style={{ fontSize: 10, color: "var(--color-text-faint)", display: "block", marginBottom: 3 }}>ASSIGNEE</label>
-                                  {users.length > 0 ? (
-                                    <select
-                                      id={`edit-assignee-${ticket.ticket_id}`}
-                                      value={editAssignee}
-                                      onChange={e => setEditAssignee(e.target.value)}
-                                      className="w-full px-2 py-1.5 rounded text-xs"
-                                      style={{ background: "var(--color-elevated)", border: "1px solid var(--color-border)", color: editAssignee ? "var(--color-text)" : "var(--color-text-muted)" }}
-                                    >
-                                      <option value="">Unassigned</option>
-                                      {users.map(u => <option key={u.email} value={u.name}>{u.name}</option>)}
-                                    </select>
-                                  ) : (
-                                    <input
-                                      id={`edit-assignee-${ticket.ticket_id}`}
-                                      type="text"
-                                      value={editAssignee}
-                                      onChange={e => setEditAssignee(e.target.value)}
-                                      placeholder="Name or email"
-                                      className="w-full px-2 py-1.5 rounded text-xs"
-                                      style={{ background: "var(--color-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
-                                    />
-                                  )}
-                                </div>
-                                <div>
-                                  <label htmlFor={`edit-note-${ticket.ticket_id}`} style={{ fontSize: 10, color: "var(--color-text-faint)", display: "block", marginBottom: 3 }}>ADD NOTE</label>
-                                  <textarea
-                                    id={`edit-note-${ticket.ticket_id}`}
-                                    value={editNote}
-                                    onChange={e => setEditNote(e.target.value)}
-                                    rows={2}
-                                    maxLength={NOTE_MAX}
-                                    placeholder="Optional update note…"
-                                    className="w-full px-2 py-1.5 rounded text-xs resize-none"
-                                    style={{ background: "var(--color-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
-                                  />
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); saveUpdate(ticket.ticket_id) }}
-                                    disabled={saving}
-                                    className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-                                    style={{ background: "var(--color-lime)", color: "var(--color-base)", opacity: saving ? 0.5 : 1 }}
-                                  >
-                                    {saving ? "Saving…" : "Save Changes"}
-                                  </button>
-                                  {saveMsg && (
-                                    <span role="status" aria-live="polite" style={{ fontSize: 11, color: saveMsg === "Saved." ? "var(--color-ok)" : saveMsg === "No changes." ? "var(--color-text-muted)" : "var(--color-err)" }}>
-                                      {saveMsg}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${ticket.ticket_id}`}
+                        checked={selected.has(ticket.ticket_id)}
+                        onChange={e => {
+                          const next = new Set(selected)
+                          if (e.target.checked) next.add(ticket.ticket_id)
+                          else next.delete(ticket.ticket_id)
+                          setSelected(next)
+                        }}
+                      />
+                    </td>
+                    <td className="px-3 py-2.5" style={{ whiteSpace: "nowrap" }}>
+                      <span className="font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                        {ticket.ticket_id}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5" style={{ fontSize: 12 }}>
+                      <span className="line-clamp-1">{ticket.title}</span>
+                    </td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      <StudioCellChips ticket={ticket} />
+                    </td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      <Badge label={ticket.priority} color={PRIORITY_COLOR[ticket.priority] ?? "var(--color-text-muted)"} />
+                    </td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      <Badge label={ticket.status} color={STATUS_COLOR[ticket.status] ?? "var(--color-text-muted)"} />
+                    </td>
+                    <td className="px-3 py-2.5" style={{ fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
+                      <time dateTime={ticket.submitted_at || undefined}>{formatDate(ticket.submitted_at)}</time>
+                    </td>
+                  </tr>
                 )
               })}
             </tbody>
@@ -1075,6 +936,28 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
           </div>
         </div>
       )}
+
+      {/* Ticket detail modal — replaces the old inline row expansion. */}
+      {expanded && (() => {
+        const t = tickets.find(x => x.ticket_id === expanded)
+        if (!t) return null
+        return (
+          <TicketDetailModal
+            ticket={t}
+            users={users}
+            isAdmin={isAdmin}
+            saving={saving}
+            saveMsg={saveMsg}
+            initialEditStatus={editStatus || t.status}
+            initialEditAssignee={editAssignee || (t.assignee || "")}
+            onClose={() => { setExpanded(null); setSaveMsg(null) }}
+            onQuickAction={update => applyQuickAction(t.ticket_id, update)}
+            onSave={async (draft) => {
+              await saveUpdate(t.ticket_id, draft)
+            }}
+          />
+        )
+      })()}
     </div>
   )
 }

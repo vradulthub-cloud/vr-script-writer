@@ -8,6 +8,7 @@ import { FilterTabs } from "@/components/ui/filter-tabs"
 import { PageHeader } from "@/components/ui/page-header"
 import { RetryError } from "@/components/ui/retry-error"
 import { AssetCells, type AssetCell } from "@/components/ui/asset-cells"
+import { GeneratedTitleModal } from "@/components/ui/generated-title-modal"
 import { useIdToken } from "@/hooks/use-id-token"
 import { api, type Scene, type SceneStats } from "@/lib/api"
 import { API_BASE_URL } from "@/lib/api"
@@ -506,6 +507,7 @@ const SceneCard = memo(function SceneCard({
   const [genTitle, setGenTitle] = useState("")
   const [genBusy, setGenBusy] = useState<"idle" | "loading" | "saving">("idle")
   const [genErr, setGenErr] = useState<string | null>(null)
+  const [genModalOpen, setGenModalOpen] = useState(false)
 
   async function runGenerate(e: React.MouseEvent | React.KeyboardEvent) {
     e.stopPropagation()
@@ -653,12 +655,28 @@ const SceneCard = memo(function SceneCard({
             </>
           ) : (
             <>
-              <span
-                style={{ flex: 1, fontSize: 11, fontWeight: 600, color: "var(--color-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                title={genTitle}
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); setGenModalOpen(true) }}
+                title="Preview in context"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  textAlign: "left",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "var(--color-text)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  background: "transparent",
+                  border: "none",
+                  padding: 0,
+                  cursor: "pointer",
+                }}
               >
                 {genTitle}
-              </span>
+              </button>
               <button
                 type="button"
                 onClick={runApply}
@@ -706,6 +724,22 @@ const SceneCard = memo(function SceneCard({
           status: scene[a.key] ? "ok" : "missing",
         }))}
       />
+
+      {genModalOpen && genTitle && (
+        <GeneratedTitleModal
+          scene={scene}
+          title={genTitle}
+          busy={genBusy}
+          error={genErr}
+          onApply={async () => {
+            await runApply({ stopPropagation: () => {} } as unknown as React.MouseEvent)
+            setGenModalOpen(false)
+          }}
+          onRegenerate={() => runGenerate({ stopPropagation: () => {} } as unknown as React.MouseEvent)}
+          onDiscard={() => { setGenTitle(""); setGenErr(null); setGenModalOpen(false) }}
+          onClose={() => setGenModalOpen(false)}
+        />
+      )}
     </div>
   )
 })
