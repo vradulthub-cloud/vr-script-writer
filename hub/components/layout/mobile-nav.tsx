@@ -60,6 +60,7 @@ export function MobileNav() {
     return (
       <Link
         href={href}
+        prefetch={false}
         className="flex flex-col items-center justify-center gap-0.5"
         style={{
           flex: 1,
@@ -98,6 +99,7 @@ export function MobileNav() {
               <Link
                 key={href}
                 href={href}
+                prefetch={false}
                 className="flex items-center gap-2.5 px-3 py-2.5 transition-colors"
                 style={{
                   fontSize: 12,
