@@ -104,7 +104,9 @@ export default async function DashboardPage() {
               : <ProductionScopeStrip stats={sceneStats} />
           )}
 
-          {v2 && shoots.length > 0 && <WeekCalendar shoots={shoots} />}
+          {v2 && shoots.length > 0 && (
+            <WeekCalendar shoots={shoots} studios={["FuckPassVR", "VRHush"]} />
+          )}
 
           <TriageFeed
             missingScenes={missingScenes}
