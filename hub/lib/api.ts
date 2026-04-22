@@ -415,6 +415,7 @@ export interface LegalDocsResult {
   folder_url: string | null
   folder_name: string | null
   files: LegalDocFile[]
+  w9_name: string | null
 }
 
 export const SHOOT_ASSET_ORDER: readonly AssetType[] = [
