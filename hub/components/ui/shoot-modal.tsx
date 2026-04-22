@@ -348,6 +348,7 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
                     agency={shoot.female_agency}
                     rate={shoot.female_rate}
                     paymentName={shoot.female_payment_name}
+                    w9Name={legalDocs?.w9_name}
                     legalFiles={legalDocs?.files}
                     folderUrl={legalDocs?.folder_url ?? undefined}
                   />
@@ -524,6 +525,7 @@ function TalentRow({
   agency,
   rate,
   paymentName,
+  w9Name,
   legalFiles,
   folderUrl,
 }: {
@@ -531,10 +533,12 @@ function TalentRow({
   agency?: string
   rate?: string
   paymentName?: string
+  w9Name?: string | null
   legalFiles?: LegalDocFile[]
   folderUrl?: string
 }) {
-  const w9Pending = !paymentName && !rate
+  const resolvedPayTo = paymentName || w9Name || null
+  const w9Pending = !resolvedPayTo && !rate
   // W9 files: any PDF with "w9" in the name (case-insensitive)
   const w9Files = (legalFiles ?? []).filter(f => /w9/i.test(f.name))
   return (
@@ -558,8 +562,8 @@ function TalentRow({
           {rate || (w9Pending ? "Pending W9" : "—")}
         </span>
         <span style={{ color: "var(--color-text-faint)", letterSpacing: "0.08em", textTransform: "uppercase", fontSize: 9, fontWeight: 700, alignSelf: "center" }}>Pay&nbsp;to</span>
-        <span style={{ color: paymentName ? "var(--color-text)" : "var(--color-text-faint)" }}>
-          {paymentName || (w9Pending ? "Pending W9" : "—")}
+        <span style={{ color: resolvedPayTo ? "var(--color-text)" : "var(--color-text-faint)" }}>
+          {resolvedPayTo || (w9Pending ? "Pending W9" : "—")}
         </span>
         {(w9Files.length > 0 || folderUrl) && (
           <>
