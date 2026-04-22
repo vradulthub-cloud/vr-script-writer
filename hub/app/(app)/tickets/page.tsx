@@ -1,25 +1,26 @@
 import { auth } from "@/auth"
 import { api, cachedUsersMe, type Ticket, type UserProfile } from "@/lib/api"
 import { requireTab } from "@/lib/rbac"
-import { isEclatechV2 } from "@/lib/eclatech-flag"
-import { TicketsTabs } from "./tickets-tabs"
+import { TicketList } from "./ticket-list"
 
 export const dynamic = "force-dynamic"
 
 /**
  * Tickets page — server entry.
  *
- * Approvals are intentionally NOT fetched here anymore. The Approvals tab
- * was removed from /tickets per product call (team isn't using approvals
- * yet); the data fetch went with it to save a round trip on every load.
- * The /approvals route is still live for direct deep-links.
+ * The redundant Open Tickets / In Review / Closed tab strip that used to
+ * live above the list got cut. The status pill row inside <TicketList>
+ * (Active / All / New / In Progress / In Review / Closed) covers the same
+ * states with finer granularity, so the tab strip was just chrome.
+ *
+ * Approvals are intentionally not fetched — the workflow is paused; see
+ * /approvals which renders a "Paused" notice for direct visitors.
  */
 export default async function TicketsPage() {
   const session = await auth()
   const idToken = (session as { idToken?: string } | null)?.idToken
   await requireTab("Tickets", idToken)
   const client = api(session)
-  const v2 = await isEclatechV2()
 
   let tickets: Ticket[]            = []
   let ticketsError: string | null   = null
@@ -45,15 +46,12 @@ export default async function TicketsPage() {
   }
 
   return (
-    <div>
-      <TicketsTabs
-        tickets={tickets}
-        ticketsError={ticketsError}
-        users={users}
-        idToken={idToken}
-        userRole={userRole}
-        v2={v2}
-      />
-    </div>
+    <TicketList
+      tickets={tickets}
+      users={users}
+      error={ticketsError}
+      idToken={idToken}
+      userRole={userRole}
+    />
   )
 }
