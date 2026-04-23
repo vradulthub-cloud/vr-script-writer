@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { ChevronRight } from "lucide-react"
 import { type Scene, type Script } from "@/lib/api"
 import { STUDIO_COLOR, STUDIO_ABBR } from "@/lib/studio-colors"
 import { AssetCells, type AssetCell } from "@/components/ui/asset-cells"
@@ -42,7 +43,10 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
   const hasAnything = byStudio.length > 0 || scripts.length > 0
 
   return (
-    <Section title="Recent Scenes" subtitle={hasAnything ? undefined : "No recent scenes found."}>
+    <Section
+      title="Recent activity"
+      subtitle={hasAnything ? "Latest scenes per studio and any scripts waiting on a writer." : "No recent scenes found."}
+    >
       {byStudio.map(group => (
         <div key={group.studio}>
           <div style={{
@@ -81,8 +85,8 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
                 <span style={{
                   fontSize: 10, fontWeight: 700, letterSpacing: "0.06em",
                   padding: "1px 5px", borderRadius: 3, flexShrink: 0,
-                  background: `color-mix(in srgb, ${group.color} 14%, transparent)`,
-                  border: `1px solid color-mix(in srgb, ${group.color} 26%, transparent)`,
+                  background: `color-mix(in srgb, ${group.color} 10%, transparent)`,
+                  border: `1px solid color-mix(in srgb, ${group.color} 28%, transparent)`,
                   color: group.color,
                 }}>{group.abbr}</span>
 
@@ -110,6 +114,16 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
                     {dateStr}
                   </span>
                 )}
+                <ChevronRight
+                  size={12}
+                  aria-hidden="true"
+                  style={{
+                    color: "var(--color-text-faint)",
+                    opacity: 0.5,
+                    flexShrink: 0,
+                    marginLeft: -2,
+                  }}
+                />
               </Link>
             )
           })}
@@ -155,8 +169,8 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
                 <span style={{
                   fontSize: 10, fontWeight: 700, letterSpacing: "0.06em",
                   padding: "1px 5px", borderRadius: 3, flexShrink: 0,
-                  background: `color-mix(in srgb, ${color} 14%, transparent)`,
-                  border: `1px solid color-mix(in srgb, ${color} 26%, transparent)`,
+                  background: `color-mix(in srgb, ${color} 10%, transparent)`,
+                  border: `1px solid color-mix(in srgb, ${color} 28%, transparent)`,
                   color,
                 }}>{abbr}</span>
                 <span style={{ fontSize: 12, color: "var(--color-text)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>

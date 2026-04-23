@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import { Geist, Geist_Mono } from "next/font/google"
+import { Geist, Geist_Mono, Anton } from "next/font/google"
 import localFont from "next/font/local"
 import { isEclatechV2 } from "@/lib/eclatech-flag"
 import { Providers } from "@/components/providers"
@@ -25,13 +25,16 @@ const generalSans = localFont({
   display: "swap",
 })
 
-const cabinetGrotesk = localFont({
-  src: [
-    { path: "../public/fonts/CabinetGrotesk-Medium.woff2", weight: "500", style: "normal" },
-    { path: "../public/fonts/CabinetGrotesk-Bold.woff2", weight: "700", style: "normal" },
-    { path: "../public/fonts/CabinetGrotesk-Extrabold.woff2", weight: "800", style: "normal" },
-  ],
-  variable: "--font-cabinet-grotesk",
+// Anton — condensed display face for page-level h1s (.display-hero) and the
+// v2 ec-page-head title. Replaces Cabinet Grotesk (2026-04-23) because CG
+// reads as the default designer-safe choice rather than a face specific to a
+// production-studio context. Anton is a single-weight (400) film-slate
+// grotesque — it looks like a production call-sheet title. Loaded from Google
+// Fonts so there's no woff2 to ship.
+const anton = Anton({
+  weight: "400",
+  subsets: ["latin"],
+  variable: "--font-anton",
   display: "swap",
 })
 
@@ -49,7 +52,7 @@ export default async function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${generalSans.variable} ${cabinetGrotesk.variable} h-full`}
+      className={`${geistSans.variable} ${geistMono.variable} ${generalSans.variable} ${anton.variable} h-full`}
       data-eclatech={eclatechFlag}
     >
       <body className="h-full antialiased">

@@ -134,10 +134,12 @@ function TaskRowItem({ task }: { task: TaskRow }) {
           >
             <div
               style={{
-                width: `${pct}%`,
+                width: "100%",
                 height: "100%",
                 background: color,
-                transition: "width 250ms ease",
+                transform: `scaleX(${pct / 100})`,
+                transformOrigin: "left",
+                transition: "transform 250ms var(--ease-out-quart)",
               }}
             />
           </div>

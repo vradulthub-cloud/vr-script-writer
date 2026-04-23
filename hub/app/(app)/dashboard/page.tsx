@@ -60,8 +60,14 @@ export default async function DashboardPage() {
     .toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
     .toUpperCase()
 
+  const briefing = computeBriefing({
+    shoots,
+    missingTotal: sceneStats?.missing_any ?? 0,
+    scriptCount: scripts.length,
+  })
+
   return (
-    <div style={{ maxWidth: 1200 }}>
+    <div style={{ maxWidth: 1400 }}>
       <PageHeader
         title={`${greeting}, ${firstName}`}
         eyebrow={eyebrow}
@@ -93,16 +99,14 @@ export default async function DashboardPage() {
         }
       />
 
+      <TodayBriefing briefing={briefing} />
+
       {/* ── Body: Triage dominates (2/3), Notifications rail recedes ─── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
 
-        <div className="flex flex-col gap-3.5">
+        <div className="flex flex-col gap-6">
           {v2 && shoots.length > 0 && (
-            <WeekOnSetHeading />
-          )}
-
-          {v2 && shoots.length > 0 && (
-            <WeekCalendar shoots={shoots} showHeader={false} />
+            <WeekCalendar shoots={shoots} flat />
           )}
 
           {sceneStats && Object.keys(sceneStats.by_studio).length > 0 && (
@@ -135,39 +139,199 @@ export default async function DashboardPage() {
   )
 }
 
+// ─── Today briefing ─────────────────────────────────────────────────────────
+//
+// Single focal action for the dashboard. Computes the most urgent pending work
+// and surfaces it as a hero line with one primary CTA. Everything else on the
+// page is reference / browse. The briefing is the daily starting point.
+
+type BriefingTone = "urgent" | "attention" | "calm"
+interface Briefing {
+  tone: BriefingTone
+  count: number
+  headline: string
+  detail: string
+  cta: { href: string; label: string } | null
+  secondary: string[]
+}
+
+function computeBriefing(input: {
+  shoots: Shoot[]
+  missingTotal: number
+  scriptCount: number
+}): Briefing {
+  const { shoots, missingTotal, scriptCount } = input
+  const agingShoots = shoots.filter(s => {
+    if (s.aging_hours < 72) return false
+    let validated = 0, total = 0
+    for (const sc of s.scenes) for (const a of sc.assets) { total += 1; if (a.status === "validated") validated += 1 }
+    return total > 0 && validated < total
+  })
+
+  const secondary: string[] = []
+  if (missingTotal > 0) secondary.push(`${missingTotal.toLocaleString()} scenes missing assets`)
+  if (scriptCount > 0) secondary.push(`${scriptCount} script${scriptCount === 1 ? "" : "s"} queued`)
+  if (agingShoots.length > 0) secondary.push(`${agingShoots.length} stuck shoot${agingShoots.length === 1 ? "" : "s"}`)
+
+  if (agingShoots.length > 0) {
+    return {
+      tone: "urgent",
+      count: agingShoots.length,
+      headline: `shoot${agingShoots.length === 1 ? "" : "s"} stuck past 72h`,
+      detail: agingShoots.length === 1
+        ? "One shoot has incomplete assets more than three days after wrap."
+        : `${agingShoots.length} shoots have incomplete assets more than three days after wrap.`,
+      cta: { href: "/shoots", label: "Open shoots" },
+      secondary: secondary.filter(s => !s.includes("stuck")),
+    }
+  }
+  if (missingTotal >= 10) {
+    return {
+      tone: "attention",
+      count: missingTotal,
+      headline: "scenes need validation",
+      detail: "Assets are missing across the catalog. Triage the queue to clear the backlog.",
+      cta: { href: "/missing", label: "Open triage" },
+      secondary: secondary.filter(s => !s.includes("missing assets")),
+    }
+  }
+  if (scriptCount > 0) {
+    return {
+      tone: "attention",
+      count: scriptCount,
+      headline: `script${scriptCount === 1 ? "" : "s"} queued for writing`,
+      detail: "Scripts are ready to be drafted before their shoot dates.",
+      cta: { href: "/scripts", label: "Start writing" },
+      secondary: secondary.filter(s => !s.includes("queued")),
+    }
+  }
+  return {
+    tone: "calm",
+    count: 0,
+    headline: "All clear",
+    detail: "Nothing urgent is on deck. Browse recent activity below.",
+    cta: null,
+    secondary,
+  }
+}
+
+function TodayBriefing({ briefing }: { briefing: Briefing }) {
+  const accentColor =
+    briefing.tone === "urgent" ? "var(--color-err)"
+    : briefing.tone === "attention" ? "var(--color-warn)"
+    : "var(--color-text-muted)"
+
+  return (
+    <section
+      aria-label="Today"
+      className="today-briefing"
+      style={{
+        marginBottom: 28,
+        display: "grid",
+        gridTemplateColumns: "auto minmax(0, 1fr) auto",
+        alignItems: "center",
+        gap: 20,
+        paddingBottom: 20,
+        borderBottom: "1px solid var(--color-border-subtle)",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            color: "var(--color-text-faint)",
+          }}
+        >
+          Today
+        </div>
+        <div
+          style={{
+            fontFamily: "var(--font-display-hero)",
+            fontWeight: 400,
+            fontSize: briefing.count > 0 ? 64 : 44,
+            lineHeight: 0.95,
+            letterSpacing: "-0.02em",
+            color: briefing.count > 0 ? accentColor : "var(--color-text)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {briefing.count > 0 ? briefing.count.toLocaleString() : "✓"}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: "var(--text-title)",
+            fontWeight: 600,
+            letterSpacing: "-0.01em",
+            color: "var(--color-text)",
+            lineHeight: 1.25,
+          }}
+        >
+          {briefing.count > 0 ? `${briefing.count.toLocaleString()} ${briefing.headline}` : briefing.headline}
+        </div>
+        <div
+          style={{
+            fontSize: 13,
+            color: "var(--color-text-muted)",
+            maxWidth: "65ch",
+            lineHeight: 1.45,
+          }}
+        >
+          {briefing.detail}
+        </div>
+        {briefing.secondary.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 6,
+              marginTop: 2,
+              fontSize: 11,
+              color: "var(--color-text-faint)",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {briefing.secondary.map((s, i) => (
+              <span key={i}>{i > 0 && <span style={{ marginRight: 6, opacity: 0.5 }}>·</span>}{s}</span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {briefing.cta && (
+        <Link
+          href={briefing.cta.href}
+          prefetch={false}
+          style={{
+            background: "var(--color-lime)",
+            color: "var(--color-lime-ink)",
+            padding: "10px 18px",
+            borderRadius: 4,
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: "0.02em",
+            textDecoration: "none",
+            whiteSpace: "nowrap",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          {briefing.cta.label} <span aria-hidden="true">→</span>
+        </Link>
+      )}
+    </section>
+  )
+}
+
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 const STUDIO_ORDER = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
-
-function WeekOnSetHeading() {
-  const now = new Date()
-  const weekStart = new Date(now)
-  weekStart.setHours(0, 0, 0, 0)
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay())
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekEnd.getDate() + 6)
-  const fmt = (d: Date) =>
-    d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "baseline",
-        justifyContent: "space-between",
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: "0.18em",
-        textTransform: "uppercase",
-        color: "var(--color-text-muted)",
-      }}
-    >
-      <span>This Week on Set</span>
-      <span style={{ fontSize: 10, color: "var(--color-text-faint)", letterSpacing: "0.14em" }}>
-        {fmt(weekStart)} → {fmt(weekEnd)}
-      </span>
-    </div>
-  )
-}
 
 function UpcomingShootStats({ shoots }: { shoots: Shoot[] }) {
   const now = new Date()
