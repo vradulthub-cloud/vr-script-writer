@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Bell, Check, Ticket } from "lucide-react"
 import type { Notification } from "@/lib/api"
@@ -58,6 +58,23 @@ export function NotificationFeed({
   const [notifications, setNotifications] = useState(initialNotifications)
   const [unreadCount, setUnreadCount]     = useState(initialUnread)
   const [marking, setMarking]             = useState(false)
+
+  useEffect(() => {
+    if (!idToken) return
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/notifications/?limit=12`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        })
+        if (res.ok) {
+          const data: Notification[] = await res.json()
+          setNotifications(data)
+          setUnreadCount(data.filter(n => n.read === 0).length)
+        }
+      } catch {}
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [idToken])
 
   async function markAllRead() {
     if (!idToken || unreadCount === 0 || marking) return
