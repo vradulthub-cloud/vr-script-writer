@@ -39,8 +39,10 @@ export function WeekCalendar({
         const left = (dayIdx / 7) * 100
         const right = ((dayIdx + 1) / 7) * 100
         const talent = [s.female_talent, s.male_talent].filter(Boolean).join(" / ")
-        const studioScene = s.scenes.find(sc => sc.studio === studio) ?? s.scenes[0]
-        return { shoot: s, left, right, talent, studioScene }
+        const studioScenes = s.scenes.filter(sc => sc.studio === studio)
+        const studioScene = studioScenes[0] ?? s.scenes[0]
+        const types = Array.from(new Set(studioScenes.map(sc => sc.scene_type).filter(Boolean)))
+        return { shoot: s, left, right, talent, studioScene, sceneCount: studioScenes.length, types }
       })
     return { studio, abbr: studioAbbr(studio), events: laneEvents }
   })
@@ -95,7 +97,8 @@ export function WeekCalendar({
             <div className="track">
               {lane.events.map(e => {
                 const cls = lane.abbr.toLowerCase()
-                const sceneTitle = e.studioScene.title || `${e.shoot.scenes.length} scene${e.shoot.scenes.length === 1 ? "" : "s"}`
+                const sceneTitle = e.studioScene.title || `${e.sceneCount} scene${e.sceneCount === 1 ? "" : "s"}`
+                const typeBadges = e.types.join(" · ")
                 return (
                   <button
                     key={e.shoot.shoot_id}
@@ -111,9 +114,13 @@ export function WeekCalendar({
                       overflow: "hidden",
                       minWidth: 0,
                     }}
-                    title={`${lane.studio} · ${e.talent || ""}`}
+                    title={`${lane.studio} · ${e.talent || ""}${typeBadges ? " · " + typeBadges : ""}`}
                     aria-label={`Open details for ${sceneTitle}`}
                   >
+                    <div className="meta-row">
+                      {e.sceneCount > 1 && <span className="count">×{e.sceneCount}</span>}
+                      {typeBadges && <span className="types">{typeBadges}</span>}
+                    </div>
                     <div className="t">{sceneTitle}</div>
                     <div className="m">{e.talent || e.shoot.shoot_id}</div>
                   </button>

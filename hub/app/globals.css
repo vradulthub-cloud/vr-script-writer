@@ -711,7 +711,7 @@ button[style*="color-lime"]:hover:not(:disabled) {
 /* Calendar / timeline lanes */
 [data-eclatech="v2"] .ec-cal { border: 1px solid var(--color-border); border-radius: 6px; overflow: hidden; background: var(--color-surface); }
 [data-eclatech="v2"] .ec-cal .cal-head {
-  display: grid; grid-template-columns: 80px repeat(7,1fr);
+  display: grid; grid-template-columns: 88px repeat(7,1fr);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-elevated);
   font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
@@ -720,7 +720,7 @@ button[style*="color-lime"]:hover:not(:disabled) {
 [data-eclatech="v2"] .ec-cal .cal-head > div { padding: 6px 8px; border-right: 1px solid var(--color-border-subtle); }
 [data-eclatech="v2"] .ec-cal .cal-head > div:last-child { border-right: none; }
 [data-eclatech="v2"] .ec-cal .cal-head .dnum { display: block; font-weight: 700; font-size: 13px; line-height: 1.2; letter-spacing: -0.01em; color: var(--color-text); }
-[data-eclatech="v2"] .ec-cal .lane { display: grid; grid-template-columns: 80px 1fr; border-bottom: 1px solid var(--color-border-subtle); min-height: 52px; }
+[data-eclatech="v2"] .ec-cal .lane { display: grid; grid-template-columns: 88px 1fr; border-bottom: 1px solid var(--color-border-subtle); min-height: 82px; }
 [data-eclatech="v2"] .ec-cal .lane:last-child { border-bottom: none; }
 [data-eclatech="v2"] .ec-cal .lane .label {
   padding: 0 10px; border-right: 1px solid var(--color-border-subtle);
@@ -744,13 +744,28 @@ button[style*="color-lime"]:hover:not(:disabled) {
   background-size: calc(100%/7) 100%;
 }
 [data-eclatech="v2"] .ec-cal .lane .ev {
-  position: absolute; top: 6px; bottom: 6px; padding: 4px 8px;
+  position: absolute; top: 6px; bottom: 6px; padding: 6px 9px;
   color: #fff; background: var(--color-text);
-  display: flex; flex-direction: column; justify-content: center; gap: 1px;
-  overflow: hidden; border-radius: 3px;
+  display: flex; flex-direction: column; justify-content: flex-start; gap: 2px;
+  overflow: hidden; border-radius: 4px;
 }
-[data-eclatech="v2"] .ec-cal .lane .ev .t { font-weight: 700; font-size: 11px; letter-spacing: -0.01em; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-[data-eclatech="v2"] .ec-cal .lane .ev .m { font-size: 9px; font-weight: 500; letter-spacing: 0.02em; text-transform: none; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+[data-eclatech="v2"] .ec-cal .lane .ev .meta-row {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; opacity: 0.85;
+  line-height: 1;
+}
+[data-eclatech="v2"] .ec-cal .lane .ev .meta-row .count {
+  font-family: var(--font-mono); letter-spacing: 0.02em;
+  background: rgba(0, 0, 0, 0.22); padding: 1px 5px; border-radius: 2px;
+}
+[data-eclatech="v2"] .ec-cal .lane .ev .meta-row .types {
+  font-family: var(--font-mono); letter-spacing: 0.04em;
+  opacity: 0.9;
+}
+[data-eclatech="v2"] .ec-cal .lane .ev .meta-row:empty { display: none; }
+[data-eclatech="v2"] .ec-cal .lane .ev .t { font-weight: 700; font-size: 12px; letter-spacing: -0.01em; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-top: 2px; }
+[data-eclatech="v2"] .ec-cal .lane .ev .m { font-size: 10px; font-weight: 500; letter-spacing: 0.02em; text-transform: none; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; line-height: 1.3; }
 [data-eclatech="v2"] .ec-cal .lane .ev.fpvr { background: var(--color-fpvr); color: #fff; }
 [data-eclatech="v2"] .ec-cal .lane .ev.vrh  { background: var(--color-vrh);  color: #fff; }
 [data-eclatech="v2"] .ec-cal .lane .ev.vra  { background: var(--color-vra);  color: #fff; }
