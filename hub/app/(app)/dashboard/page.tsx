@@ -97,14 +97,22 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start">
 
         <div className="flex flex-col gap-3.5">
-          {sceneStats && Object.keys(sceneStats.by_studio).length > 0 && (
-            v2
-              ? <ProductionScopeStripV2 stats={sceneStats} shoots={shoots} />
-              : <ProductionScopeStrip stats={sceneStats} />
+          {v2 && shoots.length > 0 && (
+            <WeekOnSetHeading />
           )}
 
           {v2 && shoots.length > 0 && (
-            <WeekCalendar shoots={shoots} studios={["FuckPassVR", "VRHush"]} />
+            <UpcomingShootStats shoots={shoots} />
+          )}
+
+          {v2 && shoots.length > 0 && (
+            <WeekCalendar shoots={shoots} studios={["FuckPassVR", "VRHush"]} showHeader={false} />
+          )}
+
+          {sceneStats && Object.keys(sceneStats.by_studio).length > 0 && (
+            v2
+              ? <SceneCountStrip stats={sceneStats} />
+              : <ProductionScopeStrip stats={sceneStats} />
           )}
 
           <TriageFeed
@@ -135,43 +143,109 @@ export default async function DashboardPage() {
 
 const STUDIO_ORDER = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
 
-function ProductionScopeStripV2({ stats, shoots }: { stats: SceneStats; shoots: Shoot[] }) {
+function WeekOnSetHeading() {
+  const now = new Date()
+  const weekStart = new Date(now)
+  weekStart.setHours(0, 0, 0, 0)
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay())
+  const weekEnd = new Date(weekStart)
+  weekEnd.setDate(weekEnd.getDate() + 6)
+  const fmt = (d: Date) =>
+    d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        justifyContent: "space-between",
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: "0.18em",
+        textTransform: "uppercase",
+        color: "var(--color-text-muted)",
+      }}
+    >
+      <span>This Week on Set</span>
+      <span style={{ fontSize: 10, color: "var(--color-text-faint)", letterSpacing: "0.14em" }}>
+        {fmt(weekStart)} → {fmt(weekEnd)}
+      </span>
+    </div>
+  )
+}
+
+function UpcomingShootStats({ shoots }: { shoots: Shoot[] }) {
+  const now = new Date()
+  const weekStart = new Date(now)
+  weekStart.setHours(0, 0, 0, 0)
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay())
+  const weekEnd = new Date(weekStart)
+  weekEnd.setDate(weekEnd.getDate() + 7)
+
+  const thisWeek = shoots.filter(s => {
+    const t = Date.parse(s.shoot_date || "")
+    return Number.isFinite(t) && t >= weekStart.getTime() && t < weekEnd.getTime()
+  })
+
+  const scenesCount = thisWeek.reduce((sum, s) => sum + s.scenes.length, 0)
+
+  const talentSet = new Set<string>()
+  for (const s of thisWeek) {
+    if (s.female_talent) talentSet.add(s.female_talent.trim().toLowerCase())
+    if (s.male_talent)   talentSet.add(s.male_talent.trim().toLowerCase())
+  }
+
+  const studioSet = new Set<string>()
+  for (const s of thisWeek) for (const sc of s.scenes) studioSet.add(sc.studio)
+  const activeStudioAbbrs = Array.from(studioSet)
+    .map(s => studioAbbr(s))
+    .sort()
+
+  const shootDays = new Set(thisWeek.map(s => s.shoot_date.slice(0, 10))).size
+
+  return (
+    <div className="ec-stats">
+      <div className="s">
+        <div className="k">Shoots</div>
+        <div className="v">{thisWeek.length}<span className="unit">scheduled</span></div>
+        <div className="d">{shootDays} shoot day{shootDays === 1 ? "" : "s"}</div>
+      </div>
+      <div className="s">
+        <div className="k">Scenes</div>
+        <div className="v">{scenesCount}</div>
+        <div className="d">to produce</div>
+      </div>
+      <div className="s">
+        <div className="k">Talent</div>
+        <div className="v">{talentSet.size}</div>
+        <div className="d">on set</div>
+      </div>
+      <div className="s">
+        <div className="k">Studios</div>
+        <div className="v">{activeStudioAbbrs.length}</div>
+        <div className="d">{activeStudioAbbrs.length > 0 ? activeStudioAbbrs.join(" · ") : "None"}</div>
+      </div>
+    </div>
+  )
+}
+
+function SceneCountStrip({ stats }: { stats: SceneStats }) {
   const entries = STUDIO_ORDER
     .map(s => [s, stats.by_studio[s] ?? 0] as [string, number])
     .filter(([, n]) => n > 0)
   const max = Math.max(1, ...entries.map(([, n]) => n))
   return (
-    <div>
-      <div className="ec-stats">
-        <div className="s">
-          <div className="k">Scenes live</div>
-          <div className="v">{stats.total.toLocaleString()}</div>
-          <div className="d">{stats.missing_any.toLocaleString()} missing</div>
-        </div>
-        <div className="s">
-          <div className="k">Shoots</div>
-          <div className="v">{shoots.length}<span className="unit">active</span></div>
-          <div className="d">Across 4 studios</div>
-        </div>
-        <div className="s">
-          <div className="k">Studios</div>
-          <div className="v">4</div>
-          <div className="d">FPVR · VRH · VRA · NJOI</div>
-        </div>
-      </div>
-      <div className="ec-strip">
-        <div className="label">Production</div>
-        {entries.slice(0, 4).map(([studio, count]) => {
-          const key = studioAbbr(studio).toLowerCase()
-          return (
-            <div key={studio} className={`cell ${key}`}>
-              <div className="mono">{studioAbbr(studio)}</div>
-              <div className="big">{count.toLocaleString()}<sup>SCN</sup></div>
-              <div className="bar" style={{ width: `${Math.round((count / max) * 100)}%` }} />
-            </div>
-          )
-        })}
-      </div>
+    <div className="ec-strip">
+      <div className="label">Scene Count</div>
+      {entries.slice(0, 4).map(([studio, count]) => {
+        const key = studioAbbr(studio).toLowerCase()
+        return (
+          <div key={studio} className={`cell ${key}`}>
+            <div className="mono">{studioAbbr(studio)}</div>
+            <div className="big">{count.toLocaleString()}<sup>SCN</sup></div>
+            <div className="bar" style={{ width: `${Math.round((count / max) * 100)}%` }} />
+          </div>
+        )
+      })}
     </div>
   )
 }
