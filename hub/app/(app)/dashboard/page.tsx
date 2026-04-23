@@ -102,11 +102,7 @@ export default async function DashboardPage() {
           )}
 
           {v2 && shoots.length > 0 && (
-            <UpcomingShootStats shoots={shoots} />
-          )}
-
-          {v2 && shoots.length > 0 && (
-            <WeekCalendar shoots={shoots} studios={["FuckPassVR", "VRHush"]} showHeader={false} />
+            <WeekCalendar shoots={shoots} showHeader={false} />
           )}
 
           {sceneStats && Object.keys(sceneStats.by_studio).length > 0 && (
