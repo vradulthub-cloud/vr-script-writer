@@ -36,33 +36,19 @@ export function ResearchV2View({ models }: { models: Model[] }) {
     <div style={{ marginBottom: 20 }}>
       <PageHeader
         title="Model Research"
-        eyebrow={`ROSTER · ${rollup.total.toLocaleString()} MODELS · AVG SCORE ${rollup.avgScore}`}
-        subtitle={`${rollup.great} great · ${rollup.good} good · ${rollup.moderate} moderate · ${rollup.poor} poor · ${rollup.available} listed as available`}
+        eyebrow="MODEL RESEARCH"
+        subtitle={
+          <span style={{ display: "flex", flexWrap: "wrap", gap: "0 16px" }}>
+            <span><strong style={{ color: "var(--color-text)", fontWeight: 600 }}>{rollup.total.toLocaleString()}</strong> tracked</span>
+            <span><strong style={{ color: "var(--color-ok)", fontWeight: 600 }}>{rollup.great}</strong> great</span>
+            <span><strong style={{ color: "var(--color-lime)", fontWeight: 600 }}>{rollup.good}</strong> good</span>
+            <span><strong style={{ color: "var(--color-warn)", fontWeight: 600 }}>{rollup.moderate}</strong> moderate</span>
+            <span><strong style={{ color: "var(--color-text-muted)", fontWeight: 600 }}>{rollup.poor}</strong> poor</span>
+            <span><strong style={{ color: "var(--color-text)", fontWeight: 600 }}>{rollup.available}</strong> available</span>
+            <span>avg score <strong style={{ color: "var(--color-text)", fontWeight: 600 }}>{rollup.avgScore}</strong></span>
+          </span>
+        }
       />
-
-      {/* KPI stat cluster */}
-      <div className="ec-stats">
-        <div className="s">
-          <div className="k">ROSTER</div>
-          <div className="v">{rollup.total.toLocaleString()}</div>
-          <div className="d">tracked models</div>
-        </div>
-        <div className="s">
-          <div className="k">GREAT</div>
-          <div className="v" style={{ color: "var(--color-ok)" }}>{rollup.great.toLocaleString()}</div>
-          <div className="d">top-rank models</div>
-        </div>
-        <div className="s">
-          <div className="k">AVAILABLE</div>
-          <div className="v">{rollup.available.toLocaleString()}</div>
-          <div className="d">per agency notes</div>
-        </div>
-        <div className="s">
-          <div className="k">AVG SCORE</div>
-          <div className="v">{rollup.avgScore}</div>
-          <div className="d">opportunity index</div>
-        </div>
-      </div>
     </div>
   )
 }

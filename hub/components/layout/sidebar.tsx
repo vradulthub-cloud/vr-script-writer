@@ -80,6 +80,7 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
       <Link
         href={href}
         title={label}
+        prefetch={false}
         data-active={active || undefined}
         className={cn(
           "flex items-center gap-2.5 py-1.5 transition-colors",
@@ -116,6 +117,7 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
       <Link
         href="/dashboard"
         aria-label="Eclatech Hub — Dashboard"
+        prefetch={false}
         className="flex items-center justify-center xl:justify-start gap-2 px-0 xl:px-4 shrink-0 transition-opacity hover:opacity-80"
         style={{
           height: "var(--spacing-topbar)",
