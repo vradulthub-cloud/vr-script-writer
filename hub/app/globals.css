@@ -749,8 +749,8 @@ button[style*="color-lime"]:hover:not(:disabled) {
   display: flex; flex-direction: column; justify-content: center; gap: 1px;
   overflow: hidden; border-radius: 3px;
 }
-[data-eclatech="v2"] .ec-cal .lane .ev .t { font-weight: 700; font-size: 11px; letter-spacing: -0.01em; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-[data-eclatech="v2"] .ec-cal .lane .ev .m { font-size: 9px; font-weight: 500; letter-spacing: 0.02em; text-transform: none; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-eclatech="v2"] .ec-cal .lane .ev .t { font-weight: 700; font-size: 11px; letter-spacing: -0.01em; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+[data-eclatech="v2"] .ec-cal .lane .ev .m { font-size: 9px; font-weight: 500; letter-spacing: 0.02em; text-transform: none; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 [data-eclatech="v2"] .ec-cal .lane .ev.fpvr { background: var(--color-fpvr); color: #fff; }
 [data-eclatech="v2"] .ec-cal .lane .ev.vrh  { background: var(--color-vrh);  color: #fff; }
 [data-eclatech="v2"] .ec-cal .lane .ev.vra  { background: var(--color-vra);  color: #fff; }
