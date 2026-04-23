@@ -108,6 +108,8 @@ export function WeekCalendar({
                       cursor: "pointer",
                       textAlign: "left",
                       font: "inherit",
+                      overflow: "hidden",
+                      minWidth: 0,
                     }}
                     title={`${lane.studio} · ${e.talent || ""}`}
                     aria-label={`Open details for ${sceneTitle}`}

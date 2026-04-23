@@ -36,7 +36,7 @@ export default async function DashboardPage() {
     client.notifications.list(12),
     client.health(),
     client.shoots.list(),
-    ...STUDIOS.map(s => client.scenes.list({ studio: s, limit: 3, missing_only: true })),
+    ...STUDIOS.map(s => client.scenes.list({ studio: s, limit: 5 })),
   ])
 
   const sceneStats     = sceneStatsRes.status    === "fulfilled" ? sceneStatsRes.value    : null
@@ -45,9 +45,8 @@ export default async function DashboardPage() {
   const health         = healthRes.status        === "fulfilled" ? healthRes.value        : null
   const shoots         = shootsRes.status        === "fulfilled" ? shootsRes.value        : []
 
-  const missingScenes = missingResults
+  const recentScenes = missingResults
     .flatMap(r => r.status === "fulfilled" ? r.value : [])
-    .sort((a, b) => (b.release_date ?? "").localeCompare(a.release_date ?? ""))
 
   const now       = new Date()
   const hour      = now.getHours()
@@ -109,7 +108,7 @@ export default async function DashboardPage() {
           )}
 
           <TriageFeed
-            missingScenes={missingScenes}
+            recentScenes={recentScenes}
             missingTotal={sceneStats?.missing_any ?? 0}
             scripts={scripts}
             idToken={idToken}

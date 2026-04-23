@@ -1211,7 +1211,7 @@ def _get_shoot_legal_docs(shoot_date: date, female: str, male: str) -> LegalDocs
                     )
                     with urllib.request.urlopen(dl_req, timeout=15) as dl_resp:
                         pdf_bytes = dl_resp.read()
-                    w9_name = _extract_w9_name(pdf_bytes)
+                    w9_name = _extract_w9_name(pdf_bytes, pdf_id=w9_id, rw_token=_get_drive_rw_token() or "")
                 except Exception as w9_exc:
                     _log.warning("w9 name extraction failed: %s", w9_exc)
 
