@@ -3,6 +3,22 @@
 import Link from "next/link"
 import { type Scene, type Script } from "@/lib/api"
 import { STUDIO_COLOR, STUDIO_ABBR } from "@/lib/studio-colors"
+import { AssetCells, type AssetCell } from "@/components/ui/asset-cells"
+
+const ASSET_COLS = [
+  { key: "has_description" as const, label: "Desc" },
+  { key: "has_videos"      as const, label: "Videos" },
+  { key: "has_thumbnail"   as const, label: "Thumb" },
+  { key: "has_photos"      as const, label: "Photos" },
+  { key: "has_storyboard"  as const, label: "Story" },
+]
+
+function sceneAssetCells(scene: Scene): AssetCell[] {
+  return ASSET_COLS.map(a => ({
+    label: a.label,
+    status: scene[a.key] ? "ok" as const : "missing" as const,
+  }))
+}
 
 const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
 
@@ -48,13 +64,14 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
             <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>{group.studio}</span>
           </div>
           {group.scenes.map((scene, i) => {
+            const cells = sceneAssetCells(scene)
             const dateStr = (scene.release_date ?? "").slice(0, 10)
             return (
               <Link
                 key={scene.id}
                 href={`/missing?scene=${encodeURIComponent(scene.id)}`}
                 style={{
-                  padding: "7px 14px",
+                  padding: "8px 14px",
                   borderBottom: i < group.scenes.length - 1 ? "1px solid var(--color-border-subtle)" : "none",
                   display: "flex", alignItems: "center", gap: 10,
                   textDecoration: "none", color: "inherit",
@@ -62,18 +79,32 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
                 className="hover:bg-[--color-elevated]"
               >
                 <span style={{
-                  fontSize: 11, fontFamily: "var(--font-mono)", color: group.color,
-                  flexShrink: 0, fontWeight: 600,
-                }}>
+                  fontSize: 10, fontWeight: 700, letterSpacing: "0.06em",
+                  padding: "1px 5px", borderRadius: 3, flexShrink: 0,
+                  background: `color-mix(in srgb, ${group.color} 14%, transparent)`,
+                  border: `1px solid color-mix(in srgb, ${group.color} 26%, transparent)`,
+                  color: group.color,
+                }}>{group.abbr}</span>
+
+                <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--color-text)", flexShrink: 0 }}>
                   {scene.id}
                 </span>
-                <span style={{
-                  fontSize: 12, color: "var(--color-text)",
-                  flex: "1 1 auto", minWidth: 0,
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
-                  {scene.title || scene.performers || <span style={{ color: "var(--color-text-faint)", fontStyle: "italic" }}>—</span>}
+
+                <span
+                  title={scene.performers || undefined}
+                  style={{
+                    fontSize: 12, color: "var(--color-text)", fontWeight: 500,
+                    flex: "1 1 auto", minWidth: 0,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}
+                >
+                  {scene.performers || <span style={{ color: "var(--color-text-faint)", fontStyle: "italic" }}>—</span>}
                 </span>
+
+                <span style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+                  <AssetCells cells={cells} />
+                </span>
+
                 {dateStr && (
                   <span style={{ fontSize: 10, color: "var(--color-text-faint)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
                     {dateStr}
