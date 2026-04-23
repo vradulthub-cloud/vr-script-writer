@@ -38,6 +38,11 @@ Thumbs.db
 
 # Next.js frontend
 hub/.next/
+.next/
+
+# Local debug / inspection scripts
+tmp_*.py
+test_db.py
 hub/node_modules/
 hub/.env.local
 
