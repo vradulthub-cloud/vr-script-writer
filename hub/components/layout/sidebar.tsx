@@ -205,8 +205,11 @@ function RailClock() {
   if (!now) return <div style={{ height: 64, borderTop: "1px solid var(--color-border)" }} />
 
   const p = (n: number) => String(n).padStart(2, "0")
-  const time = `${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`
-  const timeShort = `${p(now.getHours())}:${p(now.getMinutes())}`
+  const h24 = now.getHours()
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12
+  const ampm = h24 < 12 ? "AM" : "PM"
+  const time = `${h12}:${p(now.getMinutes())}:${p(now.getSeconds())} ${ampm}`
+  const timeShort = `${h12}:${p(now.getMinutes())} ${ampm}`
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone.split("/").pop()?.replace("_", " ") ?? "LOCAL"
   const dayDate = now
     .toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })

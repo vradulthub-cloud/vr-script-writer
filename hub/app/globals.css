@@ -744,7 +744,7 @@ button[style*="color-lime"]:hover:not(:disabled) {
   background-size: calc(100%/7) 100%;
 }
 [data-eclatech="v2"] .ec-cal .lane .ev {
-  position: absolute; top: 6px; bottom: 6px; padding: 6px 9px;
+  position: absolute; top: 6px; bottom: 6px; padding: 6px 7px;
   color: #fff; background: var(--color-text);
   display: flex; flex-direction: column; justify-content: flex-start; gap: 2px;
   overflow: hidden; border-radius: 4px;
@@ -764,9 +764,8 @@ button[style*="color-lime"]:hover:not(:disabled) {
   opacity: 0.9;
 }
 [data-eclatech="v2"] .ec-cal .lane .ev .meta-row:empty { display: none; }
-[data-eclatech="v2"] .ec-cal .lane .ev .t { font-weight: 700; font-size: 11px; letter-spacing: -0.01em; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-top: 2px; }
-[data-eclatech="v2"] .ec-cal .lane .ev .m { font-size: 10px; font-weight: 500; letter-spacing: 0.01em; text-transform: none; opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; line-height: 1.25; }
-[data-eclatech="v2"] .ec-cal .lane .ev .m.male { opacity: 0.78; font-weight: 500; }
+[data-eclatech="v2"] .ec-cal .lane .ev .t { font-weight: 600; font-size: 11px; letter-spacing: -0.02em; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-top: 2px; color: #fff; }
+[data-eclatech="v2"] .ec-cal .lane .ev .m { font-size: 11px; font-weight: 400; letter-spacing: -0.02em; text-transform: none; opacity: 0.78; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; line-height: 1.2; }
 [data-eclatech="v2"] .ec-cal .lane .ev.fpvr { background: var(--color-fpvr); color: #fff; }
 [data-eclatech="v2"] .ec-cal .lane .ev.vrh  { background: var(--color-vrh);  color: #fff; }
 [data-eclatech="v2"] .ec-cal .lane .ev.vra  { background: var(--color-vra);  color: #fff; }
