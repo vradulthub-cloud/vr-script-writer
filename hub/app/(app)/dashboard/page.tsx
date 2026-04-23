@@ -135,94 +135,43 @@ export default async function DashboardPage() {
 
 const STUDIO_ORDER = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
 
-function ProductionScopeStripV2({ shoots }: { stats: SceneStats; shoots: Shoot[] }) {
-  const now = new Date()
-  const weekStart = new Date(now)
-  weekStart.setHours(0, 0, 0, 0)
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay())
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekEnd.getDate() + 7)
-
-  const fmt = (d: Date) =>
-    d.toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase()
-  const weekRange = `${fmt(weekStart)} → ${fmt(new Date(weekEnd.getTime() - 1))}`
-
-  const thisWeek = shoots.filter(s => {
-    const t = Date.parse(s.shoot_date || "")
-    return Number.isFinite(t) && t >= weekStart.getTime() && t < weekEnd.getTime()
-  })
-
-  const byStudio = STUDIO_ORDER
-    .map(studio => ({
-      studio,
-      abbr: studioAbbr(studio),
-      color: studioColor(studio),
-      shoots: thisWeek
-        .filter(s => s.scenes.some(sc => sc.studio === studio))
-        .sort((a, b) => (a.shoot_date ?? "").localeCompare(b.shoot_date ?? "")),
-    }))
-    .filter(g => g.shoots.length > 0)
-
+function ProductionScopeStripV2({ stats, shoots }: { stats: SceneStats; shoots: Shoot[] }) {
+  const entries = STUDIO_ORDER
+    .map(s => [s, stats.by_studio[s] ?? 0] as [string, number])
+    .filter(([, n]) => n > 0)
+  const max = Math.max(1, ...entries.map(([, n]) => n))
   return (
-    <div style={{
-      background: "var(--color-surface)",
-      border: "1px solid var(--color-border)",
-      borderRadius: 6,
-      overflow: "hidden",
-    }}>
-      <div style={{
-        padding: "7px 14px",
-        display: "flex", alignItems: "center", gap: 10,
-        background: "var(--color-base)",
-        borderBottom: "1px solid var(--color-border-subtle)",
-      }}>
-        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>
-          On Set This Week
-        </span>
-        <span style={{ fontSize: 10, color: "var(--color-text-faint)", letterSpacing: "0.08em" }}>
-          {weekRange}
-        </span>
-        <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--color-text-faint)", fontVariantNumeric: "tabular-nums" }}>
-          {thisWeek.length} shoot{thisWeek.length !== 1 ? "s" : ""}
-        </span>
+    <div>
+      <div className="ec-stats">
+        <div className="s">
+          <div className="k">Scenes live</div>
+          <div className="v">{stats.total.toLocaleString()}</div>
+          <div className="d">{stats.missing_any.toLocaleString()} missing</div>
+        </div>
+        <div className="s">
+          <div className="k">Shoots</div>
+          <div className="v">{shoots.length}<span className="unit">active</span></div>
+          <div className="d">Across 4 studios</div>
+        </div>
+        <div className="s">
+          <div className="k">Studios</div>
+          <div className="v">4</div>
+          <div className="d">FPVR · VRH · VRA · NJOI</div>
+        </div>
       </div>
-
-      {byStudio.length === 0 ? (
-        <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--color-text-faint)" }}>
-          No shoots scheduled this week
-        </div>
-      ) : byStudio.map((group, i) => (
-        <div
-          key={group.studio}
-          style={{
-            display: "flex", alignItems: "flex-start", gap: 10,
-            padding: "8px 14px",
-            borderBottom: i < byStudio.length - 1 ? "1px solid var(--color-border-subtle)" : "none",
-          }}
-        >
-          <span style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: "0.06em",
-            padding: "1px 5px", borderRadius: 3, flexShrink: 0, marginTop: 1,
-            background: `color-mix(in srgb, ${group.color} 14%, transparent)`,
-            border: `1px solid color-mix(in srgb, ${group.color} 26%, transparent)`,
-            color: group.color,
-          }}>{group.abbr}</span>
-
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 18px", flex: 1 }}>
-            {group.shoots.map(s => {
-              const d = new Date(s.shoot_date)
-              const day = d.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase()
-              const talent = [s.female_talent, s.male_talent].filter(Boolean).join(" / ")
-              return (
-                <span key={s.shoot_id} style={{ fontSize: 12, color: "var(--color-text)", display: "inline-flex", gap: 6, alignItems: "center" }}>
-                  <span>{talent || s.shoot_id}</span>
-                  <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "var(--color-text-faint)" }}>{day}</span>
-                </span>
-              )
-            })}
-          </div>
-        </div>
-      ))}
+      <div className="ec-strip">
+        <div className="label">Production</div>
+        {entries.slice(0, 4).map(([studio, count]) => {
+          const key = studioAbbr(studio).toLowerCase()
+          return (
+            <div key={studio} className={`cell ${key}`}>
+              <div className="mono">{studioAbbr(studio)}</div>
+              <div className="big">{count.toLocaleString()}<sup>SCN</sup></div>
+              <div className="bar" style={{ width: `${Math.round((count / max) * 100)}%` }} />
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
