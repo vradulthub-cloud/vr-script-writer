@@ -78,7 +78,7 @@ STUDIO_TITLE_TOKENS = {
 SKIP_SCRIPT_ROWS = re.compile(r"^(cancel|note|tbd|tba)", re.IGNORECASE)
 
 LEGAL_ROOT_FOLDER = "132MZR2EgBeEEJRmF3OJke5WnZozkv2cJ"
-LEGAL_CREDS_PATH = "~/.config/google-legal-docs/credentials.json"
+# LEGAL_CREDS_PATH removed — use service account via _get_drive_token() instead
 
 # Call-sheet Doc title format (from call_sheets.py): "{M/D/YYYY} - {studios} Call Sheet"
 CALL_SHEET_TOKEN_RE = re.compile(r"Call Sheet", re.IGNORECASE)
@@ -121,8 +121,10 @@ class Shoot(BaseModel):
     shoot_date: str
     female_talent: str
     female_agency: str = ""
+    female_rate: Optional[str] = None
     male_talent: str = ""
     male_agency: str = ""
+    male_rate: Optional[str] = None
     destination: str = ""
     location: str = ""
     home_owner: str = ""
@@ -155,6 +157,73 @@ def _aging_hours(shoot_date: date) -> int:
     return max(0, int(delta.total_seconds() // 3600))
 
 
+
+# ---------------------------------------------------------------------------
+# Budget sheet rate lookup — cached 5 min
+# ---------------------------------------------------------------------------
+import threading as _threading_bgt
+_BUDGET_CACHE: dict = {}
+_BUDGET_LOCK = _threading_bgt.Lock()
+
+
+def _load_budget_rates() -> dict:
+    """Return {(date_str, female_lower): {female_rate, male_rate}} from budget sheet.
+    Cached 5 minutes."""
+    import time as _time
+    now = _time.monotonic()
+    with _BUDGET_LOCK:
+        cached = _BUDGET_CACHE.get("data")
+        if cached is not None and now - _BUDGET_CACHE.get("ts", 0) < 300:
+            return cached
+    try:
+        from api.sheets_client import open_budgets, with_retry
+        wb = with_retry(open_budgets)
+        rates: dict = {}
+        _months = ("january","february","march","april","may","june",
+                   "july","august","september","october","november","december")
+        for ws in wb.worksheets():
+            if not any(m in ws.title.lower() for m in _months):
+                continue
+            rows = with_retry(ws.get_all_values)
+            if not rows:
+                continue
+            for row in rows[1:]:
+                if len(row) < 5 or not row[0].strip() or not row[4].strip():
+                    continue
+                raw_date = row[0].strip().split(" ")[0].split("T")[0]
+                parts = raw_date.replace("/", "-").split("-")
+                if len(parts) == 3:
+                    if len(parts[0]) == 4:
+                        date_str = raw_date.replace("/", "-")
+                    else:
+                        m_p, d_p, y_p = parts
+                        y_full = "20" + y_p if len(y_p) == 2 else y_p
+                        date_str = "{}-{}-{}".format(y_full, m_p.zfill(2), d_p.zfill(2))
+                else:
+                    continue
+                f_talent = row[4].strip()
+                f_rate_raw = row[6].strip() if len(row) > 6 else ""
+                m_rate_raw = row[10].strip() if len(row) > 10 else ""
+                def _fmt(v):
+                    if not v:
+                        return None
+                    try:
+                        return "${:,}".format(int(float(v)))
+                    except (ValueError, TypeError):
+                        return v or None
+                key = (date_str, f_talent.lower())
+                if key not in rates:
+                    rates[key] = {"female_rate": _fmt(f_rate_raw), "male_rate": _fmt(m_rate_raw)}
+        with _BUDGET_LOCK:
+            _BUDGET_CACHE["data"] = rates
+            _BUDGET_CACHE["ts"] = now
+        return rates
+    except Exception as exc:
+        _log.warning("budget rate lookup failed: %s", exc)
+        with _BUDGET_LOCK:
+            return _BUDGET_CACHE.get("data") or {}
+
+
 def _shoot_id(shoot_date: str, female: str) -> str:
     """Stable ID per (date, female talent). Excludes male so BG+Solo merge."""
     base = f"{shoot_date}|{female.strip().lower()}"
@@ -175,6 +244,105 @@ def _legal_folder_key(shoot_date: date, female: str, male: str) -> tuple[str, st
 # Legal Drive lookup — now returns full file list per folder
 # ---------------------------------------------------------------------------
 
+def _get_drive_token() -> Optional[str]:
+    """Return a short-lived Drive read-only access token via the service account."""
+    from google.oauth2 import service_account as _sa
+    from google.auth.transport.requests import Request as _GReq
+    from api.config import get_settings
+    try:
+        settings = get_settings()
+        creds = _sa.Credentials.from_service_account_file(
+            str(settings.service_account_file),
+            scopes=["https://www.googleapis.com/auth/drive.readonly"],
+        )
+        creds.refresh(_GReq())
+        return creds.token
+    except Exception as exc:
+        _log.warning("drive token fetch failed: %s", exc)
+        return None
+
+
+
+def _get_drive_rw_token() -> Optional[str]:
+    """Return a short-lived Drive read-write access token (needed for file copy/delete)."""
+    from google.oauth2 import service_account as _sa
+    from google.auth.transport.requests import Request as _GReq
+    from api.config import get_settings
+    try:
+        settings = get_settings()
+        creds = _sa.Credentials.from_service_account_file(
+            str(settings.service_account_file),
+            scopes=["https://www.googleapis.com/auth/drive"],
+        )
+        creds.refresh(_GReq())
+        return creds.token
+    except Exception as exc:
+        _log.warning("drive rw token fetch failed: %s", exc)
+        return None
+
+
+def _ocr_pdf_id(pdf_id: str, rw_token: str) -> str:
+    """Copy PDF as a Google Doc (triggers Drive OCR), export text, delete the copy."""
+    import urllib.request
+    import urllib.parse
+    import json
+
+    body = json.dumps({
+        "name": "_w9_tmp_extract",
+        "mimeType": "application/vnd.google-apps.document",
+    }).encode()
+    req = urllib.request.Request(
+        f"https://www.googleapis.com/drive/v3/files/{pdf_id}/copy",
+        data=body,
+        method="POST",
+        headers={"Authorization": f"Bearer {rw_token}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=20) as r:
+        doc = json.loads(r.read())
+    doc_id = doc.get("id")
+    if not doc_id:
+        raise ValueError("drive copy returned no id")
+
+    try:
+        req2 = urllib.request.Request(
+            f"https://www.googleapis.com/drive/v3/files/{doc_id}/export"
+            f"?mimeType={urllib.parse.quote('text/plain')}",
+            headers={"Authorization": f"Bearer {rw_token}"},
+        )
+        with urllib.request.urlopen(req2, timeout=15) as r2:
+            return r2.read().decode("utf-8", errors="replace")
+    finally:
+        try:
+            urllib.request.urlopen(
+                urllib.request.Request(
+                    f"https://www.googleapis.com/drive/v3/files/{doc_id}",
+                    method="DELETE",
+                    headers={"Authorization": f"Bearer {rw_token}"},
+                ),
+                timeout=10,
+            ).close()
+        except Exception:
+            pass
+
+
+def _parse_w9_ocr_name(text: str) -> str:
+    """Extract the legal name (Line 1) from OCR text of a W9 form."""
+    import re as _re
+    boilerplate = ("required", "leave this", "do not", "line blank", "income tax return",
+                   "form w-9", "form w9", "request for taxpayer")
+    for pattern in (
+        r"Name\s*\(as shown[^)]+\)[^\n]*\n\s*([A-Z][^\n]{2,80})",
+        r"1\s+Name[^\n]*\n\s*([A-Z][^\n]{2,80})",
+        r"Name[^\n]*\n\s*([A-Z][a-z][^\n]{2,60})",
+    ):
+        m = _re.search(pattern, text, _re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+            if not any(x in candidate.lower() for x in boilerplate) and len(candidate) >= 3:
+                return candidate
+    return ""
+
+
 def _load_legal_folders(shoot_dates: set[date]) -> dict[tuple[date, str], list[str]]:
     """
     Returns {(shoot_date, folder_name): [filename, ...]} for every legal-run
@@ -184,36 +352,18 @@ def _load_legal_folders(shoot_dates: set[date]) -> dict[tuple[date, str], list[s
     call per shoot folder to list its children. Degrades to {} on creds miss
     or network error — callers fall back to `not_present`.
     """
-    import json
-    import os
     import urllib.parse
     import urllib.request
+    import json
 
     if not shoot_dates:
         return {}
 
-    creds_path = os.path.expanduser(LEGAL_CREDS_PATH)
-    if not os.path.exists(creds_path):
-        _log.info("legal creds missing at %s — skipping legal validation", creds_path)
+    token = _get_drive_token()
+    if not token:
         return {}
 
     try:
-        with open(creds_path) as f:
-            creds = json.load(f)
-
-        params = urllib.parse.urlencode({
-            "grant_type":    "refresh_token",
-            "refresh_token": creds["refresh_token"],
-            "client_id":     creds["client_id"],
-            "client_secret": creds["client_secret"],
-        }).encode()
-        req = urllib.request.Request("https://oauth2.googleapis.com/token", data=params, method="POST")
-        with urllib.request.urlopen(req, timeout=10) as r:
-            token = json.loads(r.read()).get("access_token")
-        if not token:
-            _log.warning("legal token refresh returned no access_token")
-            return {}
-
         def drive_get(url: str) -> dict:
             req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
             with urllib.request.urlopen(req, timeout=10) as r:
@@ -726,6 +876,10 @@ def _load_shoots_window(from_date: date, to_date: date, include_cancelled: bool)
         shoot_dates = {date.fromisoformat(items[0]["_parsed_date"]) for items in groups.values() if items}
         legal_folders = _load_legal_folders(shoot_dates)
         call_sheet_dates = _load_call_sheets(shoot_dates)
+        try:
+            budget_rates = _load_budget_rates()
+        except Exception:
+            budget_rates = {}
 
         shoots: list[Shoot] = []
         for _, items in groups.items():
@@ -822,11 +976,14 @@ def _load_shoots_window(from_date: date, to_date: date, include_cancelled: bool)
                     assets=assets,
                 ))
 
+            bgt = budget_rates.get((sd_iso, female.lower()), {})
             shoots.append(Shoot(
                 shoot_id=shoot_id,
                 shoot_date=sd_iso,
                 female_talent=female,
+                female_rate=bgt.get("female_rate"),
                 male_talent=male,
+                male_rate=bgt.get("male_rate"),
                 source_tab=first.get("tab_name") or "",
                 status=(first.get("script_status") or "active").lower().strip() or "active",
                 scenes=scenes,
@@ -896,3 +1053,186 @@ async def revalidate_asset(shoot_id: str, position: int, asset_type: str, user: 
                 if a.asset_type == asset_type:
                     return a
     raise HTTPException(status_code=404, detail="Asset cell not found")
+
+# ---------------------------------------------------------------------------
+# Legal docs endpoint — appended patch
+# ---------------------------------------------------------------------------
+
+class LegalDocFile(BaseModel):
+    name: str
+    web_view_link: str
+    mime_type: str = ""
+
+
+class LegalDocsResult(BaseModel):
+    folder_url: Optional[str] = None
+    folder_name: Optional[str] = None
+    files: list[LegalDocFile] = []
+    w9_name: Optional[str] = None
+
+
+def _extract_w9_name(pdf_bytes: bytes, pdf_id: str = "", rw_token: str = "") -> str:
+    """Extract Line 1 (legal name) from a W9 PDF.
+
+    Tries in order:
+    1. Drive OCR (copy-as-doc) — works on flattened/scanned PDFs
+    2. pypdf AcroForm fields — works on electronically-filled PDFs
+    3. pypdf text extraction — last resort for simple text-based PDFs
+    """
+    # ── 1. Drive OCR (most reliable for flattened forms) ─────────────────────
+    if pdf_id and rw_token:
+        try:
+            ocr_text = _ocr_pdf_id(pdf_id, rw_token)
+            name = _parse_w9_ocr_name(ocr_text)
+            if name:
+                return name
+        except Exception as ocr_exc:
+            _log.warning("w9 ocr failed: %s", ocr_exc)
+
+    # ── 2. pypdf AcroForm fields (electronically-filled PDFs) ────────────────
+    import io
+    import re as _re
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+        fields = reader.get_fields() or {}
+        if fields:
+            for key in sorted(fields.keys()):
+                field = fields[key]
+                val = field.get("/V", "")
+                if not isinstance(val, str):
+                    continue
+                val = val.strip()
+                # Skip empty, checkbox states (NameObject "/Yes"/"/Off"), booleans, digits
+                if (not val or len(val) < 2 or val.startswith("/")
+                        or val in ("Yes", "Off", "On", "True", "False")
+                        or val.isdigit()):
+                    continue
+                return val
+        # ── 3. Text extraction fallback ───────────────────────────────────────
+        if reader.pages:
+            text = reader.pages[0].extract_text() or ""
+            m = _re.search(r"Name\s*\(as shown[^\n]*\)\s*\n([^\n]+)", text, _re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _get_shoot_legal_docs(shoot_date: date, female: str, male: str) -> LegalDocsResult:
+    """Walk Drive legal folder hierarchy and return files for this shoot."""
+    import urllib.parse
+    import urllib.request
+    import json
+
+    token = _get_drive_token()
+    if not token:
+        return LegalDocsResult()
+
+    try:
+        def drive_get(url: str) -> dict:
+            r2 = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(r2, timeout=10) as resp:
+                return json.loads(resp.read())
+
+        month_name, _ = _legal_folder_key(shoot_date, female, male)
+        date_prefix = shoot_date.strftime("%m%d%y") + "-"
+        female_slug = female.replace(" ", "").lower()
+        male_slug = male.replace(" ", "").lower() if male else ""
+
+        def _folder_matches(fname: str) -> bool:
+            name_lower = fname.replace("-", "").lower()
+            if not fname.startswith(date_prefix):
+                return False
+            if female_slug and female_slug not in name_lower:
+                return False
+            if male_slug and male_slug not in name_lower:
+                return False
+            return True
+
+        # Step 1: find the month folder
+        q = (
+            f"'{LEGAL_ROOT_FOLDER}' in parents "
+            f"and name='{month_name}' "
+            "and mimeType='application/vnd.google-apps.folder' "
+            "and trashed=false"
+        )
+        res = drive_get(
+            "https://www.googleapis.com/drive/v3/files"
+            f"?q={urllib.parse.quote(q)}&fields=files(id,name)"
+        )
+        month_files = (res or {}).get("files") or []
+        if not month_files:
+            return LegalDocsResult()
+        month_id = month_files[0]["id"]
+
+        # Step 2: list shoot folders in the month folder, find the one for this shoot
+        q = f"'{month_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        res = drive_get(
+            "https://www.googleapis.com/drive/v3/files"
+            f"?q={urllib.parse.quote(q)}&fields=files(id,name)&pageSize=1000"
+        )
+        for folder in (res or {}).get("files") or []:
+            fname: str = folder.get("name", "")
+            fid: str = folder.get("id", "")
+            if not _folder_matches(fname):
+                continue
+
+            # Step 3: list files in the shoot folder
+            q2 = f"'{fid}' in parents and trashed=false"
+            res2 = drive_get(
+                "https://www.googleapis.com/drive/v3/files"
+                f"?q={urllib.parse.quote(q2)}&fields=files(id,name,mimeType,webViewLink)&pageSize=1000"
+            )
+            raw_files = res2.get("files") or []
+            files = [
+                LegalDocFile(
+                    name=c.get("name", ""),
+                    web_view_link=c.get(
+                        "webViewLink",
+                        f"https://drive.google.com/file/d/{c.get('id', '')}/view",
+                    ),
+                    mime_type=c.get("mimeType", ""),
+                )
+                for c in raw_files
+                if c.get("name")
+            ]
+
+            # Extract name from the W9 PDF (AcroForm fields, for electronically-filled PDFs)
+            w9_name: Optional[str] = None
+            w9_entries = [c for c in raw_files if c.get("mimeType") == "application/pdf"]
+            if w9_entries:
+                try:
+                    w9_id = w9_entries[0]["id"]
+                    dl_req = urllib.request.Request(
+                        f"https://www.googleapis.com/drive/v3/files/{w9_id}?alt=media",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    with urllib.request.urlopen(dl_req, timeout=15) as dl_resp:
+                        pdf_bytes = dl_resp.read()
+                    w9_name = _extract_w9_name(pdf_bytes)
+                except Exception as w9_exc:
+                    _log.warning("w9 name extraction failed: %s", w9_exc)
+
+            return LegalDocsResult(
+                folder_url=f"https://drive.google.com/drive/folders/{fid}",
+                folder_name=fname,
+                files=files,
+                w9_name=w9_name or None,
+            )
+
+        return LegalDocsResult()
+    except Exception as exc:
+        _log.warning("legal docs lookup failed: %s", exc)
+        return LegalDocsResult()
+
+
+@router.get("/{shoot_id}/legal-docs", response_model=LegalDocsResult)
+async def get_shoot_legal_docs(shoot_id: str, user: CurrentUser):
+    """Return Drive legal-folder URL and file list for a shoot."""
+    shoot = _find_shoot(shoot_id)
+    shoot_date_obj = _parse_shoot_date(shoot.shoot_date)
+    if not shoot_date_obj:
+        return LegalDocsResult()
+    return _get_shoot_legal_docs(shoot_date_obj, shoot.female_talent, shoot.male_talent)

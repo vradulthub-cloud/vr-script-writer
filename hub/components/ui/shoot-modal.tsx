@@ -71,12 +71,15 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
     return () => { cancelled = true }
   }, [idToken, shoot.shoot_date, shoot.female_talent, shoot.male_talent, shoot.scenes])
 
+  const [legalDocsLoading, setLegalDocsLoading] = useState(true)
+
   useEffect(() => {
     if (!idToken) return
+    setLegalDocsLoading(true)
     const client = api(idToken)
     client.shoots.legalDocs(shoot.shoot_id)
-      .then(setLegalDocs)
-      .catch(() => {})
+      .then(r => { setLegalDocs(r); setLegalDocsLoading(false) })
+      .catch(() => setLegalDocsLoading(false))
   }, [idToken, shoot.shoot_id])
 
   const hasScriptContent = useMemo(
@@ -351,6 +354,7 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
                     w9Name={legalDocs?.w9_name}
                     legalFiles={legalDocs?.files}
                     folderUrl={legalDocs?.folder_url ?? undefined}
+                    loading={legalDocsLoading}
                   />
                 )}
                 {shoot.male_talent && (
@@ -361,6 +365,7 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
                     paymentName={shoot.male_payment_name}
                     legalFiles={legalDocs?.files}
                     folderUrl={legalDocs?.folder_url ?? undefined}
+                    loading={legalDocsLoading}
                   />
                 )}
               </div>
@@ -528,6 +533,7 @@ function TalentRow({
   w9Name,
   legalFiles,
   folderUrl,
+  loading,
 }: {
   name: string
   agency?: string
@@ -536,9 +542,10 @@ function TalentRow({
   w9Name?: string | null
   legalFiles?: LegalDocFile[]
   folderUrl?: string
+  loading?: boolean
 }) {
   const resolvedPayTo = paymentName || w9Name || null
-  const w9Pending = !resolvedPayTo && !rate
+  const w9Pending = !loading && !resolvedPayTo && !rate
   // Any PDF in the legal folder is the W9 (files aren't always named "w9")
   const w9Files = (legalFiles ?? []).filter(f => f.mime_type === "application/pdf" || /w9/i.test(f.name))
   return (
@@ -559,11 +566,11 @@ function TalentRow({
       >
         <span style={{ color: "var(--color-text-faint)", letterSpacing: "0.08em", textTransform: "uppercase", fontSize: 9, fontWeight: 700, alignSelf: "center" }}>Rate</span>
         <span style={{ color: rate ? "var(--color-text)" : "var(--color-text-faint)", fontVariantNumeric: "tabular-nums" }}>
-          {rate || (w9Pending ? "Pending W9" : "—")}
+          {rate || (loading ? "…" : w9Pending ? "Not on file" : "—")}
         </span>
         <span style={{ color: "var(--color-text-faint)", letterSpacing: "0.08em", textTransform: "uppercase", fontSize: 9, fontWeight: 700, alignSelf: "center" }}>Pay&nbsp;to</span>
         <span style={{ color: resolvedPayTo ? "var(--color-text)" : "var(--color-text-faint)" }}>
-          {resolvedPayTo || (w9Pending ? "Pending W9" : "—")}
+          {resolvedPayTo || (loading ? "…" : w9Pending ? "No W9 on file" : "—")}
         </span>
         {(w9Files.length > 0 || folderUrl) && (
           <>
