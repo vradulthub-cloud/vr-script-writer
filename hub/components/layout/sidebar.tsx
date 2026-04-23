@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -187,6 +187,83 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
           </>
         )}
       </nav>
+
+      <RailClock />
     </aside>
+  )
+}
+
+function RailClock() {
+  const [now, setNow] = useState<Date | null>(null)
+
+  useEffect(() => {
+    setNow(new Date())
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  if (!now) return <div style={{ height: 64, borderTop: "1px solid var(--color-border)" }} />
+
+  const p = (n: number) => String(n).padStart(2, "0")
+  const time = `${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`
+  const timeShort = `${p(now.getHours())}:${p(now.getMinutes())}`
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone.split("/").pop()?.replace("_", " ") ?? "LOCAL"
+  const dayDate = now
+    .toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+    .toUpperCase()
+    .replace(",", " ·")
+
+  return (
+    <div
+      style={{
+        borderTop: "1px solid var(--color-border)",
+        padding: "10px 0 12px",
+        textAlign: "center",
+        flexShrink: 0,
+        userSelect: "none",
+      }}
+    >
+      {/* Collapsed rail: just HH:MM */}
+      <div
+        className="block xl:hidden"
+        style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--color-text-faint)", letterSpacing: "0.06em" }}
+      >
+        {timeShort}
+      </div>
+
+      {/* Expanded: full clock block */}
+      <div className="hidden xl:flex flex-col items-center gap-1">
+        <div
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 20,
+            fontWeight: 600,
+            letterSpacing: "0.08em",
+            color: "var(--color-text-muted)",
+            lineHeight: 1,
+          }}
+        >
+          {time}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            width: "100%",
+            padding: "0 14px",
+            fontSize: 9,
+            fontWeight: 600,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            color: "var(--color-text-faint)",
+            marginTop: 3,
+          }}
+        >
+          <span>{dayDate}</span>
+          <span style={{ opacity: 0.6 }}>{tz}</span>
+        </div>
+      </div>
+    </div>
   )
 }
