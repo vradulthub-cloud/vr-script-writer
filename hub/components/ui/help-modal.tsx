@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { HelpCircle, X } from "lucide-react"
+import { X } from "lucide-react"
 
 /**
  * Hub help surface. Fills the critique's "help/docs = 1/4" gap with a
@@ -43,18 +43,31 @@ export function HelpButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        title="Help (?)"
+        title="Help (press ?)"
         aria-label="Open help"
-        className="hidden sm:inline-flex items-center justify-center rounded transition-colors hover:bg-[--color-elevated]"
+        className="hidden sm:flex items-center gap-1.5 rounded transition-colors hover:bg-[--color-elevated]"
         style={{
-          padding: 5,
+          padding: "3px 8px",
           border: "1px solid var(--color-border)",
           background: "transparent",
           color: "var(--color-text-faint)",
           cursor: "pointer",
         }}
       >
-        <HelpCircle size={13} aria-hidden="true" />
+        <span style={{ fontSize: 11 }}>Help</span>
+        <kbd
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: "var(--color-text-faint)",
+            background: "var(--color-elevated)",
+            padding: "1px 4px",
+            borderRadius: 3,
+            lineHeight: 1.3,
+          }}
+        >
+          ?
+        </kbd>
       </button>
 
       {open && <HelpModal onClose={() => setOpen(false)} />}
@@ -167,7 +180,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
               <li>"All clear" if none of the above</li>
             </ol>
             <p style={pStyle}>
-              Tone of the big numeral ramps with magnitude: amber for 1–5, red-orange for 6–20, full red for 21+. The "!" state means Today couldn&rsquo;t be computed — the production server is unreachable.
+              Tone of the big numeral ramps with magnitude: neutral for 0–1 (a single pending item isn&rsquo;t a fire), amber for 2–5, red for 6+. The "!" state means Today couldn&rsquo;t be computed — the production server is unreachable.
             </p>
           </Section>
         </div>
