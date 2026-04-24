@@ -862,7 +862,7 @@ def build_rows(
         tab_name, site_code, n_rows = STUDIO_MAP[shoot["studio"]]
         female      = shoot["female"]
         male        = shoot["male"]
-        performers  = ", ".join(filter(None, [female, male]))
+        performers  = female
         scene_type  = shoot.get("type", "BG")
         destination = shoot.get("destination", "")
 

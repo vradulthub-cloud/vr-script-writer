@@ -555,6 +555,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
             />
             <input
               type="text"
+              aria-label="Search tickets"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search by title, ID, or description…"
@@ -1132,6 +1133,7 @@ function TicketQuickActions({ ticket, isAdmin, busy, onAction }: QuickActionsPro
           </div>
           <input
             type="text"
+            aria-label="QC feedback notes"
             value={qcNote}
             onChange={e => setQcNote(e.target.value)}
             placeholder="Notes (optional)"
@@ -1267,6 +1269,7 @@ function TicketQuickActions({ ticket, isAdmin, busy, onAction }: QuickActionsPro
           </div>
           <input
             type="text"
+            aria-label="Rejection reason"
             value={rejectReason}
             onChange={e => setRejectReason(e.target.value)}
             placeholder="Rejection reason (required)"
