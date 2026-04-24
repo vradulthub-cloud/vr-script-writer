@@ -1,21 +1,36 @@
 "use client"
 
 import { type ModelProfile } from "@/lib/api"
-import { scoreColor, modelPhotoUrl } from "./model-utils"
+import { scoreColor, modelPhotoUrl, RANK_COLOR } from "./model-utils"
 import { Photo } from "./model-photo"
 
 // ─── Model card (trending / priority) ────────────────────────────────────────
 
-export function ModelCard({ name, photoSrc, statLine, score, onView }: {
-  name: string; photoSrc: string; statLine: string; score?: number; onView: () => void
+export function ModelCard({ name, photoSrc, statLine, score, rank, bookings, onView }: {
+  name: string
+  photoSrc: string
+  statLine: string
+  score?: number
+  rank?: string
+  bookings?: string
+  onView: () => void
 }) {
+  const rankKey = (rank ?? "").toLowerCase()
+  const rankColor = RANK_COLOR[rankKey] ?? "var(--color-text-faint)"
+  const bookingCount = parseInt(bookings ?? "0") || 0
+
   return (
-    <div style={{
-      borderRadius: 8, overflow: "hidden",
-      background: "var(--color-surface)",
-      border: "1px solid var(--color-border)",
-      display: "flex", flexDirection: "column",
-    }}>
+    <div
+      onClick={onView}
+      style={{
+        overflow: "hidden",
+        background: "var(--color-surface)",
+        border: "1px solid var(--color-border)",
+        display: "flex", flexDirection: "column",
+        cursor: "pointer",
+      }}
+      className="hover:border-[--color-text-faint] transition-colors"
+    >
       {/* Photo */}
       <div style={{ position: "relative", flexShrink: 0 }}>
         <Photo src={photoSrc} fallbackSrc={modelPhotoUrl(name)} name={name} width="100%" height={180} radius={0} objectPos="50% 15%" />
@@ -56,28 +71,28 @@ export function ModelCard({ name, photoSrc, statLine, score, onView }: {
         </div>
       </div>
 
-      {/* View button */}
-      <button
-        onClick={onView}
-        style={{
-          background: "var(--color-elevated)",
-          border: "none", borderTop: "1px solid var(--color-border-subtle)",
-          color: "var(--color-text-muted)",
-          fontSize: 11, fontWeight: 500,
-          padding: "7px 0", cursor: "pointer", width: "100%",
-          transition: "background 0.12s, color 0.12s",
-        }}
-        onMouseEnter={e => {
-          (e.currentTarget as HTMLElement).style.background = "var(--color-lime)"
-          ;(e.currentTarget as HTMLElement).style.color = "#000"
-        }}
-        onMouseLeave={e => {
-          (e.currentTarget as HTMLElement).style.background = "var(--color-elevated)"
-          ;(e.currentTarget as HTMLElement).style.color = "var(--color-text-muted)"
-        }}
-      >
-        View
-      </button>
+      {/* Footer: rank pill + booking count */}
+      <div style={{
+        padding: "6px 10px",
+        borderTop: "1px solid var(--color-border-subtle)",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        background: "var(--color-base)",
+      }}>
+        {rankKey ? (
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
+            color: rankColor,
+            background: `color-mix(in srgb, ${rankColor} 12%, transparent)`,
+            border: `1px solid color-mix(in srgb, ${rankColor} 25%, transparent)`,
+            padding: "2px 7px",
+          }}>
+            {rankKey}
+          </span>
+        ) : <span />}
+        <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
+          {bookingCount > 0 ? `${bookingCount}× booked` : "Never booked"}
+        </span>
+      </div>
     </div>
   )
 }
