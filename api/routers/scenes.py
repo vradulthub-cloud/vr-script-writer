@@ -403,6 +403,52 @@ async def generate_scene_title(scene_id: str, body: TitleGenerateBody, user: Cur
 
 
 # ---------------------------------------------------------------------------
+# Script data lookup — for description generator pre-fill
+# ---------------------------------------------------------------------------
+
+@router.get("/{scene_id}/script")
+async def get_scene_script(scene_id: str, user: CurrentUser):
+    """
+    Return script data (plot, theme, wardrobe, scene_type) for a scene.
+
+    Used by the description generator to pre-fill the plot field when a scene
+    is selected. Matches by female performer name + studio (same pattern as
+    generate-title). Returns empty strings if no matching script row exists.
+    """
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT studio, performers FROM scenes WHERE id = ?", (scene_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Scene not found")
+        scene = dict(row)
+
+        female = (scene.get("performers") or "").split(",")[0].strip()
+        if not female:
+            return {"plot": "", "theme": "", "wardrobe_f": "", "wardrobe_m": "", "scene_type": ""}
+
+        srow = conn.execute(
+            "SELECT theme, plot, wardrobe_f, wardrobe_m, scene_type "
+            "FROM scripts "
+            "WHERE studio = ? AND LOWER(female) = LOWER(?) "
+            "ORDER BY tab_name DESC LIMIT 1",
+            (scene["studio"], female),
+        ).fetchone()
+
+        if not srow:
+            return {"plot": "", "theme": "", "wardrobe_f": "", "wardrobe_m": "", "scene_type": ""}
+
+        s = dict(srow)
+        return {
+            "plot":       s.get("plot")       or "",
+            "theme":      s.get("theme")      or "",
+            "wardrobe_f": s.get("wardrobe_f") or "",
+            "wardrobe_m": s.get("wardrobe_m") or "",
+            "scene_type": s.get("scene_type") or "",
+        }
+
+
+# ---------------------------------------------------------------------------
 # Naming validation
 # ---------------------------------------------------------------------------
 

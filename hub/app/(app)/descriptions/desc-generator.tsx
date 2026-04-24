@@ -71,7 +71,9 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   const [keywords, setKeywords] = useState("")
   const [wardrobe, setWardrobe] = useState("")
   const [plot, setPlot] = useState("")
+  const [sceneType, setSceneType] = useState("")
   const [modelNotes, setModelNotes] = useState("")
+  const [scriptLoading, setScriptLoading] = useState(false)
 
   // Inline-edited paragraphs (index → edited text)
   const [editedParagraphs, setEditedParagraphs] = useState<Record<number, string>>({})
@@ -144,26 +146,35 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   const [showQueue, setShowQueue] = useState(true)
   const [grailSaving, setGrailSaving] = useState(false)
 
-  function autoPopulateFromScene(scene: Scene) {
+  async function autoPopulateFromScene(scene: Scene) {
     setSelectedSceneId(scene.id)
-    // Pre-fill every form field the Scene shape can inform. Leaves untouched
-    // fields alone so a user can autopopulate, then tweak.
     if (scene.performers) setPerformers(scene.performers)
     if (scene.categories) {
       const cats = scene.categories.split(",").map(c => c.trim()).filter(Boolean)
       setSelectedCats(cats.filter(c => availableCategories.includes(c)))
     }
-    if (scene.tags) {
-      // Tags sit naturally in the keywords field — they're the SEO hints
-      // already curated on the Grail row.
-      setKeywords(scene.tags)
-    }
-    if (scene.plot) setPlot(scene.plot)
-    if (scene.theme) setModelNotes(scene.theme)
-    if (scene.title && !metaTitle) {
-      // Pre-seed the SEO meta title with the scene title (user can override)
-      setMetaTitle(scene.title)
-    }
+    if (scene.tags) setKeywords(scene.tags)
+    if (scene.title && !metaTitle) setMetaTitle(scene.title)
+
+    // Fetch script data (plot, theme, wardrobe, scene_type) from the scripts
+    // table — the Grail doesn't carry these fields so we look them up by
+    // performer name. If the scene was shot more than 3 months ago and isn't
+    // in the scripts sync window, the fields come back empty and the user
+    // can fill them in manually.
+    setScriptLoading(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/scenes/${scene.id}/script`, {
+        headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.plot)       setPlot(data.plot)
+        if (data.theme)      setModelNotes(data.theme)
+        if (data.wardrobe_f) setWardrobe(data.wardrobe_f)
+        if (data.scene_type) setSceneType(data.scene_type)
+      }
+    } catch { /* leave fields empty — user can fill manually */ }
+    finally { setScriptLoading(false) }
   }
 
   const selectedScene = useMemo(
@@ -268,6 +279,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
         wardrobe,
         model_properties: modelNotes || undefined,
         plot: plot || undefined,
+        scene_type: sceneType || undefined,
       }
     )
   }
@@ -521,6 +533,16 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
               <p style={{ fontSize: 12, color: "var(--color-text)", lineHeight: 1.35 }}>
                 {selectedScene.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}
               </p>
+              {scriptLoading && (
+                <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 4 }}>
+                  Loading script data…
+                </p>
+              )}
+              {!scriptLoading && sceneType && (
+                <p style={{ fontSize: 10, color: "var(--color-text-muted)", marginTop: 4, fontWeight: 600 }}>
+                  {sceneType}
+                </p>
+              )}
               {genTitleErr && (
                 <p style={{ fontSize: 10, color: "var(--color-err)", marginTop: 4 }}>{genTitleErr}</p>
               )}
@@ -596,6 +618,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                 setMetaTitle("")
                 setMetaDesc("")
                 setPlot("")
+                setSceneType("")
               }}
             />
           </div>
