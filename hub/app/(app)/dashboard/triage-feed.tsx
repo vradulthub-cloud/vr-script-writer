@@ -22,7 +22,10 @@ function sceneAssetCells(scene: Scene): AssetCell[] {
   }))
 }
 
-const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
+// NJOI intentionally omitted from Recent activity — the team isn't actively
+// triaging that studio's catalog on the dashboard. Surface it via /missing if
+// needed.
+const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure"]
 
 interface Props {
   recentScenes: Scene[]
