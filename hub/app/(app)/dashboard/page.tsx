@@ -4,7 +4,6 @@ import { api, type SceneStats, type Shoot } from "@/lib/api"
 import { studioColor, studioAbbr } from "@/lib/studio-colors"
 import { isEclatechV2 } from "@/lib/eclatech-flag"
 import { PageHeader } from "@/components/ui/page-header"
-import { Panel } from "@/components/ui/panel"
 import { WeekCalendar } from "@/components/ui/week-calendar"
 import { TodayBriefing, type Briefing, toneForCount } from "@/components/ui/today-briefing"
 import { NotificationFeed } from "./notification-feed"
@@ -74,30 +73,30 @@ export default async function DashboardPage() {
         title={`${greeting}, ${firstName}`}
         eyebrow={eyebrow}
         actions={
-          <span
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              fontSize: 12,
-              color: systemOk ? "var(--color-text-muted)" : "var(--color-err)",
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
+          !systemOk ? (
             <span
-              aria-hidden="true"
               style={{
-                width: 7,
-                height: 7,
-                borderRadius: "50%",
-                background: systemOk ? "var(--color-ok)" : "var(--color-err)",
-                boxShadow: systemOk
-                  ? "0 0 0 3px color-mix(in srgb, var(--color-ok) 20%, transparent)"
-                  : "0 0 0 3px color-mix(in srgb, var(--color-err) 20%, transparent)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 12,
+                color: "var(--color-err)",
+                fontVariantNumeric: "tabular-nums",
               }}
-            />
-            {systemOk ? "All green" : "Connection lost"}
-          </span>
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: "var(--color-err)",
+                  boxShadow: "0 0 0 3px color-mix(in srgb, var(--color-err) 20%, transparent)",
+                }}
+              />
+              Connection lost
+            </span>
+          ) : undefined
         }
       />
 
@@ -157,9 +156,6 @@ export default async function DashboardPage() {
             unreadCount={unreadCount}
           />
 
-          {health?.syncs && Object.keys(health.syncs).length > 0 && (
-            <SyncStatusPanel syncs={health.syncs} />
-          )}
         </div>
       </div>
     </div>
@@ -263,11 +259,12 @@ function SceneCountStrip({ stats }: { stats: SceneStats }) {
     <div className="ec-strip">
       <div className="label">Scene Count</div>
       {entries.slice(0, 4).map(([studio, count]) => {
+        const isNjoi = studio === "NaughtyJOI"
         const key = studioAbbr(studio).toLowerCase()
         return (
-          <div key={studio} className={`cell ${key}`}>
+          <div key={studio} className={`cell ${key}`} style={isNjoi ? { opacity: 0.45 } : undefined}>
             <div className="mono">{studioAbbr(studio)}</div>
-            <div className="big">{count.toLocaleString()}<sup>SCN</sup></div>
+            <div className="big" style={isNjoi ? { fontSize: "1.5rem" } : undefined}>{count.toLocaleString()}<sup>SCN</sup></div>
             <div className="bar" style={{ width: `${Math.round((count / max) * 100)}%` }} />
           </div>
         )
@@ -313,32 +310,3 @@ function ProductionScopeStrip({ stats }: { stats: SceneStats }) {
   )
 }
 
-function SyncStatusPanel({ syncs }: { syncs: Record<string, unknown> }) {
-  return (
-    <Panel title="Sync Status">
-      <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-        {Object.entries(syncs).map(([source, infoRaw]) => {
-          const info = infoRaw as { last_synced_at?: string; row_count?: number; status?: string; error?: string }
-          const ok = !info.status || info.status === "ok" || info.status === "synced"
-          return (
-            <div key={source} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span
-                aria-hidden="true"
-                style={{
-                  width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-                  background: ok ? "var(--color-ok)" : "var(--color-err)",
-                }}
-              />
-              <span style={{ flex: 1, fontSize: 12, color: "var(--color-text)" }}>{source}</span>
-              {info.row_count !== undefined && (
-                <span style={{ fontSize: 11, color: "var(--color-text-faint)", fontVariantNumeric: "tabular-nums" }}>
-                  {info.row_count.toLocaleString()} rows
-                </span>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </Panel>
-  )
-}
