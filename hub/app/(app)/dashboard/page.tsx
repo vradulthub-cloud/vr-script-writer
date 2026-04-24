@@ -1,11 +1,11 @@
 import Link from "next/link"
 import { auth } from "@/auth"
 import { api, type SceneStats, type Shoot } from "@/lib/api"
-import { studioColor, studioAbbr } from "@/lib/studio-colors"
-import { isEclatechV2 } from "@/lib/eclatech-flag"
+import { studioAbbr } from "@/lib/studio-colors"
 import { PageHeader } from "@/components/ui/page-header"
 import { WeekCalendar } from "@/components/ui/week-calendar"
-import { TodayBriefing, type Briefing, toneForCount } from "@/components/ui/today-briefing"
+import { type Briefing, toneForCount } from "@/components/ui/today-briefing"
+import { BriefingCache } from "./briefing-cache"
 import { NotificationFeed } from "./notification-feed"
 import { TriageFeed } from "./triage-feed"
 
@@ -17,7 +17,6 @@ export default async function DashboardPage() {
   const session = await auth()
   const client = api(session)
   const idToken = (session as { idToken?: string } | null)?.idToken
-  const v2 = await isEclatechV2()
 
   // Approvals removed from the dashboard for now — the team isn't using
   // the approvals workflow yet. The /approvals route + API are gone too;
@@ -100,20 +99,18 @@ export default async function DashboardPage() {
         }
       />
 
-      <TodayBriefing briefing={briefing} />
+      <BriefingCache briefing={briefing} />
 
       {/* ── Body: Triage dominates (2/3), Notifications rail recedes ─── */}
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
 
         <div className="flex flex-col gap-6">
-          {v2 && shoots.length > 0 && (
+          {shoots.length > 0 && (
             <WeekCalendar shoots={shoots} flat />
           )}
 
           {sceneStats && Object.keys(sceneStats.by_studio).length > 0 && (
-            v2
-              ? <SceneCountStrip stats={sceneStats} />
-              : <ProductionScopeStrip stats={sceneStats} />
+            <SceneCountStrip stats={sceneStats} />
           )}
 
           <TriageFeed
@@ -273,40 +270,4 @@ function SceneCountStrip({ stats }: { stats: SceneStats }) {
   )
 }
 
-function ProductionScopeStrip({ stats }: { stats: SceneStats }) {
-  const entries = Object.entries(stats.by_studio).sort(([, a], [, b]) => b - a)
-  return (
-    <div
-      style={{
-        background: "var(--color-surface)",
-        border: "1px solid var(--color-border)",
-        borderRadius: 6,
-        padding: "8px 14px",
-        display: "flex",
-        alignItems: "center",
-        gap: 18,
-        flexWrap: "wrap",
-      }}
-    >
-      <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-text-faint)", letterSpacing: "0.07em", textTransform: "uppercase" }}>
-        Production
-      </span>
-      {entries.map(([studio, count]) => {
-        const color = studioColor(studio)
-        const abbr  = studioAbbr(studio)
-        return (
-          <span key={studio} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-            <span style={{ fontWeight: 700, color, letterSpacing: "0.04em" }}>{abbr}</span>
-            <span style={{ fontVariantNumeric: "tabular-nums", color: "var(--color-text)" }}>
-              {count.toLocaleString()}
-            </span>
-          </span>
-        )
-      })}
-      <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--color-text-faint)" }}>
-        {stats.total.toLocaleString()} scenes · {stats.missing_any} missing
-      </span>
-    </div>
-  )
-}
 
