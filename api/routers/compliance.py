@@ -54,6 +54,8 @@ MALE_TPLS: dict[str, str] = {
 }
 DATE_FIELDS = {"Date 1", "Date 2", "Custom Field 13"}
 
+_RCLONE = r"C:\Users\andre\rclone.exe"
+
 STUDIO_TO_MEGA: dict[str, str] = {
     "FuckPassVR": "FPVR",
     "VRHush":     "VRH",
@@ -617,7 +619,7 @@ async def upload_photos(
             mega_path = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/"
             try:
                 r = subprocess.run(
-                    ["rclone", "copy", tmp_dir, mega_path],
+                    [_RCLONE, "copy", tmp_dir, mega_path],
                     capture_output=True, text=True, timeout=120,
                 )
                 if r.returncode == 0:
@@ -693,7 +695,7 @@ async def mega_sync(
         mega_studio = STUDIO_TO_MEGA.get(studio, studio)
         mega_path = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/"
         r = subprocess.run(
-            ["rclone", "copy", tmp_dir, mega_path],
+            [_RCLONE, "copy", tmp_dir, mega_path],
             capture_output=True, text=True, timeout=300,
         )
         if r.returncode == 0:
