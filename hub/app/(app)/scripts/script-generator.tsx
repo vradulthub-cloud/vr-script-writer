@@ -56,6 +56,8 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
 
+  const [savedAt, setSavedAt] = useState<Date | null>(null)
+
   // Post-generation features
   const [violations, setViolations] = useState<string[]>([])
   const [validationRan, setValidationRan] = useState(false)
@@ -177,6 +179,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
   }
 
   function generate() {
+    setSavedAt(null)
     stream.start(
       `${API_BASE_URL}/api/scripts/generate`,
       idToken,
@@ -215,6 +218,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
         props: "",
       })
       setSaveMsg("Saved to sheet.")
+      setSavedAt(new Date())
     } catch (e) {
       setSaveMsg(formatApiError(e, "Save"))
     } finally {
@@ -702,6 +706,11 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
               }}
             >
               <span>{outputStats}</span>
+              {savedAt && (
+                <span style={{ color: "var(--color-ok)" }}>
+                  Saved {savedAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                </span>
+              )}
               {!stream.streaming && stream.output && (
                 <CopyButton text={stream.output} label="Copy" />
               )}
