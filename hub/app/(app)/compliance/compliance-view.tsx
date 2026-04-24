@@ -30,6 +30,17 @@ function studioColor(studio: string) {
   return STUDIO_COLOR[studio] ?? "var(--color-lime)"
 }
 
+const STUDIO_CODE: Record<string, string> = {
+  FuckPassVR: "FPVR",
+  VRHush:     "VRH",
+  VRAllure:   "VRA",
+  NaughtyJOI: "NJOI",
+}
+
+function studioCode(studio: string) {
+  return STUDIO_CODE[studio] ?? studio.slice(0, 4).toUpperCase()
+}
+
 // Known male talent whose full form data is pre-stored in Drive templates.
 // They only need dates auto-filled via the `prepare` endpoint.
 const KNOWN_MALES = new Set(["MikeMancini", "JaydenMarcos", "DannySteele"])
@@ -63,6 +74,26 @@ function emptyForm(): TalentFormData {
 
 // ─── TalentForm component ─────────────────────────────────────────────────────
 
+const ID_TYPES = [
+  "US Passport",
+  "Driver's License",
+  "State ID Card",
+  "Military ID",
+  "Permanent Resident Card",
+  "Foreign Passport",
+] as const
+
+// Returns the whole-years age at `asOf` (today by default). NaN if dob unparseable.
+function computeAge(dobIso: string, asOf = new Date()): number {
+  if (!dobIso) return NaN
+  const d = new Date(dobIso + "T12:00:00")
+  if (!Number.isFinite(d.getTime())) return NaN
+  let age = asOf.getFullYear() - d.getFullYear()
+  const m = asOf.getMonth() - d.getMonth()
+  if (m < 0 || (m === 0 && asOf.getDate() < d.getDate())) age -= 1
+  return age
+}
+
 function TalentForm({
   talentLabel,
   accent,
@@ -77,7 +108,8 @@ function TalentForm({
   onSubmit: (data: TalentFormData) => void
 }) {
   const [form, setForm] = useState<TalentFormData>(emptyForm)
-  const set = (k: keyof TalentFormData) => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const [reviewing, setReviewing] = useState(false)
+  const set = (k: keyof TalentFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }))
 
   const inputStyle: React.CSSProperties = {
@@ -94,10 +126,9 @@ function TalentForm({
 
   function Section({ title, children }: { title: string; children: React.ReactNode }) {
     return (
-      <div style={{ marginBottom: 20 }}>
+      <div style={{ marginBottom: 18 }}>
         <div style={{
-          fontSize: 10, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase",
-          color: "var(--color-text-faint)", marginBottom: 10,
+          fontSize: 13, fontWeight: 600, color: "var(--color-text-muted)", marginBottom: 8,
         }}>
           {title}
         </div>
@@ -123,7 +154,7 @@ function TalentForm({
   }) {
     return (
       <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--color-border-subtle)" }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
+        <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
           {label}{required && <span style={{ color: accent, marginLeft: 3 }}>*</span>}
         </div>
         <input
@@ -139,6 +170,38 @@ function TalentForm({
     )
   }
 
+  function SelectField({
+    label, fieldKey, options, required,
+  }: {
+    label: string
+    fieldKey: keyof TalentFormData
+    options: readonly string[]
+    required?: boolean
+  }) {
+    return (
+      <div style={{ padding: "12px 14px", borderRight: "1px solid var(--color-border-subtle)", borderTop: "1px solid var(--color-border-subtle)" }}>
+        <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
+          {label}{required && <span style={{ color: accent, marginLeft: 3 }}>*</span>}
+        </div>
+        <select
+          value={form[fieldKey]}
+          onChange={set(fieldKey)}
+          style={{
+            ...inputStyle,
+            appearance: "none", WebkitAppearance: "none",
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>")`,
+            backgroundRepeat: "no-repeat",
+            backgroundPosition: "right 12px center",
+            paddingRight: 34,
+          }}
+        >
+          <option value="">Select…</option>
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+      </div>
+    )
+  }
+
   function TwoCol({ children }: { children: React.ReactNode }) {
     return (
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
@@ -147,21 +210,104 @@ function TalentForm({
     )
   }
 
-  const isValid = form.legal_name.trim() && form.signature.trim()
+  const age = computeAge(form.dob)
+  const underage = Number.isFinite(age) && age < 18
+  const isValid =
+    form.legal_name.trim() !== "" &&
+    form.signature.trim() !== "" &&
+    !!form.dob &&
+    !underage &&
+    form.id1_type !== "" &&
+    form.id1_number.trim() !== ""
+
+  // ─── Confirm details preview ─────────────────────────────────────────
+  if (reviewing) {
+    return (
+      <div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text)", marginBottom: 4 }}>
+          Confirm your details
+        </div>
+        <p style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 16, lineHeight: 1.5 }}>
+          This is what will appear on your signed paperwork. Check each line, then tap Generate to create the document.
+        </p>
+
+        <div style={{
+          background: "var(--color-surface)", border: "1px solid var(--color-border)",
+          borderRadius: 12, overflow: "hidden", marginBottom: 14,
+        }}>
+          <ReviewRow label="Legal name" value={form.legal_name} />
+          <ReviewRow label="Stage name" value={form.stage_name || "—"} />
+          <ReviewRow label="Date of birth" value={formatDob(form.dob)} />
+          <ReviewRow label="Place of birth" value={form.place_of_birth || "—"} />
+          <ReviewRow label="Address" value={[form.street_address, form.city_state_zip].filter(Boolean).join(", ") || "—"} />
+          <ReviewRow label="Phone · Email" value={[form.phone, form.email].filter(Boolean).join(" · ") || "—"} />
+          <ReviewRow label="Primary ID" value={form.id1_type && form.id1_number ? `${form.id1_type} · ${form.id1_number}` : "—"} />
+          <ReviewRow label="Secondary ID" value={form.id2_type && form.id2_number ? `${form.id2_type} · ${form.id2_number}` : "—"} />
+          <ReviewRow label="Signature" value={form.signature} italic last />
+        </div>
+
+        {error && (
+          <div style={{
+            background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+            borderRadius: 8, padding: "10px 14px", marginBottom: 14,
+            fontSize: 13, color: "#f87171",
+          }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10, marginBottom: 32 }}>
+          <button
+            onClick={() => setReviewing(false)}
+            disabled={submitting}
+            style={{
+              flex: "0 0 auto",
+              background: "transparent",
+              border: "1px solid var(--color-border)",
+              borderRadius: 10, padding: "14px 18px",
+              fontSize: 14, fontWeight: 600,
+              color: "var(--color-text-muted)",
+              cursor: submitting ? "not-allowed" : "pointer",
+            }}
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => !submitting && onSubmit(form)}
+            disabled={submitting}
+            style={{
+              flex: 1,
+              background: submitting ? "var(--color-elevated)" : "var(--color-lime)",
+              border: "none", borderRadius: 10, padding: "16px 20px",
+              fontSize: 15, fontWeight: 700,
+              color: submitting ? "var(--color-text-faint)" : "#000",
+              cursor: submitting ? "not-allowed" : "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            }}
+          >
+            {submitting
+              ? <><Loader2 size={16} className="animate-spin" /> Generating…</>
+              : <><FileText size={16} /> Generate PDF</>
+            }
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>
-      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)", marginBottom: 4 }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text)", marginBottom: 4 }}>
         {talentLabel}
       </div>
 
-      {/* What you're signing — brief disclosure upfront */}
+      {/* What you're signing — disclosure up top */}
       <div style={{
         background: "var(--color-elevated)",
         border: "1px solid var(--color-border)",
-        borderRadius: 10, padding: "12px 14px", marginBottom: 20,
+        borderRadius: 10, padding: "14px 16px", marginBottom: 18,
       }}>
-        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)", marginBottom: 8 }}>
           What you&apos;re agreeing to
         </div>
         <ul style={{ margin: 0, padding: "0 0 0 16px", display: "flex", flexDirection: "column", gap: 4 }}>
@@ -171,46 +317,49 @@ function TalentForm({
             "Model release — grants production rights to the content recorded today",
             "You may request a copy of the signed agreement at any time",
           ].map((line, i) => (
-            <li key={i} style={{ fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.5 }}>{line}</li>
+            <li key={i} style={{ fontSize: 12.5, color: "var(--color-text-muted)", lineHeight: 1.55 }}>{line}</li>
           ))}
         </ul>
-        <p style={{ fontSize: 11, color: "var(--color-text-faint)", marginTop: 8, marginBottom: 0, lineHeight: 1.5 }}>
-          After submitting this form you will be shown the full agreement to read before confirming your signature.
+        <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginTop: 10, marginBottom: 0, lineHeight: 1.5 }}>
+          After submitting this form you&apos;ll review the full agreement before signing.
         </p>
       </div>
 
-      <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginBottom: 20, lineHeight: 1.5 }}>
-        Fill in all fields below accurately. Your information will be used to complete your compliance paperwork.
-      </p>
-
       <Section title="Identity">
-        <Field label="Legal Name (as shown on ID)" fieldKey="legal_name" placeholder="Full legal name" required />
-        <Field label="Stage / Performer Name" fieldKey="stage_name" placeholder="Screen name" />
+        <Field label="Legal name (as shown on ID)" fieldKey="legal_name" placeholder="Full legal name" required />
+        <Field label="Stage / performer name" fieldKey="stage_name" placeholder="Screen name" />
       </Section>
 
-      <Section title="Personal Info">
-        <Field label="Date of Birth" fieldKey="dob" type="date" required />
-        <div style={{ borderBottom: "1px solid var(--color-border-subtle)" }}>
-          <div style={{ padding: "12px 14px" }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
-              Place of Birth
-            </div>
-            <input
-              placeholder="City, State / Country"
-              value={form.place_of_birth}
-              onChange={set("place_of_birth")}
-              style={inputStyle}
-            />
+      <Section title="Personal info">
+        <Field label="Date of birth" fieldKey="dob" type="date" required />
+        {underage && (
+          <div style={{
+            padding: "8px 14px", borderBottom: "1px solid var(--color-border-subtle)",
+            background: "rgba(239,68,68,0.08)",
+            fontSize: 12, color: "#f87171", lineHeight: 1.5,
+          }}>
+            Talent must be 18 or older to sign. This date of birth is {age} — please double-check it.
           </div>
+        )}
+        <div style={{ padding: "12px 14px" }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
+            Place of birth
+          </div>
+          <input
+            placeholder="City, State / Country"
+            value={form.place_of_birth}
+            onChange={set("place_of_birth")}
+            style={inputStyle}
+          />
         </div>
       </Section>
 
-      <Section title="Address & Contact">
-        <Field label="Street Address" fieldKey="street_address" placeholder="123 Main St, Apt 4" inputMode="text" />
+      <Section title="Address & contact">
+        <Field label="Street address" fieldKey="street_address" placeholder="123 Main St, Apt 4" inputMode="text" />
         <Field label="City, State & ZIP" fieldKey="city_state_zip" placeholder="Los Angeles, CA 90210" inputMode="text" />
         <Field label="Phone" fieldKey="phone" type="tel" inputMode="tel" placeholder="(555) 000-0000" />
         <div style={{ padding: "12px 14px" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
             Email
           </div>
           <input
@@ -224,44 +373,53 @@ function TalentForm({
         </div>
       </Section>
 
-      <Section title="ID Documents">
+      <Section title="ID documents">
         <TwoCol>
           <div style={{ padding: "12px 14px", borderRight: "1px solid var(--color-border-subtle)" }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
-              Primary ID Type<span style={{ color: accent, marginLeft: 3 }}>*</span>
+            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
+              Primary ID type<span style={{ color: accent, marginLeft: 3 }}>*</span>
             </div>
-            <input placeholder="US Passport" value={form.id1_type} onChange={set("id1_type")} style={inputStyle} />
+            <select
+              value={form.id1_type}
+              onChange={set("id1_type")}
+              style={{
+                ...inputStyle,
+                appearance: "none", WebkitAppearance: "none",
+                backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>")`,
+                backgroundRepeat: "no-repeat",
+                backgroundPosition: "right 12px center",
+                paddingRight: 34,
+              }}
+            >
+              <option value="">Select…</option>
+              {ID_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
           </div>
           <div style={{ padding: "12px 14px" }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
-              ID Number<span style={{ color: accent, marginLeft: 3 }}>*</span>
+            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
+              ID number<span style={{ color: accent, marginLeft: 3 }}>*</span>
             </div>
             <input placeholder="A12345678" value={form.id1_number} onChange={set("id1_number")} style={inputStyle} />
           </div>
         </TwoCol>
         <TwoCol>
-          <div style={{ padding: "12px 14px", borderRight: "1px solid var(--color-border-subtle)", borderTop: "1px solid var(--color-border-subtle)" }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
-              Secondary ID Type
-            </div>
-            <input placeholder="Driver's License" value={form.id2_type} onChange={set("id2_type")} style={inputStyle} />
-          </div>
+          <SelectField label="Secondary ID type" fieldKey="id2_type" options={ID_TYPES} />
           <div style={{ padding: "12px 14px", borderTop: "1px solid var(--color-border-subtle)" }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
-              ID Number
+            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
+              ID number
             </div>
             <input placeholder="D1234567" value={form.id2_number} onChange={set("id2_number")} style={inputStyle} />
           </div>
         </TwoCol>
       </Section>
 
-      <Section title="Electronic Signature">
+      <Section title="Electronic signature">
         <div style={{ padding: "12px 14px" }}>
-          <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginBottom: 10, lineHeight: 1.5 }}>
-            By typing your full legal name below you confirm that all information provided is accurate and you agree to the terms of this agreement.
+          <p style={{ fontSize: 12.5, color: "var(--color-text-muted)", marginBottom: 10, lineHeight: 1.55 }}>
+            Type your full legal name to confirm the information above is accurate. You&apos;ll read the full agreement on the next screen before it&apos;s final.
           </p>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
-            Full Legal Name (Signature)<span style={{ color: accent, marginLeft: 3 }}>*</span>
+          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
+            Full legal name (signature)<span style={{ color: accent, marginLeft: 3 }}>*</span>
           </div>
           <input
             placeholder="Type your full legal name"
@@ -283,26 +441,56 @@ function TalentForm({
       )}
 
       <button
-        onClick={() => isValid && onSubmit(form)}
-        disabled={submitting || !isValid}
+        onClick={() => isValid && setReviewing(true)}
+        disabled={!isValid}
         style={{
           width: "100%",
-          background: submitting || !isValid ? "var(--color-elevated)" : "var(--color-lime)",
+          background: !isValid ? "var(--color-elevated)" : accent,
           border: "none", borderRadius: 10, padding: "16px 20px",
           fontSize: 15, fontWeight: 700,
-          color: submitting || !isValid ? "var(--color-text-faint)" : "#000",
-          cursor: submitting || !isValid ? "not-allowed" : "pointer",
+          color: !isValid ? "var(--color-text-faint)" : "#000",
+          cursor: !isValid ? "not-allowed" : "pointer",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
           marginBottom: 32,
         }}
       >
-        {submitting
-          ? <><Loader2 size={16} className="animate-spin" /> Saving…</>
-          : <><FileText size={16} /> Save &amp; Generate PDF</>
-        }
+        <FileText size={16} /> Review details
       </button>
     </div>
   )
+}
+
+function ReviewRow({
+  label, value, italic, last,
+}: {
+  label: string
+  value: string
+  italic?: boolean
+  last?: boolean
+}) {
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: "120px 1fr", gap: 12,
+      padding: "10px 14px",
+      borderBottom: last ? "none" : "1px solid var(--color-border-subtle)",
+    }}>
+      <div style={{ fontSize: 12, color: "var(--color-text-faint)" }}>{label}</div>
+      <div style={{
+        fontSize: italic ? 15 : 13,
+        color: "var(--color-text)", wordBreak: "break-word",
+        fontStyle: italic ? "italic" : "normal",
+      }}>
+        {value || "—"}
+      </div>
+    </div>
+  )
+}
+
+function formatDob(iso: string): string {
+  if (!iso) return "—"
+  const d = new Date(iso + "T12:00:00")
+  if (!Number.isFinite(d.getTime())) return iso
+  return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
 }
 
 // ─── ReviewCard component ─────────────────────────────────────────────────────
@@ -365,15 +553,20 @@ function ReviewCard({
       </p>
 
       <button
-        onClick={onSkip}
+        onClick={() => {
+          if (window.confirm(
+            "Confirm: talent has already signed this agreement on paper.\n\n" +
+            "This will skip the digital signature step. Only use this when a physical signed copy has been collected."
+          )) onSkip()
+        }}
         style={{
           width: "100%", background: "transparent",
-          border: "none", cursor: "pointer",
+          border: "1px solid var(--color-border-subtle)", cursor: "pointer",
           color: "var(--color-text-faint)", fontSize: 12,
-          padding: "8px 0",
+          padding: "10px 12px", borderRadius: 8,
         }}
       >
-        Skip (already signed on paper)
+        Already signed on paper — skip digital signature
       </button>
     </div>
   )
@@ -505,7 +698,7 @@ function StatusBadge({ shoot }: { shoot: ComplianceShoot }) {
       <span style={{
         fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
         padding: "3px 8px", borderRadius: 4,
-        background: "rgba(99,102,241,0.12)", color: "#818cf8",
+        background: "rgba(255,255,255,0.06)", color: "var(--color-text-muted)",
         textTransform: "uppercase",
       }}>Docs Ready</span>
     )
@@ -1034,7 +1227,6 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
                     style={{
                       background: "var(--color-surface)",
                       border: `1px solid var(--color-border)`,
-                      borderLeft: `4px solid ${sc}`,
                       borderRadius: 12,
                       padding: "16px 18px",
                       cursor: "pointer",
@@ -1043,6 +1235,19 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
                       display: "flex", alignItems: "center", gap: 14,
                     }}
                   >
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        width: 40, height: 40, borderRadius: 10,
+                        background: `color-mix(in oklab, ${sc} 18%, transparent)`,
+                        color: sc,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {studioCode(shoot.studio)}
+                    </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
                         <span style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text)" }}>
