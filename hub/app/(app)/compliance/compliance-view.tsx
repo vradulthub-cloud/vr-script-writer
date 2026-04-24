@@ -14,7 +14,7 @@ import {
   Upload,
   X,
 } from "lucide-react"
-import { api, type ComplianceShoot, type CompliancePrepareResult } from "@/lib/api"
+import { api, type ComplianceShoot, type CompliancePrepareResult, type FillFormRequest } from "@/lib/api"
 
 // ─── Studio colors ────────────────────────────────────────────────────────────
 
@@ -27,6 +27,256 @@ const STUDIO_COLOR: Record<string, string> = {
 
 function studioColor(studio: string) {
   return STUDIO_COLOR[studio] ?? "var(--color-lime)"
+}
+
+// Known male talent whose full form data is pre-stored in Drive templates.
+// They only need dates auto-filled via the `prepare` endpoint.
+const KNOWN_MALES = new Set(["MikeMancini", "JaydenMarcos", "DannySteele"])
+
+// ─── Form data ────────────────────────────────────────────────────────────────
+
+interface TalentFormData {
+  legal_name: string
+  stage_name: string
+  dob: string
+  place_of_birth: string
+  street_address: string
+  city_state_zip: string
+  phone: string
+  email: string
+  id1_type: string
+  id1_number: string
+  id2_type: string
+  id2_number: string
+  signature: string
+}
+
+function emptyForm(): TalentFormData {
+  return {
+    legal_name: "", stage_name: "", dob: "", place_of_birth: "",
+    street_address: "", city_state_zip: "", phone: "", email: "",
+    id1_type: "", id1_number: "", id2_type: "", id2_number: "",
+    signature: "",
+  }
+}
+
+// ─── TalentForm component ─────────────────────────────────────────────────────
+
+function TalentForm({
+  talentLabel,
+  accent,
+  submitting,
+  error,
+  onSubmit,
+}: {
+  talentLabel: string
+  accent: string
+  submitting: boolean
+  error: string | null
+  onSubmit: (data: TalentFormData) => void
+}) {
+  const [form, setForm] = useState<TalentFormData>(emptyForm)
+  const set = (k: keyof TalentFormData) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm(prev => ({ ...prev, [k]: e.target.value }))
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    background: "var(--color-elevated)",
+    border: "1px solid var(--color-border)",
+    borderRadius: 8,
+    padding: "13px 14px",
+    fontSize: 16,
+    color: "var(--color-text)",
+    outline: "none",
+    boxSizing: "border-box",
+  }
+
+  function Section({ title, children }: { title: string; children: React.ReactNode }) {
+    return (
+      <div style={{ marginBottom: 20 }}>
+        <div style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase",
+          color: "var(--color-text-faint)", marginBottom: 10,
+        }}>
+          {title}
+        </div>
+        <div style={{
+          background: "var(--color-surface)", border: "1px solid var(--color-border)",
+          borderRadius: 12, overflow: "hidden",
+        }}>
+          {children}
+        </div>
+      </div>
+    )
+  }
+
+  function Field({
+    label, fieldKey, type = "text", inputMode, placeholder, required,
+  }: {
+    label: string
+    fieldKey: keyof TalentFormData
+    type?: string
+    inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"]
+    placeholder?: string
+    required?: boolean
+  }) {
+    return (
+      <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--color-border-subtle)" }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
+          {label}{required && <span style={{ color: accent, marginLeft: 3 }}>*</span>}
+        </div>
+        <input
+          type={type}
+          inputMode={inputMode}
+          placeholder={placeholder}
+          value={form[fieldKey]}
+          onChange={set(fieldKey)}
+          required={required}
+          style={inputStyle}
+        />
+      </div>
+    )
+  }
+
+  function TwoCol({ children }: { children: React.ReactNode }) {
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+        {children}
+      </div>
+    )
+  }
+
+  const isValid = form.legal_name.trim() && form.signature.trim()
+
+  return (
+    <div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)", marginBottom: 4 }}>
+        {talentLabel}
+      </div>
+      <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginBottom: 20, lineHeight: 1.5 }}>
+        Fill in all fields below. This information will be saved to the compliance PDF.
+      </p>
+
+      <Section title="Identity">
+        <Field label="Legal Name (as shown on ID)" fieldKey="legal_name" placeholder="Full legal name" required />
+        <Field label="Stage / Performer Name" fieldKey="stage_name" placeholder="Screen name" />
+      </Section>
+
+      <Section title="Personal Info">
+        <Field label="Date of Birth" fieldKey="dob" type="date" required />
+        <div style={{ borderBottom: "1px solid var(--color-border-subtle)" }}>
+          <div style={{ padding: "12px 14px" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
+              Place of Birth
+            </div>
+            <input
+              placeholder="City, State / Country"
+              value={form.place_of_birth}
+              onChange={set("place_of_birth")}
+              style={inputStyle}
+            />
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Address & Contact">
+        <Field label="Street Address" fieldKey="street_address" placeholder="123 Main St, Apt 4" inputMode="text" />
+        <Field label="City, State & ZIP" fieldKey="city_state_zip" placeholder="Los Angeles, CA 90210" inputMode="text" />
+        <Field label="Phone" fieldKey="phone" type="tel" inputMode="tel" placeholder="(555) 000-0000" />
+        <div style={{ padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
+            Email
+          </div>
+          <input
+            type="email"
+            inputMode="email"
+            placeholder="email@example.com"
+            value={form.email}
+            onChange={set("email")}
+            style={inputStyle}
+          />
+        </div>
+      </Section>
+
+      <Section title="ID Documents">
+        <TwoCol>
+          <div style={{ padding: "12px 14px", borderRight: "1px solid var(--color-border-subtle)" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
+              Primary ID Type<span style={{ color: accent, marginLeft: 3 }}>*</span>
+            </div>
+            <input placeholder="US Passport" value={form.id1_type} onChange={set("id1_type")} style={inputStyle} />
+          </div>
+          <div style={{ padding: "12px 14px" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
+              ID Number<span style={{ color: accent, marginLeft: 3 }}>*</span>
+            </div>
+            <input placeholder="A12345678" value={form.id1_number} onChange={set("id1_number")} style={inputStyle} />
+          </div>
+        </TwoCol>
+        <TwoCol>
+          <div style={{ padding: "12px 14px", borderRight: "1px solid var(--color-border-subtle)", borderTop: "1px solid var(--color-border-subtle)" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
+              Secondary ID Type
+            </div>
+            <input placeholder="Driver's License" value={form.id2_type} onChange={set("id2_type")} style={inputStyle} />
+          </div>
+          <div style={{ padding: "12px 14px", borderTop: "1px solid var(--color-border-subtle)" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
+              ID Number
+            </div>
+            <input placeholder="D1234567" value={form.id2_number} onChange={set("id2_number")} style={inputStyle} />
+          </div>
+        </TwoCol>
+      </Section>
+
+      <Section title="Electronic Signature">
+        <div style={{ padding: "12px 14px" }}>
+          <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginBottom: 10, lineHeight: 1.5 }}>
+            By typing your full legal name below you confirm that all information provided is accurate and you agree to the terms of this agreement.
+          </p>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-faint)", marginBottom: 5, letterSpacing: "0.04em" }}>
+            Full Legal Name (Signature)<span style={{ color: accent, marginLeft: 3 }}>*</span>
+          </div>
+          <input
+            placeholder="Type your full legal name"
+            value={form.signature}
+            onChange={set("signature")}
+            style={{ ...inputStyle, fontStyle: "italic", fontSize: 18 }}
+          />
+        </div>
+      </Section>
+
+      {error && (
+        <div style={{
+          background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+          borderRadius: 8, padding: "10px 14px", marginBottom: 14,
+          fontSize: 13, color: "#f87171",
+        }}>
+          {error}
+        </div>
+      )}
+
+      <button
+        onClick={() => isValid && onSubmit(form)}
+        disabled={submitting || !isValid}
+        style={{
+          width: "100%",
+          background: submitting || !isValid ? "var(--color-elevated)" : "var(--color-lime)",
+          border: "none", borderRadius: 10, padding: "16px 20px",
+          fontSize: 15, fontWeight: 700,
+          color: submitting || !isValid ? "var(--color-text-faint)" : "#000",
+          cursor: submitting || !isValid ? "not-allowed" : "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          marginBottom: 32,
+        }}
+      >
+        {submitting
+          ? <><Loader2 size={16} className="animate-spin" /> Saving…</>
+          : <><FileText size={16} /> Save &amp; Generate PDF</>
+        }
+      </button>
+    </div>
+  )
 }
 
 // ─── Photo slot definition ────────────────────────────────────────────────────
@@ -301,6 +551,7 @@ interface Props {
 }
 
 type WizardStep = "select" | "docs" | "photos" | "upload"
+type DocsPhase = "female" | "male-known" | "male-form" | "done"
 
 export function ComplianceView({ initialShoots, initialDate, idToken, loadError }: Props) {
   const client = api(idToken ?? null)
@@ -318,6 +569,12 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   const [preparing, setPreparing] = useState(false)
   const [prepResult, setPrepResult] = useState<CompliancePrepareResult | null>(null)
   const [prepError, setPrepError] = useState<string | null>(null)
+  // Which sub-step within docs: female form → male (known/unknown/none) → done
+  const [docsPhase, setDocsPhase] = useState<DocsPhase>("female")
+  const [femaleSubmitting, setFemaleSubmitting] = useState(false)
+  const [femaleError, setFemaleError] = useState<string | null>(null)
+  const [maleSubmitting, setMaleSubmitting] = useState(false)
+  const [maleError, setMaleError] = useState<string | null>(null)
 
   // Photos step state
   const [photos, setPhotos] = useState<CapturedPhoto[]>([])
@@ -356,6 +613,11 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
     setStep("docs")
     setPrepResult(null)
     setPrepError(null)
+    setDocsPhase("female")
+    setFemaleSubmitting(false)
+    setFemaleError(null)
+    setMaleSubmitting(false)
+    setMaleError(null)
     setPhotos([])
     setUploadResult(null)
     setSyncResult(null)
@@ -394,6 +656,63 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
       setPrepError(e instanceof Error ? e.message : "Prepare failed")
     } finally {
       setPreparing(false)
+    }
+  }
+
+  // ── Form submit handlers ──────────────────────────────────────────────
+
+  async function submitFemaleForm(data: TalentFormData) {
+    if (!selected) return
+    setFemaleSubmitting(true)
+    setFemaleError(null)
+    try {
+      const req: FillFormRequest = { talent: "female", ...data }
+      const r = await client.compliance.fillForm(selected.shoot_id, req)
+      setPrepResult(r)
+      void loadDate(date)
+      // Advance to male phase or done
+      if (selected.male_talent) {
+        setDocsPhase(KNOWN_MALES.has(selected.male_talent) ? "male-known" : "male-form")
+      } else {
+        setDocsPhase("done")
+      }
+    } catch (e) {
+      setFemaleError(e instanceof Error ? e.message : "Failed to save form")
+    } finally {
+      setFemaleSubmitting(false)
+    }
+  }
+
+  async function submitMaleKnown() {
+    if (!selected) return
+    setMaleSubmitting(true)
+    setMaleError(null)
+    try {
+      const r = await client.compliance.prepare(selected.shoot_id)
+      setPrepResult(r)
+      void loadDate(date)
+      setDocsPhase("done")
+    } catch (e) {
+      setMaleError(e instanceof Error ? e.message : "Failed to generate male form")
+    } finally {
+      setMaleSubmitting(false)
+    }
+  }
+
+  async function submitMaleForm(data: TalentFormData) {
+    if (!selected) return
+    setMaleSubmitting(true)
+    setMaleError(null)
+    try {
+      const req: FillFormRequest = { talent: selected.male_talent, ...data }
+      const r = await client.compliance.fillForm(selected.shoot_id, req)
+      setPrepResult(r)
+      void loadDate(date)
+      setDocsPhase("done")
+    } catch (e) {
+      setMaleError(e instanceof Error ? e.message : "Failed to save form")
+    } finally {
+      setMaleSubmitting(false)
     }
   }
 
@@ -629,126 +948,128 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
       {/* ── Step: Docs ── */}
       {step === "docs" && selected && (
         <div style={{ padding: 16 }}>
-          <h2 style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 16 }}>
-            Step 1 — Paperwork
-          </h2>
 
-          {/* Drive folder card */}
-          <div style={{
-            background: "var(--color-surface)",
-            border: "1px solid var(--color-border)",
-            borderRadius: 12, padding: 18, marginBottom: 14,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-              <FolderOpen size={18} color={accent} />
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text)" }}>Drive Legal Folder</div>
-                {prepResult?.folder_name && (
-                  <div style={{ fontSize: 11, color: "var(--color-text-faint)", marginTop: 2, fontFamily: "var(--font-mono)" }}>
-                    {prepResult.folder_name}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {prepResult ? (
-              <>
-                <div style={{ marginBottom: 14 }}>
-                  {prepResult.message && (
-                    <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 10, lineHeight: 1.4 }}>
-                      {prepResult.message}
-                    </p>
-                  )}
-                  <a
-                    href={prepResult.folder_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: "flex", alignItems: "center", gap: 6,
-                      background: accent,
-                      color: "#000",
-                      border: "none", borderRadius: 10,
-                      padding: "14px 20px",
-                      fontSize: 15, fontWeight: 700, cursor: "pointer",
-                      textDecoration: "none", justifyContent: "center",
-                    }}
-                  >
-                    <ExternalLink size={16} />
-                    Open Drive Folder
-                  </a>
+          {/* Progress pills */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+            {[
+              { phase: "female" as const, label: selected.female_talent },
+              ...(selected.male_talent ? [{ phase: (KNOWN_MALES.has(selected.male_talent) ? "male-known" : "male-form") as DocsPhase, label: selected.male_talent }] : []),
+            ].map(({ phase, label }, i) => {
+              const phases: DocsPhase[] = ["female", "male-known", "male-form", "done"]
+              const currentIdx = phases.indexOf(docsPhase)
+              const thisIdx = phases.indexOf(phase)
+              const isDone = docsPhase === "done" || currentIdx > thisIdx
+              const isActive = docsPhase === phase
+              return (
+                <div key={phase} style={{
+                  flex: 1, padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: isDone ? "rgba(190,214,47,0.12)" : isActive ? "rgba(255,255,255,0.06)" : "transparent",
+                  border: `1px solid ${isDone ? "rgba(190,214,47,0.3)" : isActive ? "var(--color-border)" : "var(--color-border-subtle)"}`,
+                  color: isDone ? "var(--color-lime)" : isActive ? "var(--color-text)" : "var(--color-text-faint)",
+                }}>
+                  {isDone ? <CheckCircle2 size={12} /> : <span style={{ width: 12, height: 12, borderRadius: "50%", border: `2px solid ${isActive ? accent : "var(--color-border)"}`, display: "inline-block", flexShrink: 0 }} />}
+                  {label}
                 </div>
-                <p style={{ fontSize: 11, color: "var(--color-text-faint)", lineHeight: 1.5 }}>
-                  Hand the iPad to the talent and have them open the folder link, then fill and sign all PDF forms. Return the iPad when complete.
-                </p>
-              </>
-            ) : (
-              <>
-                <p style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 14, lineHeight: 1.4 }}>
-                  Creates the Drive folder and copies PDF templates for today&apos;s shoot.
-                  {selected.male_talent && (
-                    <> Male PDF dates will be auto-filled for known talent.</>
-                  )}
-                </p>
-                <button
-                  onClick={prepareDocs}
-                  disabled={preparing}
-                  style={{
-                    width: "100%",
-                    background: preparing ? "var(--color-elevated)" : "var(--color-lime)",
-                    border: "none", borderRadius: 10,
-                    padding: "16px 20px",
-                    fontSize: 15, fontWeight: 700, cursor: preparing ? "not-allowed" : "pointer",
-                    color: preparing ? "var(--color-text-faint)" : "#000",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  }}
-                >
-                  {preparing ? <><Loader2 size={16} className="animate-spin" /> Preparing…</> : <><FileText size={16} /> Prepare Docs</>}
-                </button>
-                {prepError && (
-                  <p style={{ fontSize: 12, color: "#f87171", marginTop: 8 }}>{prepError}</p>
-                )}
-              </>
-            )}
+              )
+            })}
           </div>
 
-          {/* Talent info */}
-          <div style={{
-            background: "var(--color-surface)", border: "1px solid var(--color-border)",
-            borderRadius: 12, padding: 14, marginBottom: 20,
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-text-faint)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>
-              Talent
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>Female</span>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{selected.female_talent}</span>
+          {/* Phase: female form */}
+          {docsPhase === "female" && (
+            <TalentForm
+              talentLabel={`${selected.female_talent} — Female Talent Form`}
+              accent={accent}
+              submitting={femaleSubmitting}
+              error={femaleError}
+              onSubmit={submitFemaleForm}
+            />
+          )}
+
+          {/* Phase: known male — auto-generate with date */}
+          {docsPhase === "male-known" && selected.male_talent && (
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)", marginBottom: 4 }}>
+                {selected.male_talent} — On File
               </div>
-              {selected.male_talent && (
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>Male</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{selected.male_talent}</span>
+              <p style={{ fontSize: 13, color: "var(--color-text-faint)", marginBottom: 20, lineHeight: 1.5 }}>
+                {selected.male_talent}&apos;s paperwork is pre-filled on file. Tap below to generate the form with today&apos;s shoot date.
+              </p>
+              {maleError && (
+                <div style={{
+                  background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+                  borderRadius: 8, padding: "10px 14px", marginBottom: 14,
+                  fontSize: 13, color: "#f87171",
+                }}>
+                  {maleError}
                 </div>
               )}
+              <button
+                onClick={submitMaleKnown}
+                disabled={maleSubmitting}
+                style={{
+                  width: "100%",
+                  background: maleSubmitting ? "var(--color-elevated)" : "var(--color-lime)",
+                  border: "none", borderRadius: 10, padding: "16px 20px",
+                  fontSize: 15, fontWeight: 700,
+                  color: maleSubmitting ? "var(--color-text-faint)" : "#000",
+                  cursor: maleSubmitting ? "not-allowed" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  marginBottom: 32,
+                }}
+              >
+                {maleSubmitting
+                  ? <><Loader2 size={16} className="animate-spin" /> Generating…</>
+                  : <><FileText size={16} /> Generate Form</>
+                }
+              </button>
             </div>
-          </div>
+          )}
 
-          {/* Navigation */}
-          <button
-            onClick={() => setStep("photos")}
-            disabled={!prepResult}
-            style={{
-              width: "100%",
-              background: prepResult ? accent : "var(--color-elevated)",
-              border: "none", borderRadius: 10, padding: "16px 20px",
-              fontSize: 15, fontWeight: 700,
-              color: prepResult ? "#000" : "var(--color-text-faint)",
-              cursor: prepResult ? "pointer" : "not-allowed",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            }}
-          >
-            Continue to Photos <ChevronRight size={16} />
-          </button>
+          {/* Phase: unknown male form */}
+          {docsPhase === "male-form" && selected.male_talent && (
+            <TalentForm
+              talentLabel={`${selected.male_talent} — Male Talent Form`}
+              accent={accent}
+              submitting={maleSubmitting}
+              error={maleError}
+              onSubmit={submitMaleForm}
+            />
+          )}
+
+          {/* Phase: done — all forms complete */}
+          {docsPhase === "done" && (
+            <div>
+              <div style={{
+                background: "rgba(190,214,47,0.08)", border: "1px solid rgba(190,214,47,0.25)",
+                borderRadius: 12, padding: "18px 20px", marginBottom: 20,
+                display: "flex", alignItems: "center", gap: 14,
+              }}>
+                <CheckCircle2 size={24} color="var(--color-lime)" />
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-lime)" }}>All forms complete</div>
+                  {prepResult?.message && (
+                    <div style={{ fontSize: 12, color: "var(--color-text-faint)", marginTop: 2 }}>{prepResult.message}</div>
+                  )}
+                </div>
+              </div>
+
+              <button
+                onClick={() => setStep("photos")}
+                style={{
+                  width: "100%",
+                  background: accent,
+                  border: "none", borderRadius: 10, padding: "16px 20px",
+                  fontSize: 15, fontWeight: 700, color: "#000",
+                  cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                }}
+              >
+                Continue to Photos <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
+
         </div>
       )}
 

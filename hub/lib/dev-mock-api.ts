@@ -500,6 +500,21 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
         message: "Copied 5 files to MEGA",
       } as unknown as T)
     }
+    // Fill form
+    const fillMatch = base.match(/^\/compliance\/shoots\/([^/]+)\/fill-form$/)
+    if (fillMatch) {
+      const shoot = MOCK_COMPLIANCE_SHOOTS.find(s => s.shoot_id === fillMatch[1]) ?? MOCK_COMPLIANCE_SHOOTS[0]
+      return wait({
+        folder_id: "mock-folder-id",
+        folder_url: "https://drive.google.com/drive/folders/mock",
+        folder_name: shoot.drive_folder_name ?? "mock-folder",
+        female_pdf_id: "mock-female-pdf",
+        male_pdf_id: "",
+        male_known: false,
+        dates_filled: true,
+        message: "PDF saved to Drive",
+      } as unknown as T)
+    }
   }
 
   // eslint-disable-next-line no-console
