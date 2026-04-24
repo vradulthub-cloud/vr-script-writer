@@ -71,6 +71,9 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   const [keywords, setKeywords] = useState("")
   const [wardrobe, setWardrobe] = useState("")
   const [modelNotes, setModelNotes] = useState("")
+  const [plot, setPlot] = useState("")
+  const [sceneType, setSceneType] = useState("")
+  const [scriptLoading, setScriptLoading] = useState(false)
 
   // Inline-edited paragraphs (index → edited text)
   const [editedParagraphs, setEditedParagraphs] = useState<Record<number, string>>({})
@@ -143,29 +146,32 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   const [showQueue, setShowQueue] = useState(true)
   const [grailSaving, setGrailSaving] = useState(false)
 
-  function autoPopulateFromScene(scene: Scene) {
+  async function autoPopulateFromScene(scene: Scene) {
     setSelectedSceneId(scene.id)
-    // Pre-fill every form field the Scene shape can inform. Leaves untouched
-    // fields alone so a user can autopopulate, then tweak.
     if (scene.performers) setPerformers(scene.performers)
     if (scene.categories) {
       const cats = scene.categories.split(",").map(c => c.trim()).filter(Boolean)
       setSelectedCats(cats.filter(c => availableCategories.includes(c)))
     }
-    if (scene.tags) {
-      // Tags sit naturally in the keywords field — they're the SEO hints
-      // already curated on the Grail row.
-      setKeywords(scene.tags)
-    }
-    if (scene.theme) {
-      // Theme maps to model/scene notes — it's prose-y context for the
-      // description prompt, not a structured field.
-      setModelNotes(scene.theme)
-    }
-    if (scene.title && !metaTitle) {
-      // Pre-seed the SEO meta title with the scene title (user can override)
-      setMetaTitle(scene.title)
-    }
+    if (scene.tags) setKeywords(scene.tags)
+    if (scene.title && !metaTitle) setMetaTitle(scene.title)
+    // Reset script fields before fetch
+    setPlot("")
+    setSceneType("")
+    setScriptLoading(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/scenes/${scene.id}/script`, {
+        headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.plot)       setPlot(data.plot)
+        if (data.theme)      setModelNotes(data.theme)
+        if (data.wardrobe_f) setWardrobe(data.wardrobe_f)
+        if (data.scene_type) setSceneType(data.scene_type)
+      }
+    } catch { /* leave fields empty */ }
+    finally { setScriptLoading(false) }
   }
 
   const selectedScene = useMemo(
@@ -269,6 +275,8 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
         target_keywords: keywords,
         wardrobe,
         model_properties: modelNotes || undefined,
+        plot: plot || undefined,
+        scene_type: sceneType || undefined,
       }
     )
   }
@@ -729,6 +737,31 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
               onChange={e => setModelNotes(e.target.value)}
               rows={2}
               placeholder="Any special context about the talent…"
+              className="w-full px-2.5 py-1.5 rounded text-xs outline-none resize-none"
+              style={{
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text)",
+              }}
+            />
+          </div>
+
+          {/* Scene plot — populated automatically from Scripts Sheet via autoPopulateFromScene */}
+          <div>
+            <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+              Scene plot{" "}
+              {scriptLoading && <span style={{ color: "var(--color-text-faint)" }}>fetching…</span>}
+              {!scriptLoading && sceneType && (
+                <span style={{ marginLeft: 6, color: "var(--color-text-faint)", fontFamily: "var(--font-mono, monospace)" }}>
+                  {sceneType}
+                </span>
+              )}
+            </label>
+            <textarea
+              value={plot}
+              onChange={e => setPlot(e.target.value)}
+              rows={4}
+              placeholder="Auto-filled from Scripts Sheet when you pick a scene. Paste manually if needed."
               className="w-full px-2.5 py-1.5 rounded text-xs outline-none resize-none"
               style={{
                 background: "var(--color-surface)",
