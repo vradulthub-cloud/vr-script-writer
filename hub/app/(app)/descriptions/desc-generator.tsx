@@ -70,6 +70,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   const [selectedCats, setSelectedCats] = useState<string[]>([])
   const [keywords, setKeywords] = useState("")
   const [wardrobe, setWardrobe] = useState("")
+  const [plot, setPlot] = useState("")
   const [modelNotes, setModelNotes] = useState("")
 
   // Inline-edited paragraphs (index → edited text)
@@ -157,11 +158,8 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
       // already curated on the Grail row.
       setKeywords(scene.tags)
     }
-    if (scene.theme) {
-      // Theme maps to model/scene notes — it's prose-y context for the
-      // description prompt, not a structured field.
-      setModelNotes(scene.theme)
-    }
+    if (scene.plot) setPlot(scene.plot)
+    if (scene.theme) setModelNotes(scene.theme)
     if (scene.title && !metaTitle) {
       // Pre-seed the SEO meta title with the scene title (user can override)
       setMetaTitle(scene.title)
@@ -269,6 +267,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
         target_keywords: keywords,
         wardrobe,
         model_properties: modelNotes || undefined,
+        plot: plot || undefined,
       }
     )
   }
@@ -596,6 +595,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                 setEditedParagraphs({})
                 setMetaTitle("")
                 setMetaDesc("")
+                setPlot("")
               }}
             />
           </div>
@@ -694,6 +694,25 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
               onChange={e => setKeywords(e.target.value)}
               placeholder="e.g. VR porn, creampie VR"
               className="w-full px-2.5 py-1.5 rounded text-xs outline-none"
+              style={{
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text)",
+              }}
+            />
+          </div>
+
+          {/* Plot */}
+          <div>
+            <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+              Plot <span style={{ color: "var(--color-text-faint)" }}>(from script — informs what actually happens)</span>
+            </label>
+            <textarea
+              value={plot}
+              onChange={e => setPlot(e.target.value)}
+              rows={4}
+              placeholder="Paste the scene plot from the script…"
+              className="w-full px-2.5 py-1.5 rounded text-xs outline-none resize-none"
               style={{
                 background: "var(--color-surface)",
                 border: "1px solid var(--color-border)",
