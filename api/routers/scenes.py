@@ -403,6 +403,47 @@ async def generate_scene_title(scene_id: str, body: TitleGenerateBody, user: Cur
 
 
 # ---------------------------------------------------------------------------
+# Script lookup for description generator
+# ---------------------------------------------------------------------------
+
+@router.get("/{scene_id}/script")
+async def get_scene_script(scene_id: str, user: CurrentUser):
+    """
+    Return the Scripts Sheet data for the scene's primary female performer.
+
+    Used by the description generator to pre-fill plot, theme, wardrobe, and
+    scene_type without requiring the user to manually paste them.
+    """
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT studio, performers FROM scenes WHERE id = ?", (scene_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Scene not found")
+        scene = dict(row)
+        female = (scene.get("performers") or "").split(",")[0].strip()
+        if not female:
+            return {"plot": "", "theme": "", "wardrobe_f": "", "wardrobe_m": "", "scene_type": ""}
+        srow = conn.execute(
+            "SELECT theme, plot, wardrobe_f, wardrobe_m, scene_type "
+            "FROM scripts "
+            "WHERE studio = ? AND LOWER(female) = LOWER(?) "
+            "ORDER BY tab_name DESC LIMIT 1",
+            (scene["studio"], female),
+        ).fetchone()
+        if not srow:
+            return {"plot": "", "theme": "", "wardrobe_f": "", "wardrobe_m": "", "scene_type": ""}
+        s = dict(srow)
+        return {
+            "plot": s.get("plot") or "",
+            "theme": s.get("theme") or "",
+            "wardrobe_f": s.get("wardrobe_f") or "",
+            "wardrobe_m": s.get("wardrobe_m") or "",
+            "scene_type": s.get("scene_type") or "",
+        }
+
+
+# ---------------------------------------------------------------------------
 # Naming validation
 # ---------------------------------------------------------------------------
 
