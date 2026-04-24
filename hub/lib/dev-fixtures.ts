@@ -10,6 +10,7 @@
 
 import type {
   Approval,
+  ComplianceShoot,
   Notification,
   Scene,
   SceneStats,
@@ -767,6 +768,53 @@ export const MOCK_SHOOTS: Shoot[] = [
         assets: mockAssets(),
       },
     ],
+  },
+]
+
+// ─── Compliance fixtures ─────────────────────────────────────────────────────
+
+export const MOCK_COMPLIANCE_SHOOTS: ComplianceShoot[] = [
+  {
+    shoot_id: "2026-04-24-natalia-fox-abc12345",
+    shoot_date: "2026-04-24",
+    female_talent: "Natalia Fox",
+    male_talent: "MikeMancini",
+    drive_folder_url: "https://drive.google.com/drive/folders/mock-folder-1",
+    drive_folder_id: "mock-folder-1",
+    drive_folder_name: "042426-NataliaFox-MikeMancini",
+    pdfs_ready: true,
+    photos_uploaded: 0,
+    is_complete: false,
+    scene_id: "FPVR1337",
+    studio: "FuckPassVR",
+  },
+  {
+    shoot_id: "2026-04-24-sofia-red-def67890",
+    shoot_date: "2026-04-24",
+    female_talent: "Sofia Red",
+    male_talent: "JaydenMarcos",
+    drive_folder_url: null,
+    drive_folder_id: null,
+    drive_folder_name: null,
+    pdfs_ready: false,
+    photos_uploaded: 0,
+    is_complete: false,
+    scene_id: "VRH0889",
+    studio: "VRHush",
+  },
+  {
+    shoot_id: "2026-04-24-elena-rivers-ghi11223",
+    shoot_date: "2026-04-24",
+    female_talent: "Elena Rivers",
+    male_talent: "DannySteele",
+    drive_folder_url: "https://drive.google.com/drive/folders/mock-folder-3",
+    drive_folder_id: "mock-folder-3",
+    drive_folder_name: "042426-ElenaRivers-DannySteele",
+    pdfs_ready: true,
+    photos_uploaded: 4,
+    is_complete: true,
+    scene_id: "VRA0512",
+    studio: "VRAllure",
   },
 ]
 
