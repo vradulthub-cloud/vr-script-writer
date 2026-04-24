@@ -460,6 +460,24 @@ export interface MegaSyncResult {
   message: string
 }
 
+export interface FillFormRequest {
+  talent: string          // "female" | male stage name e.g. "MikeMancini"
+  legal_name: string
+  stage_name?: string
+  dob?: string            // YYYY-MM-DD
+  place_of_birth?: string
+  street_address?: string
+  city_state_zip?: string
+  phone?: string
+  email?: string
+  id1_type?: string
+  id1_number?: string
+  id2_type?: string
+  id2_number?: string
+  signature?: string
+  company_name?: string
+}
+
 export const SHOOT_ASSET_ORDER: readonly AssetType[] = [
   "script_done",
   "call_sheet_sent",
@@ -921,6 +939,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       },
       prepare: (shootId: string) =>
         post<CompliancePrepareResult>(`/compliance/shoots/${encodeURIComponent(shootId)}/prepare`, {}),
+      fillForm: (shootId: string, req: FillFormRequest) =>
+        post<CompliancePrepareResult>(`/compliance/shoots/${encodeURIComponent(shootId)}/fill-form`, req),
       uploadPhotos: (
         shootId: string,
         photos: { file: File; label: string }[],
