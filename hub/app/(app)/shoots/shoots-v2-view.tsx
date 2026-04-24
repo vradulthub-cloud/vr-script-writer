@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import nextDynamic from "next/dynamic"
 import { api, type Shoot } from "@/lib/api"
 import { PageHeader } from "@/components/ui/page-header"
@@ -9,6 +9,7 @@ import { ShootModal } from "@/components/ui/shoot-modal"
 import { AddEventModal } from "@/components/ui/add-event-modal"
 import { studioColor } from "@/lib/studio-colors"
 import { rowToEvent, type CalendarEvent } from "@/lib/calendar-events"
+import { showUndoToast } from "@/components/ui/toast"
 
 const ShootBoard = nextDynamic(() => import("./shoot-board").then(m => m.ShootBoard))
 
@@ -37,6 +38,7 @@ export function ShootsV2View({
   const [eventsError, setEventsError] = useState<string | null>(null)
 
   const client = useMemo(() => api(idToken ?? null), [idToken])
+  const pendingDeletes = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const refreshEvents = useCallback(async () => {
     try {
@@ -210,12 +212,20 @@ export function ShootsV2View({
             viewMode={viewMode}
             events={events}
             onAddEvent={(date) => setAddEventDate(date)}
-            onRemoveEvent={async (id) => {
-              // Optimistic: drop from UI immediately so the popover row
-              // disappears on click. Reconcile from server on completion.
+            onRemoveEvent={(id) => {
+              const removed = events.find(e => e.id === id)
               setEvents(prev => prev.filter(e => e.id !== id))
-              try { await client.calendarEvents.remove(id) } catch {}
-              refreshEvents()
+              const timer = setTimeout(async () => {
+                pendingDeletes.current.delete(id)
+                try { await client.calendarEvents.remove(id) } catch {}
+                refreshEvents()
+              }, 8000)
+              pendingDeletes.current.set(id, timer)
+              showUndoToast("Event removed", () => {
+                clearTimeout(timer)
+                pendingDeletes.current.delete(id)
+                if (removed) setEvents(prev => [...prev, removed])
+              })
             }}
           />
           {calendarShoots.length === 0 && (
