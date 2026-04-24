@@ -97,10 +97,10 @@ export default async function AdminPage() {
   return (
     <div style={{ padding: "0 0 32px" }}>
       <header style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>
+        <div style={{ fontSize: 10, fontWeight: 400, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>
           Admin
         </div>
-        <h1 style={{ margin: "4px 0 0", fontSize: 32, fontWeight: 800, letterSpacing: "-0.02em", color: "var(--color-text)", fontFamily: "var(--font-display-hero)" }}>
+        <h1 style={{ margin: "4px 0 0", fontSize: 32, fontWeight: 400, letterSpacing: "-0.02em", color: "var(--color-text)", fontFamily: "var(--font-display-hero)" }}>
           Console
         </h1>
       </header>

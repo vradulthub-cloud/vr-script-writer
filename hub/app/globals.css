@@ -38,14 +38,25 @@
   /* Typography */
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-general-sans), var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-display-hero: var(--font-cabinet-grotesk), var(--font-general-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display-hero: var(--font-anton), Impact, "Arial Narrow", var(--font-general-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
-  /* Type scale — amplified for drama */
+  /* Type scale — amplified for drama.
+     Two bands:
+       captions/labels (xs/sm) and body (base) — the dense read
+       content titles (md/title/lg) and page heads (xl/display) — the hierarchy
+     md + title added so Panel titles that carry *content* weight (not
+     label/section-name weight) have a real mid-step above 14px body and
+     below the 28px section head, instead of falling back to uppercase-
+     tracked 13px which reads as categorical chrome. Use `text-title` for content-
+     bearing section headings (e.g., a "Today" briefing, a named region); keep
+     the uppercase-tracked h3 treatment for grouped-label chrome. */
   --text-xs:    0.6875rem;   /* 11px — captions, metadata */
   --text-sm:    0.75rem;     /* 12px — secondary, labels */
   --text-base:  0.875rem;    /* 14px — body */
+  --text-md:    1rem;        /* 16px — slightly-emphasized body / large list rows */
   --text-lg:    1.125rem;    /* 18px — subheadings */
+  --text-title: 1.25rem;     /* 20px — content-bearing section titles (not label chrome) */
   --text-xl:    1.75rem;     /* 28px — section headings */
   --text-display: clamp(2.25rem, 1.5rem + 1.6vw, 2.75rem);  /* page-level h1 — cinematic display step */
 
@@ -89,12 +100,15 @@ h3 { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.06em; text-transf
 
 /* Display hero — reserved for page-level h1 via PageHeader.
    Using a class rather than re-styling bare h1 so modal/panel headings
-   don't accidentally inherit the hero face. */
+   don't accidentally inherit the hero face.
+   Font is Anton (single-weight 400) — it's a condensed production-slate
+   grotesque that reads as strongly bold at 400. Synthesizing bold on top
+   distorts the letterforms; keep weight: 400. */
 .display-hero {
   font-family: var(--font-display-hero);
-  font-weight: 700;
+  font-weight: 400;
   font-size: var(--text-display);
-  letter-spacing: -0.04em;
+  letter-spacing: -0.02em;
   line-height: 1;
   color: var(--color-text);
   margin: 0;
@@ -116,13 +130,17 @@ h3 { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.06em; text-transf
 /* ─── Focus ring ──────────────────────────────────────────────────────────── */
 /* Uses both outline AND box-shadow so the ring survives inside parents with
    overflow:hidden (common on our Panel primitive + sticky tables). box-shadow
-   doesn't clip; outline degrades gracefully if box-shadow is unsupported. */
+   doesn't clip; outline degrades gracefully if box-shadow is unsupported.
+   The original 4px solid-lime outer ring + 2px outline was loud on
+   already-bordered elements (chips, buttons). Tightened the stack so
+   visible thickness is ~3px of ring, with a softer outer lime at 75% so
+   it reads as emphasis rather than alarm. */
 :focus-visible {
   outline: 2px solid var(--color-lime);
-  outline-offset: 2px;
+  outline-offset: 1px;
   box-shadow:
-    0 0 0 2px var(--color-base),
-    0 0 0 4px var(--color-lime);
+    0 0 0 1px var(--color-base),
+    0 0 0 3px color-mix(in srgb, var(--color-lime) 75%, transparent);
   border-radius: 3px;
 }
 
@@ -221,6 +239,18 @@ thead th {
   margin-bottom: 24px;
   padding-bottom: 20px;
   border-bottom: 1px solid var(--color-border);
+}
+
+/* Dashboard Today briefing — stacks at narrow viewports so the headline
+   doesn't get crushed between the big numeral and the primary CTA. */
+@media (max-width: 640px) {
+  .today-briefing {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 16px !important;
+  }
+  .today-briefing > :last-child {
+    justify-self: start;
+  }
 }
 
 /* Dropdown menus */
@@ -514,7 +544,7 @@ button[style*="color-lime"]:hover:not(:disabled) {
 }
 [data-eclatech="v2"] .ec-stats .v {
   font-family: var(--font-display-hero);
-  font-weight: 800; font-size: 44px; line-height: 1; letter-spacing: -0.04em;
+  font-weight: 400; font-size: 44px; line-height: 1; letter-spacing: -0.02em;
   color: var(--color-text);
 }
 [data-eclatech="v2"] .ec-stats .unit {
@@ -546,8 +576,8 @@ button[style*="color-lime"]:hover:not(:disabled) {
 }
 [data-eclatech="v2"] .ec-strip .cell .big {
   font-family: var(--font-display-hero);
-  font-weight: 800; font-size: 28px; line-height: 1;
-  letter-spacing: -0.03em; margin-top: 2px;
+  font-weight: 400; font-size: 28px; line-height: 1;
+  letter-spacing: -0.02em; margin-top: 2px;
 }
 [data-eclatech="v2"] .ec-strip .cell .big sup {
   font-size: 9px; font-weight: 400; color: var(--color-text-muted);
@@ -702,14 +732,30 @@ button[style*="color-lime"]:hover:not(:disabled) {
 }
 [data-eclatech="v2"] .ec-page-head .display {
   font-family: var(--font-display-hero);
-  font-weight: 800; font-size: var(--text-display); line-height: 0.95;
-  letter-spacing: -0.04em; color: var(--color-text); margin: 0;
+  font-weight: 400; font-size: var(--text-display); line-height: 0.95;
+  letter-spacing: -0.02em; color: var(--color-text); margin: 0;
 }
 [data-eclatech="v2"] .ec-page-head .sub { margin-top: 12px; font-size: 13px; color: var(--color-text-muted); }
 [data-eclatech="v2"] .ec-page-head .actions { display: flex; gap: 8px; align-items: center; }
 
 /* Calendar / timeline lanes */
 [data-eclatech="v2"] .ec-cal { border: 1px solid var(--color-border); border-radius: 6px; overflow: hidden; background: var(--color-surface); }
+/* Flat variant — no outer frame, sits directly on the page background.
+   Keeps the row rules + cell dividers so the grid reads as a grid even
+   without a surrounding container. */
+[data-eclatech="v2"] .ec-cal-flat {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+[data-eclatech="v2"] .ec-cal-flat .cal-head {
+  background: transparent;
+  border-bottom-color: var(--color-border);
+}
+[data-eclatech="v2"] .ec-cal-flat .lane .label {
+  background: transparent;
+}
 [data-eclatech="v2"] .ec-cal .cal-head {
   display: grid; grid-template-columns: 88px repeat(7,1fr);
   border-bottom: 1px solid var(--color-border);

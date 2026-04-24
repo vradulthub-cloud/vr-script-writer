@@ -1,6 +1,7 @@
 import type { ReactNode, CSSProperties } from "react"
 
 type PanelTone = "default" | "muted" | "urgent"
+type PanelVariant = "label" | "content"
 
 /**
  * Shared panel primitive. Replaces the ~dozen inline-styled
@@ -16,6 +17,7 @@ export function Panel({
   count,
   action,
   tone = "default",
+  variant = "label",
   padded = false,
   style,
   className,
@@ -25,6 +27,13 @@ export function Panel({
   count?: ReactNode
   action?: ReactNode
   tone?: PanelTone
+  /**
+   * Controls the title treatment:
+   *   "label"   — default uppercase-tracked 13px chrome for grouped sections.
+   *   "content" — 20px semibold sentence-case for panels that carry content
+   *               weight (named regions, feature blocks). Uses --text-title.
+   */
+  variant?: PanelVariant
   /** Apply inner body padding. Leave off when children render their own rows (tables, lists). */
   padded?: boolean
   style?: CSSProperties
@@ -65,20 +74,35 @@ export function Panel({
           <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
             {title && (
               // Semantic h2: Panel is always a first-class page region; it
-              // sits under the page's single h1 in PageHeader. Visual style
-              // matches the existing uppercase label — inherits the h3 rules
-              // in globals.css by shared font-size / letter-spacing tokens.
+              // sits under the page's single h1 in PageHeader. Two styles:
+              // "label" (default) is the dense uppercase-tracked chrome used
+              // for grouped sections; "content" is the 20px semibold title
+              // used for content-bearing panels so the mid-step of the type
+              // scale gets real hierarchy instead of compressing into 13px
+              // label chrome.
               <h2
-                style={{
-                  margin: 0,
-                  fontSize: "0.8125rem",
-                  fontWeight: 600,
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "var(--color-text-muted)",
-                  fontFamily: "var(--font-display)",
-                  lineHeight: 1.15,
-                }}
+                style={
+                  variant === "content"
+                    ? {
+                        margin: 0,
+                        fontSize: "var(--text-title)",
+                        fontWeight: 600,
+                        letterSpacing: "-0.01em",
+                        color: "var(--color-text)",
+                        fontFamily: "var(--font-display)",
+                        lineHeight: 1.2,
+                      }
+                    : {
+                        margin: 0,
+                        fontSize: "0.8125rem",
+                        fontWeight: 600,
+                        letterSpacing: "0.06em",
+                        textTransform: "uppercase",
+                        color: "var(--color-text-muted)",
+                        fontFamily: "var(--font-display)",
+                        lineHeight: 1.15,
+                      }
+                }
               >
                 {title}
               </h2>

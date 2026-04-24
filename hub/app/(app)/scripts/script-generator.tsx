@@ -12,6 +12,7 @@ import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
 import { PageHeader } from "@/components/ui/page-header"
 import { SheetRowModal } from "@/components/ui/sheet-row-modal"
+import { TodayBriefing, type Briefing } from "@/components/ui/today-briefing"
 import { studioAbbr } from "@/lib/studio-colors"
 import { BatchPanel } from "./batch-panel"
 const SCENE_TYPES = ["BG", "BGCP"]
@@ -37,9 +38,10 @@ interface Props {
   tabsError: string | null
   idToken: string | undefined
   userRole?: string
+  briefing?: Briefing | null
 }
 
-export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userRole = "editor" }: Props) {
+export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userRole = "editor", briefing }: Props) {
   const idToken = useIdToken(serverIdToken)
   const isAdmin = userRole === "admin"
 
@@ -406,6 +408,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
           </div>
         }
       />
+      {briefing && <TodayBriefing briefing={briefing} />}
       <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
         {/* Left panel — inputs. Mode tabs moved into PageHeader actions (V2). */}
         <div style={{ width: 300, flexShrink: 0 }}>
@@ -598,24 +601,39 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
           </div>
         )}
 
-        {/* Generate button */}
-        <button
-          onClick={generate}
-          disabled={stream.streaming || (!female && mode === "manual")}
-          className="w-full mt-4 px-3 py-2 rounded text-xs font-semibold transition-colors"
-          style={{
-            background: stream.streaming ? "var(--color-elevated)" : "var(--color-lime)",
-            color: stream.streaming ? "var(--color-text-muted)" : "var(--color-lime-ink)",
-            cursor: stream.streaming ? "wait" : "pointer",
-            opacity: (!female && mode === "manual" && !stream.streaming) ? 0.5 : 1,
-          }}
-        >
-          {stream.streaming
-            ? "Generating…"
-            : (!female && mode === "manual")
-              ? "Add female talent to continue"
-              : "Generate Script"}
-        </button>
+        {/* Generate button — lime fill reserved for the armed state.
+            Inert state uses an outlined-faint treatment so users can tell
+            at a glance whether a click will do anything. */}
+        {(() => {
+          const inert = !female && mode === "manual" && !stream.streaming
+          return (
+            <button
+              onClick={generate}
+              disabled={stream.streaming || (!female && mode === "manual")}
+              className="w-full mt-4 px-3 py-2 rounded text-xs font-semibold transition-colors"
+              style={{
+                background: stream.streaming
+                  ? "var(--color-elevated)"
+                  : inert
+                    ? "transparent"
+                    : "var(--color-lime)",
+                color: stream.streaming
+                  ? "var(--color-text-muted)"
+                  : inert
+                    ? "var(--color-text-faint)"
+                    : "var(--color-lime-ink)",
+                border: inert ? "1px solid var(--color-border)" : "1px solid transparent",
+                cursor: stream.streaming ? "wait" : inert ? "not-allowed" : "pointer",
+              }}
+            >
+              {stream.streaming
+                ? "Generating…"
+                : inert
+                  ? "Add female talent to continue"
+                  : "Generate Script"}
+            </button>
+          )
+        })()}
 
         {stream.streaming && (
           <button
@@ -780,28 +798,33 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
               <div className="flex flex-col gap-3 mb-4">
                 {/* Action buttons row */}
                 <div className="flex items-center gap-2 flex-wrap">
-                  {isAdmin ? (
-                    <button
-                      onClick={save}
-                      disabled={saving || !selectedRow}
-                      className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-                      style={{
-                        background: "var(--color-lime)",
-                        color: "var(--color-lime-ink)",
-                        opacity: saving || !selectedRow ? 0.5 : 1,
-                      }}
-                    >
-                      {saving ? "Saving..." : "Accept & Save"}
-                    </button>
-                  ) : (
+                  {isAdmin ? (() => {
+                    const inert = !selectedRow && !saving
+                    return (
+                      <button
+                        onClick={save}
+                        disabled={saving || !selectedRow}
+                        className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+                        title={inert ? "Select a sheet row to enable saving" : undefined}
+                        style={{
+                          background: saving ? "var(--color-elevated)" : inert ? "transparent" : "var(--color-lime)",
+                          color: saving ? "var(--color-text-muted)" : inert ? "var(--color-text-faint)" : "var(--color-lime-ink)",
+                          border: inert ? "1px solid var(--color-border)" : "1px solid transparent",
+                          cursor: saving ? "wait" : inert ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        {saving ? "Saving..." : "Accept & Save"}
+                      </button>
+                    )
+                  })() : (
                     <button
                       onClick={submitForApproval}
                       disabled={saving}
                       className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
                       style={{
-                        background: "var(--color-lime)",
-                        color: "var(--color-lime-ink)",
-                        opacity: saving ? 0.5 : 1,
+                        background: saving ? "var(--color-elevated)" : "var(--color-lime)",
+                        color: saving ? "var(--color-text-muted)" : "var(--color-lime-ink)",
+                        cursor: saving ? "wait" : "pointer",
                       }}
                     >
                       {saving ? "Submitting..." : "Submit for Approval"}

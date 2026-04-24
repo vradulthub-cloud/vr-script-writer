@@ -118,7 +118,7 @@ export function ConfirmModal({
               id="confirm-modal-title"
               style={{
                 fontFamily: "var(--font-display-hero)",
-                fontWeight: 800,
+                fontWeight: 400,
                 fontSize: 22,
                 lineHeight: 1.1,
                 letterSpacing: "-0.02em",

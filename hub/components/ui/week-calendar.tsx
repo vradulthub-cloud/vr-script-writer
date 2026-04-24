@@ -7,16 +7,21 @@ import { ShootModal } from "@/components/ui/shoot-modal"
 
 /** Week-view timeline using the v2 `.ec-cal` primitive.
  *  Shows 4 studio lanes with a bar per shoot positioned across the 7-day week.
- *  Clicking an event opens a modal with the shoot's details. */
+ *  Clicking an event opens a modal with the shoot's details.
+ *  `flat` strips the calendar's outer frame (border + surface bg + radius) so
+ *  it can live directly on the page background — used on the dashboard to
+ *  break container monotony. */
 export function WeekCalendar({
   shoots,
   weekStart,
   showHeader = true,
+  flat = false,
   studios = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"],
 }: {
   shoots: Shoot[]
   weekStart?: Date
   showHeader?: boolean
+  flat?: boolean
   studios?: string[]
 }) {
   const [selected, setSelected] = useState<Shoot | null>(null)
@@ -72,7 +77,7 @@ export function WeekCalendar({
           </span>
         </div>
       )}
-      <section className="ec-cal">
+      <section className={flat ? "ec-cal ec-cal-flat" : "ec-cal"}>
         <div className="cal-head">
           <div>Studio</div>
           {Array.from({ length: 7 }).map((_, i) => {

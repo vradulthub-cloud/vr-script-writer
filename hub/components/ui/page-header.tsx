@@ -23,12 +23,19 @@ export function PageHeader({
   subtitle,
   actions,
   studioAccent,
+  compact = false,
 }: {
   title: ReactNode
   eyebrow?: ReactNode
   subtitle?: ReactNode
   actions?: ReactNode
   studioAccent?: string
+  /**
+   * Compact mode: demotes the h1 to a ~20px display-face line and drops the
+   * bottom rule. Use when the page's real focal element (e.g. TodayBriefing
+   * on the dashboard) lives immediately below and deserves to be the hero.
+   */
+  compact?: boolean
 }) {
   const accent = studioAccent ? studioColor(studioAccent) : undefined
   const stacked = useStackedLayout()
@@ -49,9 +56,9 @@ export function PageHeader({
         alignItems: "end",
         gap: 16,
         columnGap: accent ? 14 : 16,
-        marginBottom: 24,
-        paddingBottom: 20,
-        borderBottom: "1px solid var(--color-border)",
+        marginBottom: compact ? 16 : 24,
+        paddingBottom: compact ? 0 : 20,
+        borderBottom: compact ? "none" : "1px solid var(--color-border)",
       }}
     >
       {accent && (
@@ -83,7 +90,16 @@ export function PageHeader({
           </div>
         )}
 
-        <h1 className="display-hero">{title}</h1>
+        <h1
+          className="display-hero"
+          style={
+            compact
+              ? { fontSize: "1.375rem", lineHeight: 1.1, letterSpacing: "-0.015em" }
+              : undefined
+          }
+        >
+          {title}
+        </h1>
 
         {subtitle && (
           <div

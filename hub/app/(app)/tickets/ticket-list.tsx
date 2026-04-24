@@ -6,6 +6,7 @@ import { ErrorAlert } from "@/components/ui/error-alert"
 import { PageHeader } from "@/components/ui/page-header"
 import { StudioFilter } from "@/components/ui/studio-filter"
 import { TicketDetailModal } from "@/components/ui/ticket-detail-modal"
+import { showUndoToast, showToast } from "@/components/ui/toast"
 import { api, type Ticket, type TicketCreate, type TicketUpdate, type UserProfile } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { formatApiError } from "@/lib/errors"
@@ -368,6 +369,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
   async function applyQuickAction(ticketId: string, body: TicketUpdate): Promise<void> {
     setSaving(true)
     setSaveMsg(null)
+    const prior = tickets.find(t => t.ticket_id === ticketId)
     try {
       const updated = await client.tickets.update(ticketId, body)
       setTickets(prev => prev.map(t => t.ticket_id === ticketId ? updated : t))
@@ -375,6 +377,27 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
       setEditAssignee(updated.assignee || "")
       setFlashId(ticketId)
       setSaveMsg("Saved.")
+      // Undo: restore the status that was in effect before this quick-action.
+      // Only offer on status changes — note-only writes aren't reversible.
+      if (prior && body.status && body.status !== prior.status) {
+        const priorStatus = prior.status
+        const priorAssignee = prior.assignee ?? ""
+        showUndoToast(`Moved ${ticketId} to ${updated.status}`, async () => {
+          try {
+            const reverted = await client.tickets.update(ticketId, {
+              status: priorStatus,
+              assignee: priorAssignee,
+              note: `Reverted quick-action — returned to ${priorStatus}.`,
+            })
+            setTickets(prev => prev.map(t => t.ticket_id === ticketId ? reverted : t))
+            setEditStatus(reverted.status)
+            setEditAssignee(reverted.assignee || "")
+            setFlashId(ticketId)
+          } catch (e) {
+            showToast(formatApiError(e, "Undo failed"), "error")
+          }
+        })
+      }
     } catch (e) {
       setSaveMsg(formatApiError(e, "Save"))
     } finally {

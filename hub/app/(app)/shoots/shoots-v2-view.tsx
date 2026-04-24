@@ -121,7 +121,22 @@ export function ShootsV2View({
       <PageHeader
         title="Shoot Tracker"
         eyebrow={`SCHEDULE · ${monthLabel} · ${calendarShoots.length} SHOOTS`}
-        subtitle={`${statusCounts.inProgress} in progress · ${statusCounts.overdue} overdue · ${statusCounts.wrapped} wrapped`}
+        subtitle={
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>
+            {statusCounts.inProgress} in progress
+            <span aria-hidden="true" style={{ margin: "0 6px", opacity: 0.5 }}>·</span>
+            <span
+              style={{
+                color: statusCounts.overdue > 0 ? "var(--color-warn)" : undefined,
+                fontWeight: statusCounts.overdue > 0 ? 600 : undefined,
+              }}
+            >
+              {statusCounts.overdue} overdue
+            </span>
+            <span aria-hidden="true" style={{ margin: "0 6px", opacity: 0.5 }}>·</span>
+            {statusCounts.wrapped} wrapped
+          </span>
+        }
         studioAccent={studioFilter !== "All" ? studioFilter : undefined}
         actions={
           <div

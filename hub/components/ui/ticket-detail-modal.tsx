@@ -140,7 +140,7 @@ export function TicketDetailModal({
               id="ticket-modal-title"
               style={{
                 fontFamily: "var(--font-display-hero)",
-                fontWeight: 800,
+                fontWeight: 400,
                 fontSize: 24,
                 lineHeight: 1.15,
                 letterSpacing: "-0.02em",

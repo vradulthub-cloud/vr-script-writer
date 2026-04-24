@@ -1,7 +1,8 @@
 import nextDynamic from "next/dynamic"
 import { auth } from "@/auth"
-import { api } from "@/lib/api"
+import { api, type Script } from "@/lib/api"
 import { requireTab } from "@/lib/rbac"
+import type { Briefing } from "@/components/ui/today-briefing"
 
 const ScriptGenerator = nextDynamic(() => import("./script-generator").then(m => m.ScriptGenerator))
 
@@ -15,6 +16,8 @@ export default async function ScriptsPage() {
 
   let tabs: string[] = []
   let error: string | null = null
+  let queued: Script[] = []
+  let queueFetchFailed = false
 
   try {
     tabs = await client.scripts.tabs()
@@ -22,12 +25,105 @@ export default async function ScriptsPage() {
     error = e instanceof Error ? e.message : "Failed to load script tabs"
   }
 
+  try {
+    queued = await client.scripts.list({ needs_script: true })
+  } catch {
+    queueFetchFailed = true
+  }
+
+  const briefing = computeScriptsBriefing({ queued, queueFetchFailed })
+
   return (
     <ScriptGenerator
       tabs={tabs}
       tabsError={error}
       idToken={idToken}
       userRole={userProfile.role}
+      briefing={briefing}
     />
   )
+}
+
+// ─── Briefing computation ───────────────────────────────────────────────────
+//
+// On /scripts, the user is a writer sitting down to work. The briefing's job
+// is to point at the one script whose shoot is soonest — so they start where
+// the deadline is tightest, not the top of an alphabetized list.
+
+function computeScriptsBriefing(input: { queued: Script[]; queueFetchFailed: boolean }): Briefing | null {
+  const { queued, queueFetchFailed } = input
+
+  if (queueFetchFailed) {
+    return {
+      eyebrow: "Next up",
+      tone: "error",
+      count: 0,
+      headline: "Couldn't load the script queue",
+      detail: "The queue is temporarily unreachable. Use Manual mode below to draft without it.",
+      cta: null,
+      secondary: [],
+    }
+  }
+
+  if (queued.length === 0) {
+    return {
+      eyebrow: "Next up",
+      tone: "calm",
+      count: 0,
+      headline: "Queue is empty",
+      detail: "No scripts currently flagged as needing a draft. New shoots will appear here once they're added to the sheet.",
+      cta: null,
+      secondary: [],
+    }
+  }
+
+  // Earliest upcoming shoot that still needs a script.
+  const withDate = queued
+    .filter(s => s.shoot_date && Number.isFinite(Date.parse(s.shoot_date)))
+    .sort((a, b) => (a.shoot_date ?? "").localeCompare(b.shoot_date ?? ""))
+
+  const next = withDate[0] ?? null
+  const now = Date.now()
+  const daysOut = next ? Math.round((Date.parse(next.shoot_date!) - now) / (24 * 60 * 60 * 1000)) : null
+  const talent = next ? [next.female, next.male].filter(Boolean).join(" / ") : ""
+
+  const when =
+    daysOut === null ? null :
+    daysOut < 0      ? `shot ${-daysOut}d ago` :
+    daysOut === 0    ? "shoots today" :
+    daysOut === 1    ? "shoots tomorrow" :
+    `shoots in ${daysOut}d`
+
+  if (!next) {
+    return {
+      eyebrow: "Next up",
+      tone: "attention",
+      count: queued.length,
+      headline: `${queued.length} script${queued.length === 1 ? "" : "s"} queued — no shoot dates set`,
+      detail: "Scripts are ready to draft but don't have a shoot date yet. Pick any row from the sheet to begin.",
+      cta: null,
+      secondary: [],
+    }
+  }
+
+  const tone: Briefing["tone"] =
+    daysOut !== null && daysOut < 0 ? "urgent" :
+    daysOut !== null && daysOut < 3 ? "urgent" :
+    daysOut !== null && daysOut < 7 ? "attention" :
+    "calm"
+
+  return {
+    eyebrow: "Next up",
+    tone,
+    count: queued.length,
+    headline: `${talent || next.id} ${when ?? ""}`.trim(),
+    detail:
+      `${queued.length} script${queued.length === 1 ? "" : "s"} still queued.` +
+      ` Start with the shoot that's tightest on time.`,
+    cta: null,
+    secondary: [
+      next.studio,
+      next.shoot_date ? next.shoot_date.slice(0, 10) : "",
+    ].filter(Boolean),
+  }
 }

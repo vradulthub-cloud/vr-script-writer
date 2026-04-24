@@ -169,7 +169,7 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
               id="shoot-modal-title"
               style={{
                 fontFamily: "var(--font-display-hero)",
-                fontWeight: 800,
+                fontWeight: 400,
                 fontSize: 28,
                 lineHeight: 1.05,
                 letterSpacing: "-0.02em",
@@ -614,7 +614,7 @@ function ModalStat({ label, value, sub }: { label: string; value: string; sub?: 
         style={{
           marginTop: 4,
           fontFamily: "var(--font-display-hero)",
-          fontWeight: 800,
+          fontWeight: 400,
           fontSize: 22,
           letterSpacing: "-0.02em",
           color: "var(--color-text)",

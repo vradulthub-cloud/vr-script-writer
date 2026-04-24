@@ -154,7 +154,11 @@ function EditableParagraph({
             onClick={() => { onSave(index, draft); setEditing(false); setFeedback("") }}
             disabled={regenerating}
             className="px-2.5 py-1 rounded text-xs font-semibold"
-            style={{ background: "var(--color-lime)", color: "var(--color-lime-ink)", opacity: regenerating ? 0.5 : 1 }}
+            style={{
+              background: regenerating ? "var(--color-elevated)" : "var(--color-lime)",
+              color: regenerating ? "var(--color-text-muted)" : "var(--color-lime-ink)",
+              cursor: regenerating ? "wait" : "pointer",
+            }}
           >
             Save
           </button>
@@ -691,8 +695,8 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                     className="px-2 py-0.5 rounded"
                     style={{
                       fontSize: 10,
-                      background: "var(--color-lime)",
-                      color: "var(--color-lime-ink)",
+                      background: genTitleSaving ? "var(--color-elevated)" : "var(--color-lime)",
+                      color: genTitleSaving ? "var(--color-text-muted)" : "var(--color-lime-ink)",
                       fontWeight: 600,
                       cursor: genTitleSaving ? "wait" : "pointer",
                     }}
@@ -721,11 +725,24 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
             <StudioSelector
               value={studio}
               onChange={(s) => {
-                setStudio(s)
-                setSelectedCats([])
+                if (s === studio) return
                 // Changing studio invalidates any selected scene + paragraph
                 // edits from the previous studio; leaving them in state lets
-                // a user save edits against the wrong studio's scene.
+                // a user save edits against the wrong studio's scene. Warn
+                // before destroying work the user can see on screen.
+                const hasDirtyDraft =
+                  !!selectedSceneId ||
+                  Object.keys(editedParagraphs).length > 0 ||
+                  metaTitle !== "" ||
+                  metaDesc !== ""
+                if (hasDirtyDraft) {
+                  const ok = window.confirm(
+                    `Switching from ${studioAbbr(studio)} to ${studioAbbr(s)} will clear the selected scene, paragraph edits, and SEO metadata for ${studioAbbr(studio)}. Continue?`,
+                  )
+                  if (!ok) return
+                }
+                setStudio(s)
+                setSelectedCats([])
                 setSelectedSceneId("")
                 setEditedParagraphs({})
                 setMetaTitle("")
@@ -873,20 +890,34 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
           </div>
         </div>
 
-        {/* Generate */}
-        <button
-          onClick={generate}
-          disabled={stream.streaming || !performers}
-          className="w-full mt-4 px-3 py-2 rounded text-xs font-semibold transition-colors"
-          style={{
-            background: stream.streaming ? "var(--color-elevated)" : "var(--color-lime)",
-            color: stream.streaming ? "var(--color-text-muted)" : "var(--color-lime-ink)",
-            cursor: stream.streaming ? "wait" : "pointer",
-            opacity: (!performers && !stream.streaming) ? 0.5 : 1,
-          }}
-        >
-          {stream.streaming ? "Generating…" : !performers ? "Add performers to continue" : "Generate Description"}
-        </button>
+        {/* Generate — lime fill reserved for the armed state; inert state
+            uses outlined-faint so users can tell a click will do nothing. */}
+        {(() => {
+          const inert = !performers && !stream.streaming
+          return (
+            <button
+              onClick={generate}
+              disabled={stream.streaming || !performers}
+              className="w-full mt-4 px-3 py-2 rounded text-xs font-semibold transition-colors"
+              style={{
+                background: stream.streaming
+                  ? "var(--color-elevated)"
+                  : inert
+                    ? "transparent"
+                    : "var(--color-lime)",
+                color: stream.streaming
+                  ? "var(--color-text-muted)"
+                  : inert
+                    ? "var(--color-text-faint)"
+                    : "var(--color-lime-ink)",
+                border: inert ? "1px solid var(--color-border)" : "1px solid transparent",
+                cursor: stream.streaming ? "wait" : inert ? "not-allowed" : "pointer",
+              }}
+            >
+              {stream.streaming ? "Generating…" : inert ? "Add performers to continue" : "Generate Description"}
+            </button>
+          )
+        })()}
 
         {stream.streaming && (
           <button
@@ -1140,34 +1171,49 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                   ))}
                 </select>
 
-                <button
-                  onClick={save}
-                  disabled={saving || !selectedSceneId}
-                  className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-                  style={{
-                    background: "var(--color-lime)",
-                    color: "var(--color-lime-ink)",
-                    opacity: (saving || !selectedSceneId) ? 0.5 : 1,
-                  }}
-                >
-                  {saving ? "Saving…" : "Save"}
-                </button>
+                {(() => {
+                  const inert = !selectedSceneId && !saving
+                  return (
+                    <button
+                      onClick={save}
+                      disabled={saving || !selectedSceneId}
+                      className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+                      title={inert ? "Pick a scene from the dropdown to enable saving" : undefined}
+                      style={{
+                        background: saving ? "var(--color-elevated)" : inert ? "transparent" : "var(--color-lime)",
+                        color: saving ? "var(--color-text-muted)" : inert ? "var(--color-text-faint)" : "var(--color-lime-ink)",
+                        border: inert ? "1px solid var(--color-border)" : "1px solid transparent",
+                        cursor: saving ? "wait" : inert ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {saving ? "Saving…" : "Save"}
+                    </button>
+                  )
+                })()}
 
-                {isAdmin && (
-                  <button
-                    onClick={saveToGrail}
-                    disabled={grailSaving || !selectedSceneId}
-                    className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-                    style={{
-                      background: "color-mix(in srgb, var(--color-lime) 15%, transparent)",
-                      color: "var(--color-lime)",
-                      border: "1px solid color-mix(in srgb, var(--color-lime) 30%, transparent)",
-                      opacity: (grailSaving || !selectedSceneId) ? 0.5 : 1,
-                    }}
-                  >
-                    {grailSaving ? "Saving…" : "Save to Grail"}
-                  </button>
-                )}
+                {isAdmin && (() => {
+                  const inert = !selectedSceneId && !grailSaving
+                  return (
+                    <button
+                      onClick={saveToGrail}
+                      disabled={grailSaving || !selectedSceneId}
+                      className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+                      title={inert ? "Pick a scene from the dropdown to enable Grail save" : undefined}
+                      style={{
+                        background: inert
+                          ? "transparent"
+                          : "color-mix(in srgb, var(--color-lime) 15%, transparent)",
+                        color: inert ? "var(--color-text-faint)" : "var(--color-lime)",
+                        border: inert
+                          ? "1px solid var(--color-border)"
+                          : "1px solid color-mix(in srgb, var(--color-lime) 30%, transparent)",
+                        cursor: grailSaving ? "wait" : inert ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {grailSaving ? "Saving…" : "Save to Grail"}
+                    </button>
+                  )
+                })()}
 
                 <button
                   onClick={downloadDocx}

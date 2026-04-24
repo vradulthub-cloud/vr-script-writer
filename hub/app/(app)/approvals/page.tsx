@@ -31,7 +31,7 @@ export default function ApprovalsPage() {
         style={{
           margin: "6px 0 12px",
           fontSize: 30,
-          fontWeight: 800,
+          fontWeight: 400,
           letterSpacing: "-0.02em",
           color: "var(--color-text)",
           fontFamily: "var(--font-display-hero)",

@@ -207,7 +207,7 @@ export function MonthCalendar({
                     disabled={!inMonth}
                     style={{
                       fontFamily: "var(--font-display-hero)",
-                      fontWeight: 700,
+                      fontWeight: 400,
                       fontSize: 14,
                       color: isToday ? "var(--color-lime)" : "var(--color-text)",
                       letterSpacing: "-0.02em",

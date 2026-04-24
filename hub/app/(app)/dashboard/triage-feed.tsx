@@ -1,6 +1,8 @@
 "use client"
 
+import { useEffect, useRef } from "react"
 import Link from "next/link"
+import { ChevronRight } from "lucide-react"
 import { type Scene, type Script } from "@/lib/api"
 import { STUDIO_COLOR, STUDIO_ABBR } from "@/lib/studio-colors"
 import { AssetCells, type AssetCell } from "@/components/ui/asset-cells"
@@ -41,8 +43,40 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
 
   const hasAnything = byStudio.length > 0 || scripts.length > 0
 
+  // j/k + ↑/↓ row navigation. Activates when focus is already inside the feed
+  // so it doesn't hijack keys on unrelated pages. Enter still works via the
+  // native Link activation — we don't need to handle it explicitly.
+  const feedRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const root = feedRef.current
+    if (!root) return
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (!["j", "k", "ArrowDown", "ArrowUp"].includes(e.key)) return
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return
+      const rows = root!.querySelectorAll<HTMLAnchorElement>("a[data-triage-row='true']")
+      if (rows.length === 0) return
+      const active = document.activeElement as HTMLElement | null
+      const activeInFeed = active && root!.contains(active)
+      const idx = activeInFeed ? Array.from(rows).indexOf(active as HTMLAnchorElement) : -1
+      let next = idx
+      if (e.key === "j" || e.key === "ArrowDown") next = idx < 0 ? 0 : Math.min(rows.length - 1, idx + 1)
+      if (e.key === "k" || e.key === "ArrowUp")   next = idx < 0 ? 0 : Math.max(0, idx - 1)
+      if (next === idx && activeInFeed) return
+      e.preventDefault()
+      rows[next]?.focus()
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [])
+
   return (
-    <Section title="Recent Scenes" subtitle={hasAnything ? undefined : "No recent scenes found."}>
+    <div ref={feedRef}>
+    <Section
+      title="Recent activity"
+      subtitle={hasAnything ? "Latest scenes per studio and scripts waiting on a writer. Use j/k or ↑/↓ to step through rows." : "No recent scenes found."}
+    >
       {byStudio.map(group => (
         <div key={group.studio}>
           <div style={{
@@ -70,6 +104,7 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
               <Link
                 key={scene.id}
                 href={`/missing?scene=${encodeURIComponent(scene.id)}`}
+                data-triage-row="true"
                 style={{
                   padding: "8px 14px",
                   borderBottom: i < group.scenes.length - 1 ? "1px solid var(--color-border-subtle)" : "none",
@@ -81,8 +116,8 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
                 <span style={{
                   fontSize: 10, fontWeight: 700, letterSpacing: "0.06em",
                   padding: "1px 5px", borderRadius: 3, flexShrink: 0,
-                  background: `color-mix(in srgb, ${group.color} 14%, transparent)`,
-                  border: `1px solid color-mix(in srgb, ${group.color} 26%, transparent)`,
+                  background: `color-mix(in srgb, ${group.color} 10%, transparent)`,
+                  border: `1px solid color-mix(in srgb, ${group.color} 28%, transparent)`,
                   color: group.color,
                 }}>{group.abbr}</span>
 
@@ -110,6 +145,16 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
                     {dateStr}
                   </span>
                 )}
+                <ChevronRight
+                  size={12}
+                  aria-hidden="true"
+                  style={{
+                    color: "var(--color-text-faint)",
+                    opacity: 0.5,
+                    flexShrink: 0,
+                    marginLeft: -2,
+                  }}
+                />
               </Link>
             )
           })}
@@ -155,8 +200,8 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
                 <span style={{
                   fontSize: 10, fontWeight: 700, letterSpacing: "0.06em",
                   padding: "1px 5px", borderRadius: 3, flexShrink: 0,
-                  background: `color-mix(in srgb, ${color} 14%, transparent)`,
-                  border: `1px solid color-mix(in srgb, ${color} 26%, transparent)`,
+                  background: `color-mix(in srgb, ${color} 10%, transparent)`,
+                  border: `1px solid color-mix(in srgb, ${color} 28%, transparent)`,
                   color,
                 }}>{abbr}</span>
                 <span style={{ fontSize: 12, color: "var(--color-text)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
@@ -199,6 +244,7 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
         </div>
       )}
     </Section>
+    </div>
   )
 }
 

@@ -705,6 +705,8 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
           studio={studio}
           studioColor={studioColor}
           onOpen={(id) => setExpandedComp(id)}
+          onStartBuild={() => setMode("builder")}
+          onStartIdeas={() => setMode("ideas")}
         />
       )}
 
@@ -742,21 +744,65 @@ interface ExistingCompsTableProps {
   studio: string
   studioColor: string
   onOpen: (compId: string) => void
+  onStartBuild?: () => void
+  onStartIdeas?: () => void
 }
 
-function ExistingCompsTable({ comps, loading, studio, studioColor, onOpen }: ExistingCompsTableProps) {
+function ExistingCompsTable({ comps, loading, studio, studioColor, onOpen, onStartBuild, onStartIdeas }: ExistingCompsTableProps) {
   if (loading) {
     return <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Loading existing compilations…</p>
   }
   if (comps.length === 0) {
     return (
       <div
-        className="rounded flex flex-col items-center justify-center gap-2"
-        style={{ height: 200, border: "1px dashed var(--color-border)", color: "var(--color-text-faint)", fontSize: 12, textAlign: "center", padding: "0 24px" }}
+        className="rounded flex flex-col items-center justify-center gap-3"
+        style={{ padding: "40px 24px", border: "1px dashed var(--color-border)", textAlign: "center" }}
       >
-        <span style={{ fontSize: 18, opacity: 0.4 }}>◈</span>
-        <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>No compilations yet for {studio}</span>
-        <span>Build a compilation above and Save — it will appear here in the Index.</span>
+        <span aria-hidden="true" style={{ fontSize: 22, color: studioColor, opacity: 0.55 }}>◈</span>
+        <span style={{ fontWeight: 600, color: "var(--color-text)", fontSize: 14 }}>
+          No compilations yet for {studioAbbr(studio)}
+        </span>
+        <span style={{ fontSize: 12, color: "var(--color-text-muted)", maxWidth: 360, lineHeight: 1.5 }}>
+          A compilation bundles scenes into a release set. Start from a prompt for AI-suggested groupings, or hand-pick scenes in the builder.
+        </span>
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          {onStartIdeas && (
+            <button
+              type="button"
+              onClick={onStartIdeas}
+              style={{
+                background: "var(--color-lime)",
+                color: "var(--color-lime-ink)",
+                padding: "7px 14px",
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 600,
+                border: "1px solid transparent",
+                cursor: "pointer",
+              }}
+            >
+              Get ideas
+            </button>
+          )}
+          {onStartBuild && (
+            <button
+              type="button"
+              onClick={onStartBuild}
+              style={{
+                background: "transparent",
+                color: "var(--color-text)",
+                padding: "7px 14px",
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 500,
+                border: "1px solid var(--color-border)",
+                cursor: "pointer",
+              }}
+            >
+              Start building
+            </button>
+          )}
+        </div>
       </div>
     )
   }

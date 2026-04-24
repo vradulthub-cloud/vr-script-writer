@@ -431,8 +431,8 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
                         <button
                           onClick={() => removeUser(u)}
                           title={`Remove ${u.name}`}
-                          className="rounded px-2 py-1 transition-colors hover:bg-[--color-elevated]"
-                          style={{ fontSize: 11, color: "var(--color-err)" }}
+                          className="rounded px-2 py-1 transition-colors hover:bg-[color-mix(in_srgb,var(--color-err)_12%,transparent)] hover:text-[--color-err]"
+                          style={{ fontSize: 11, color: "var(--color-text-muted)" }}
                         >
                           Remove
                         </button>
