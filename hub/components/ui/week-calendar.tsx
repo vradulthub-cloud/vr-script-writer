@@ -35,11 +35,11 @@ export function WeekCalendar({
       .filter(s => {
         if (s.scenes.length === 0) return false
         if (!s.scenes.some(sc => sc.studio === studio)) return false
-        const t = Date.parse(s.shoot_date || "")
-        return Number.isFinite(t) && t >= start.getTime() && t < end.getTime()
+        const t = parseLocalDate(s.shoot_date || "")
+        return t !== null && t >= start.getTime() && t < end.getTime()
       })
       .map(s => {
-        const t = Date.parse(s.shoot_date)
+        const t = parseLocalDate(s.shoot_date)!
         const dayIdx = Math.floor((t - start.getTime()) / (24 * 60 * 60 * 1000))
         const left = (dayIdx / 7) * 100
         const right = ((dayIdx + 1) / 7) * 100
@@ -149,4 +149,12 @@ function startOfWeek(d: Date): Date {
   out.setHours(0, 0, 0, 0)
   out.setDate(out.getDate() - out.getDay())
   return out
+}
+
+// "2026-04-24" → local midnight timestamp. Date.parse interprets bare
+// ISO dates as UTC midnight, which shifts the day by the timezone offset.
+function parseLocalDate(s: string): number | null {
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return null
+  return new Date(+m[1], +m[2] - 1, +m[3]).getTime()
 }
