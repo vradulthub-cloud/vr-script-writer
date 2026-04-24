@@ -1,7 +1,6 @@
 import type { Metadata } from "next"
 import { Geist, Geist_Mono, Anton } from "next/font/google"
 import localFont from "next/font/local"
-import { isEclatechV2 } from "@/lib/eclatech-flag"
 import { Providers } from "@/components/providers"
 import "./globals.css"
 
@@ -43,17 +42,15 @@ export const metadata: Metadata = {
   description: "Production management for FPVR · VRH · VRA · NJOI",
 }
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const eclatechFlag = (await isEclatechV2()) ? "v2" : undefined
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${generalSans.variable} ${anton.variable} h-full`}
-      data-eclatech={eclatechFlag}
     >
       <body className="h-full antialiased">
         <Providers>{children}</Providers>

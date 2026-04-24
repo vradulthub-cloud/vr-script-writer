@@ -17,19 +17,19 @@ import {
 } from "lucide-react"
 
 const PRIMARY_ITEMS = [
-  { href: "/dashboard",   label: "Home",     icon: Home },
-  { href: "/shoots",      label: "Shoots",   icon: LayoutGrid },
-  { href: "/call-sheets", label: "Calls",    icon: Phone },
-  { href: "/scripts",     label: "Scripts",  icon: FileText },
+  { href: "/dashboard", label: "Home",    icon: Home },
+  { href: "/shoots",    label: "Shoots",  icon: LayoutGrid },
+  { href: "/missing",   label: "Assets",  icon: Layers },
+  { href: "/scripts",   label: "Scripts", icon: FileText },
 ]
 
 const OVERFLOW_ITEMS = [
-  { href: "/missing",      label: "Grail Assets", icon: LayoutGrid },
-  { href: "/titles",       label: "Titles",       icon: Image },
+  { href: "/tickets",      label: "Tickets",      icon: Ticket },
   { href: "/descriptions", label: "Descriptions", icon: AlignLeft },
   { href: "/research",     label: "Research",     icon: Users },
+  { href: "/call-sheets",  label: "Calls",        icon: Phone },
   { href: "/compilations", label: "Comps",        icon: Layers },
-  { href: "/tickets",      label: "Tickets",      icon: Ticket },
+  { href: "/titles",       label: "Titles",       icon: Image },
 ]
 
 export function MobileNav() {

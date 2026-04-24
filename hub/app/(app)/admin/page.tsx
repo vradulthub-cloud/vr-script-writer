@@ -1,7 +1,6 @@
 import { auth } from "@/auth"
 import { api, type UserProfile, type TicketStats, type SceneStats, type TaskStats } from "@/lib/api"
 import { requireAdmin } from "@/lib/rbac"
-import { isEclatechV2 } from "@/lib/eclatech-flag"
 import { UsersPanel } from "./users-panel"
 import { SystemCheck } from "./system-check"
 import { SyncPanel } from "./sync-panel"
@@ -36,7 +35,6 @@ export default async function AdminPage() {
   const idToken = (session as { idToken?: string } | null)?.idToken
   const me = await requireAdmin(idToken)
   const client = api(session)
-  const v2 = await isEclatechV2()
 
   let users: UserProfile[] = []
   let error: string | null = null
@@ -47,26 +45,21 @@ export default async function AdminPage() {
 
   const [usersRes, healthRes, ticketRes, sceneRes, taskRes] = await Promise.allSettled([
     client.users.list(),
-    v2 ? client.health() : Promise.resolve(null),
-    v2 ? client.tickets.stats() : Promise.resolve(null),
-    v2 ? client.scenes.stats() : Promise.resolve(null),
-    v2 ? client.tasks.stats() : Promise.resolve(null),
+    client.health(),
+    client.tickets.stats(),
+    client.scenes.stats(),
+    client.tasks.stats(),
   ])
   if (usersRes.status === "fulfilled") users = usersRes.value
   else error = usersRes.reason instanceof Error ? usersRes.reason.message : "Failed to load users"
-  if (v2 && healthRes.status === "fulfilled") health = healthRes.value
-  if (v2 && ticketRes.status === "fulfilled") ticketStats = ticketRes.value
-  if (v2 && sceneRes.status === "fulfilled") sceneStats = sceneRes.value
-  if (v2 && taskRes.status === "fulfilled") taskStats = taskRes.value
+  if (healthRes.status === "fulfilled") health = healthRes.value
+  if (ticketRes.status === "fulfilled") ticketStats = ticketRes.value
+  if (sceneRes.status === "fulfilled") sceneStats = sceneRes.value
+  if (taskRes.status === "fulfilled") taskStats = taskRes.value
 
   const usersPanel = (
     <UsersPanel users={users} error={error} idToken={idToken} currentEmail={me.email} />
   )
-
-  // Pre-v2 still gets the original single-panel view — the tabbed shell is
-  // an Eclatech-V2 feature gated by the same flag the rest of the redesign
-  // sits behind.
-  if (!v2) return usersPanel
 
   const adminCount = users.filter(u => (u.role ?? "").toLowerCase() === "admin").length
   const editorCount = users.filter(u => (u.role ?? "").toLowerCase() === "editor").length

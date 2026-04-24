@@ -27,7 +27,7 @@ export interface Briefing {
  * Numeral size ramps with digit count so 3-digit values don't blow past the
  * headline column.
  */
-export function TodayBriefing({ briefing }: { briefing: Briefing }) {
+export function TodayBriefing({ briefing, cachedAt }: { briefing: Briefing; cachedAt?: number | null }) {
   const accentColor = toneToAccent(briefing.tone)
   const numeralSize = toneSize(briefing.count)
   const eyebrow = briefing.eyebrow ?? "Today"
@@ -115,6 +115,35 @@ export function TodayBriefing({ briefing }: { briefing: Briefing }) {
             ))}
           </div>
         )}
+        {cachedAt != null && (
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              marginTop: 4,
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: "var(--color-text-faint)",
+              border: "1px solid var(--color-border)",
+              padding: "2px 7px",
+              width: "fit-content",
+            }}
+          >
+            <span
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: "50%",
+                background: "var(--color-warn)",
+                flexShrink: 0,
+              }}
+            />
+            Cached · {staleLabel(cachedAt)}
+          </div>
+        )}
       </div>
 
       {briefing.cta && (
@@ -164,6 +193,13 @@ function toneSize(count: number): number {
   if (count < 10)   return 64
   if (count < 100)  return 56
   return 48
+}
+
+function staleLabel(savedAt: number): string {
+  const s = Math.floor((Date.now() - savedAt) / 1000)
+  if (s < 60)   return `${s}s ago`
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  return `${Math.floor(s / 3600)}h ago`
 }
 
 /**
