@@ -13,7 +13,11 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
+import subprocess
+import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import anthropic
@@ -353,6 +357,88 @@ def _build_desc_user_prompt(body: DescGenRequest) -> str:
         lines.append(f"Plot Summary: {body.plot}")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Save description as DOCX to MEGA Description/ folder
+# ---------------------------------------------------------------------------
+
+_STUDIO_TO_MEGA: dict[str, str] = {
+    "FuckPassVR": "FPVR",
+    "VRHush":     "VRH",
+    "VRAllure":   "VRA",
+    "NaughtyJOI": "NNJOI",
+}
+
+
+class DescSaveMegaBody(BaseModel):
+    scene_id: str
+    description: str
+    title: str = ""
+    meta_title: str | None = None
+    meta_description: str | None = None
+
+
+@router.post("/save-mega")
+async def save_description_to_mega(body: DescSaveMegaBody, user: CurrentUser):
+    """
+    Build a DOCX from the description and upload it to the scene's
+    MEGA Description/ subfolder via rclone. Also marks has_description=1.
+    """
+    from io import BytesIO
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, studio, grail_tab FROM scenes WHERE id = ?", (body.scene_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Scene not found")
+        scene = dict(row)
+        conn.execute("UPDATE scenes SET has_description=1 WHERE id=?", (body.scene_id,))
+
+    mega_studio = _STUDIO_TO_MEGA.get(scene["studio"], scene.get("grail_tab", scene["studio"]))
+    mega_path = f"mega:/Grail/{mega_studio}/{body.scene_id}/Description/"
+    filename = f"{body.scene_id}_description.docx"
+
+    # Build DOCX
+    doc = Document()
+    if body.title:
+        h = doc.add_heading(body.title, level=1)
+        h.runs[0].font.color.rgb = RGBColor(0x1A, 0x1A, 0x1A)
+    for para_text in [p.strip() for p in body.description.split("\n\n") if p.strip()]:
+        p = doc.add_paragraph(para_text)
+        p.runs[0].font.size = Pt(11)
+    if body.meta_title or body.meta_description:
+        doc.add_paragraph("")
+        doc.add_heading("SEO Metadata", level=2)
+        if body.meta_title:
+            p = doc.add_paragraph()
+            p.add_run("Meta Title: ").bold = True
+            p.add_run(body.meta_title)
+        if body.meta_description:
+            p = doc.add_paragraph()
+            p.add_run("Meta Description: ").bold = True
+            p.add_run(body.meta_description)
+
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        (Path(tmp_dir) / filename).write_bytes(buf.read())
+        r = subprocess.run(
+            ["rclone", "copy", tmp_dir, mega_path],
+            capture_output=True, text=True, timeout=120,
+        )
+        if r.returncode != 0:
+            raise HTTPException(status_code=502, detail=f"rclone error: {r.stderr[:300]}")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return {"scene_id": body.scene_id, "mega_path": f"{mega_path}{filename}", "status": "saved"}
 
 
 # ---------------------------------------------------------------------------

@@ -769,6 +769,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<{ ok: boolean }>("/descriptions/save", body),
       saveGrail: (body: { scene_id: string; description: string; meta_title?: string; meta_description?: string }) =>
         post<{ scene_id: string; status: string }>("/descriptions/save-grail", body),
+      saveMega: (body: { scene_id: string; description: string; title?: string; meta_title?: string; meta_description?: string }) =>
+        post<{ scene_id: string; mega_path: string; status: string }>("/descriptions/save-mega", body),
       seo: (body: { description: string; studio: string }) =>
         post<{ meta_title: string; meta_description: string }>("/descriptions/seo", body),
       regenerateParagraph: (body: {

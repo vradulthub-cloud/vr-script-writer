@@ -145,6 +145,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
 
   const [showQueue, setShowQueue] = useState(true)
   const [grailSaving, setGrailSaving] = useState(false)
+  const [megaSaving, setMegaSaving] = useState(false)
 
   async function autoPopulateFromScene(scene: Scene) {
     setSelectedSceneId(scene.id)
@@ -232,6 +233,26 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
       setSaveMsg(formatApiError(e, "Save to Grail"))
     } finally {
       setGrailSaving(false)
+    }
+  }
+
+  async function saveToMega() {
+    if (!getFullDescription() || !selectedSceneId) return
+    setMegaSaving(true)
+    setSaveMsg(null)
+    try {
+      const res = await client.descriptions.saveMega({
+        scene_id: selectedSceneId,
+        description: getFullDescription(),
+        title: selectedScene?.title || undefined,
+        meta_title: metaTitle || undefined,
+        meta_description: metaDesc || undefined,
+      })
+      setSaveMsg(`Saved to MEGA.`)
+    } catch (e) {
+      setSaveMsg(formatApiError(e, "Save to MEGA"))
+    } finally {
+      setMegaSaving(false)
     }
   }
 
@@ -1098,6 +1119,30 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                       }}
                     >
                       {grailSaving ? "Saving…" : "Save to Grail"}
+                    </button>
+                  )
+                })()}
+
+                {(() => {
+                  const inert = !selectedSceneId && !megaSaving
+                  return (
+                    <button
+                      onClick={saveToMega}
+                      disabled={megaSaving || !selectedSceneId}
+                      className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
+                      title={inert ? "Pick a scene from the dropdown to enable MEGA save" : undefined}
+                      style={{
+                        background: inert
+                          ? "transparent"
+                          : "color-mix(in srgb, var(--color-lime) 15%, transparent)",
+                        color: inert ? "var(--color-text-faint)" : "var(--color-lime)",
+                        border: inert
+                          ? "1px solid var(--color-border)"
+                          : "1px solid color-mix(in srgb, var(--color-lime) 30%, transparent)",
+                        cursor: megaSaving ? "wait" : inert ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {megaSaving ? "Saving…" : "Save to MEGA"}
                     </button>
                   )
                 })()}
