@@ -216,6 +216,8 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
               onChange={setStudio}
               counts={studioCounts}
             />
+            {/* Divider separates studio filter (primary) from query controls (secondary) */}
+            <span aria-hidden="true" style={{ width: 1, height: 16, background: "var(--color-border)", flexShrink: 0, alignSelf: "center" }} />
             <button
               role="switch"
               aria-checked={missingOnly}
@@ -292,36 +294,32 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
                 </button>
               ))}
             </div>
-            {megaMsg && (
-              <span style={{ fontSize: 11, color: megaMsg.includes("Scan") ? "var(--color-ok)" : "var(--color-err)" }}>
-                {megaMsg}
-              </span>
-            )}
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-              <button
-                onClick={triggerMegaRefresh}
-                disabled={megaRefreshing}
-                title="Scan MEGA for new files — results will sync in ~5 minutes"
-                style={{
-                  display: "flex", alignItems: "center", gap: 4,
-                  padding: "4px 10px", borderRadius: 4, fontSize: 11, cursor: megaRefreshing ? "wait" : "pointer",
-                  background: "transparent", border: "1px solid var(--color-border)",
-                  color: megaRefreshing ? "var(--color-text-faint)" : "var(--color-text-muted)",
-                }}
-              >
-                <RefreshCw
-                  size={11}
-                  aria-hidden="true"
-                  style={{ animation: megaRefreshing ? "spin 0.8s linear infinite" : undefined }}
-                />
-                {megaRefreshing ? "Requesting…" : "Refresh MEGA"}
-              </button>
-              {megaLastRefreshed && !megaRefreshing && (
-                <span style={{ fontSize: 9, color: "var(--color-text-faint)", letterSpacing: "0.02em" }}>
-                  requested {megaLastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                </span>
-              )}
-            </div>
+            <button
+              onClick={triggerMegaRefresh}
+              disabled={megaRefreshing}
+              title={
+                megaRefreshing
+                  ? "Scanning MEGA…"
+                  : megaLastRefreshed
+                  ? `Refresh MEGA — last requested ${megaLastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                  : "Refresh MEGA — scan for new files (~5 min)"
+              }
+              aria-label={megaRefreshing ? "Scanning MEGA" : "Refresh MEGA"}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 28, height: 28, borderRadius: 4, flexShrink: 0,
+                cursor: megaRefreshing ? "wait" : "pointer",
+                background: megaMsg && !megaMsg.includes("Scan") ? "color-mix(in srgb, var(--color-err) 10%, transparent)" : "transparent",
+                border: `1px solid ${megaMsg && !megaMsg.includes("Scan") ? "color-mix(in srgb, var(--color-err) 25%, transparent)" : "var(--color-border)"}`,
+                color: megaRefreshing ? "var(--color-text-faint)" : megaMsg && megaMsg.includes("Scan") ? "var(--color-ok)" : "var(--color-text-muted)",
+              }}
+            >
+              <RefreshCw
+                size={12}
+                aria-hidden="true"
+                style={{ animation: megaRefreshing ? "spin 0.8s linear infinite" : undefined }}
+              />
+            </button>
           </>
         }
       />
