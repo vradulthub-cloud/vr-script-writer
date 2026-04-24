@@ -12,6 +12,14 @@
 import { redirect } from "next/navigation"
 import { cachedUsersMe, type UserProfile } from "./api"
 
+const SKIP_AUTH = process.env.SKIP_AUTH === "1"
+const MOCK_PROFILE: UserProfile = {
+  email: "dev@eclatech.test",
+  name: "Dev Admin",
+  role: "admin",
+  allowed_tabs: "ALL",
+}
+
 /**
  * Load the current user's profile or redirect to /login.
  *
@@ -21,6 +29,7 @@ import { cachedUsersMe, type UserProfile } from "./api"
  * not full access.
  */
 export async function requireProfile(idToken: string | undefined): Promise<UserProfile> {
+  if (SKIP_AUTH) return MOCK_PROFILE
   if (!idToken) redirect("/login")
   let profile: UserProfile | null = null
   try {
