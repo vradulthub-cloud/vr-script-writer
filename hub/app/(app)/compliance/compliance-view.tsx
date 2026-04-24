@@ -303,7 +303,7 @@ interface Props {
 type WizardStep = "select" | "docs" | "photos" | "upload"
 
 export function ComplianceView({ initialShoots, initialDate, idToken, loadError }: Props) {
-  const client = api(idToken)
+  const client = api(idToken ?? null)
 
   // Date + shoot list state
   const [date, setDate] = useState(initialDate)
@@ -685,8 +685,8 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               <>
                 <p style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 14, lineHeight: 1.4 }}>
                   Creates the Drive folder and copies PDF templates for today&apos;s shoot.
-                  {selected.male_talent && !prepResult?.male_known && (
-                    <> Male PDF dates will be pre-filled automatically for known talent.</>
+                  {selected.male_talent && (
+                    <> Male PDF dates will be auto-filled for known talent.</>
                   )}
                 </p>
                 <button

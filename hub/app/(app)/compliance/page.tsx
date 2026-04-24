@@ -1,5 +1,5 @@
 import { auth } from "@/auth"
-import { api } from "@/lib/api"
+import { api, type ComplianceShoot } from "@/lib/api"
 import { requireTab } from "@/lib/rbac"
 import { ComplianceView } from "./compliance-view"
 
@@ -12,7 +12,7 @@ export default async function CompliancePage() {
   const client = api(session)
 
   const today = new Date().toISOString().slice(0, 10)
-  let shoots = []
+  let shoots: ComplianceShoot[] = []
   let error: string | null = null
 
   try {
