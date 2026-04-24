@@ -1099,30 +1099,6 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                   )
                 })()}
 
-                {isAdmin && (() => {
-                  const inert = !selectedSceneId && !grailSaving
-                  return (
-                    <button
-                      onClick={saveToGrail}
-                      disabled={grailSaving || !selectedSceneId}
-                      className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-                      title={inert ? "Pick a scene from the dropdown to enable Grail save" : undefined}
-                      style={{
-                        background: inert
-                          ? "transparent"
-                          : "color-mix(in srgb, var(--color-lime) 15%, transparent)",
-                        color: inert ? "var(--color-text-faint)" : "var(--color-lime)",
-                        border: inert
-                          ? "1px solid var(--color-border)"
-                          : "1px solid color-mix(in srgb, var(--color-lime) 30%, transparent)",
-                        cursor: grailSaving ? "wait" : inert ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      {grailSaving ? "Saving…" : "Save to Grail"}
-                    </button>
-                  )
-                })()}
-
                 {(() => {
                   const inert = !selectedSceneId && !megaSaving
                   return (
@@ -1130,15 +1106,11 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                       onClick={saveToMega}
                       disabled={megaSaving || !selectedSceneId}
                       className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-                      title={inert ? "Pick a scene from the dropdown to enable MEGA save" : undefined}
+                      title={inert ? "Pick a scene from the dropdown to save" : undefined}
                       style={{
-                        background: inert
-                          ? "transparent"
-                          : "color-mix(in srgb, var(--color-lime) 15%, transparent)",
-                        color: inert ? "var(--color-text-faint)" : "var(--color-lime)",
-                        border: inert
-                          ? "1px solid var(--color-border)"
-                          : "1px solid color-mix(in srgb, var(--color-lime) 30%, transparent)",
+                        background: megaSaving ? "var(--color-elevated)" : inert ? "transparent" : "var(--color-lime)",
+                        color: megaSaving ? "var(--color-text-muted)" : inert ? "var(--color-text-faint)" : "var(--color-lime-ink)",
+                        border: inert ? "1px solid var(--color-border)" : "1px solid transparent",
                         cursor: megaSaving ? "wait" : inert ? "not-allowed" : "pointer",
                       }}
                     >

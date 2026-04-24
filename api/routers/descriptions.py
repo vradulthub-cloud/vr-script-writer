@@ -426,15 +426,19 @@ async def save_description_to_mega(body: DescSaveMegaBody, user: CurrentUser):
     doc.save(buf)
     buf.seek(0)
 
+    # rclone lives at a fixed path on the Windows server — not on system PATH
+    rclone = r"C:\Users\andre\rclone.exe"
+
     tmp_dir = tempfile.mkdtemp()
     try:
         (Path(tmp_dir) / filename).write_bytes(buf.read())
         r = subprocess.run(
-            ["rclone", "copy", tmp_dir, mega_path],
+            [rclone, "copy", tmp_dir, mega_path],
             capture_output=True, text=True, timeout=120,
         )
         if r.returncode != 0:
-            raise HTTPException(status_code=502, detail=f"rclone error: {r.stderr[:300]}")
+            detail = r.stderr.strip() or r.stdout.strip() or f"rclone exit {r.returncode}"
+            raise HTTPException(status_code=502, detail=f"rclone error: {detail[:400]}")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
