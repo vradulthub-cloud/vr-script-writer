@@ -17,22 +17,29 @@ export default async function MissingPage() {
   let scenes: Scene[] = []
   let stats: SceneStats = { total: 0, by_studio: {}, complete: 0, missing_any: 0 }
   let error: string | null = null
+  let sceneSyncedAt: string | null = null
 
   try {
     const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
-    const [statsResult, ...studioResults] = await Promise.all([
+    const [statsResult, syncResult, ...studioResults] = await Promise.allSettled([
       client.scenes.stats(),
+      client.sync.status(),
       ...STUDIOS.map(s => client.scenes.list({ studio: s, limit: 5, missing_only: true })),
     ])
-    stats = statsResult
-    scenes = studioResults.flat()
+    if (statsResult.status === "fulfilled") stats = statsResult.value
+    else error = "Failed to load scenes"
+    if (syncResult.status === "fulfilled") {
+      const sceneSync = syncResult.value.find(s => s.source === "scenes")
+      sceneSyncedAt = sceneSync?.last_synced_at ?? null
+    }
+    scenes = studioResults.flatMap(r => r.status === "fulfilled" ? r.value : [])
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load scenes"
   }
 
   return (
     <div>
-      <MissingV2View stats={stats} scenes={scenes} fetchFailed={error !== null} />
+      <MissingV2View stats={stats} scenes={scenes} fetchFailed={error !== null} sceneSyncedAt={sceneSyncedAt} />
       <div className="ec-embed-grid">
         <SceneGrid scenes={scenes} stats={stats} error={error} idToken={idToken} />
       </div>

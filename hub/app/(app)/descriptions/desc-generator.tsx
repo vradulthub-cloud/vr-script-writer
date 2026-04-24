@@ -94,6 +94,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   const stream = useStream()
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
+  const [savedAt, setSavedAt] = useState<Date | null>(null)
   const [docxLoading, setDocxLoading] = useState(false)
   const [docxError, setDocxError] = useState<string | null>(null)
   const [seoOpen, setSeoOpen] = useState(false)
@@ -255,6 +256,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
     setMetaTitle("")
     setMetaDesc("")
     setSeoError(null)
+    setSavedAt(null)
     stream.start(
       `${API_BASE_URL}/api/descriptions/generate`,
       idToken,
@@ -308,6 +310,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
         meta_description: metaDesc || undefined,
       })
       setSaveMsg("Saved.")
+      setSavedAt(new Date())
     } catch (e) {
       setSaveMsg(formatApiError(e, "Save"))
     } finally {
@@ -841,6 +844,11 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
             >
               {outputWords > 0 && (
                 <span className="tabular-nums">{outputWords.toLocaleString()} words</span>
+              )}
+              {savedAt && (
+                <span style={{ color: "var(--color-ok)" }}>
+                  Saved {savedAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                </span>
               )}
               {stream.streaming && <span style={{ color: "var(--color-lime)" }}>Streaming</span>}
               {!stream.streaming && stream.output && (

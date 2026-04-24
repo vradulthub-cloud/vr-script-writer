@@ -15,10 +15,12 @@ export function MissingV2View({
   stats,
   scenes = [],
   fetchFailed = false,
+  sceneSyncedAt = null,
 }: {
   stats: SceneStats
   scenes?: Scene[]
   fetchFailed?: boolean
+  sceneSyncedAt?: string | null
 }) {
   const totalMissing = stats.missing_any
   const complete = stats.complete
@@ -61,7 +63,7 @@ export function MissingV2View({
       </div>
 
       {/* Per-studio strip */}
-      <section className="ec-block" style={{ marginBottom: 20 }}>
+      <section className="ec-block" style={{ marginBottom: sceneSyncedAt ? 10 : 20 }}>
         <header>
           <h2>Production · by studio</h2>
           <div className="act"><span>{total.toLocaleString()} scenes total</span></div>
@@ -95,8 +97,45 @@ export function MissingV2View({
           })}
         </div>
       </section>
+
+      {sceneSyncedAt && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 20,
+            padding: "6px 12px",
+            fontSize: 10,
+            color: "var(--color-text-faint)",
+            letterSpacing: "0.06em",
+          }}
+        >
+          <span
+            style={{
+              width: 5,
+              height: 5,
+              borderRadius: "50%",
+              background: "var(--color-ok)",
+              flexShrink: 0,
+            }}
+          />
+          Catalog synced {relativeTime(sceneSyncedAt)}
+        </div>
+      )}
     </div>
   )
+}
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const mins = Math.floor(diff / 60_000)
+  if (mins < 2) return "just now"
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
 }
 
 // ─── Briefing computation ───────────────────────────────────────────────────

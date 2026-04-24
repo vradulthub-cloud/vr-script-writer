@@ -289,19 +289,12 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
           </div>
         </Panel>
       )}
-      <Panel>
-        <table className="w-full" style={{ borderCollapse: "collapse" }}>
+      <div style={{ border: "1px solid var(--color-border)", overflow: "hidden" }}>
+        <table className="ec-ctab">
         <thead>
-          <tr style={{ background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
+          <tr>
             {["Name", "Email", "Role", "Allowed Tabs", ""].map((h) => (
-              <th
-                key={h}
-                scope="col"
-                className="text-left px-3 py-2 font-medium"
-                style={{ fontSize: 11, color: "var(--color-text-muted)" }}
-              >
-                {h}
-              </th>
+              <th key={h} scope="col">{h}</th>
             ))}
           </tr>
         </thead>
@@ -317,13 +310,13 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
                   background: isEditing ? "var(--color-surface)" : undefined,
                 }}
               >
-                <td className="px-3 py-2.5" style={{ fontSize: 13, color: "var(--color-text)", fontWeight: 500 }}>
+                <td style={{ fontWeight: 500 }}>
                   {u.name}
                 </td>
-                <td className="px-3 py-2.5" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                <td className="dim">
                   {u.email}
                 </td>
-                <td className="px-3 py-2.5">
+                <td>
                   {isEditing ? (
                     <select
                       value={editRole}
@@ -353,7 +346,7 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-2.5">
+                <td>
                   {isEditing ? (
                     <div className="flex flex-wrap gap-1.5">
                       {ALL_TABS.map((tab) => (
@@ -394,7 +387,7 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-2.5" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                   {isEditing ? (
                     <div className="flex items-center gap-2 justify-end">
                       {saveMsg && (
@@ -445,7 +438,7 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
           })}
         </tbody>
       </table>
-      </Panel>
+      </div>
 
       {pendingConfirm?.kind === "remove" && (
         <ConfirmModal
