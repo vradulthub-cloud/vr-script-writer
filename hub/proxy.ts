@@ -5,7 +5,11 @@ import { NextRequest, NextResponse } from "next/server"
 const DEV_MOCK =
   process.env.NODE_ENV !== "production" && process.env.DEV_AUTH_MOCK === "1"
 
-const authProxy = DEV_MOCK ? () => NextResponse.next() : authMiddleware
+// Temporary production bypass — set SKIP_AUTH=1 in Vercel env vars to let
+// unauthenticated traffic through (e.g. for design review). Remove when done.
+const SKIP_AUTH = process.env.SKIP_AUTH === "1"
+
+const authProxy = (DEV_MOCK || SKIP_AUTH) ? () => NextResponse.next() : authMiddleware
 
 // Thin wrapper that honors ?eclatech=v1|v2|off by setting/clearing a cookie,
 // then hands off to the auth middleware. Only strips the param and redirects
