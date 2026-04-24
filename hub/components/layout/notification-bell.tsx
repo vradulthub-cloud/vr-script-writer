@@ -49,7 +49,7 @@ export function NotificationBell({ idToken: serverToken, disablePolling }: Notif
 
   useEffect(() => {
     fetchUnread()
-    const interval = setInterval(fetchUnread, 60_000)
+    const interval = setInterval(fetchUnread, 120_000)
     return () => clearInterval(interval)
   }, [fetchUnread])
 
