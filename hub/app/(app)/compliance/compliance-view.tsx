@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Camera,
   CheckCircle2,
@@ -279,6 +279,72 @@ function TalentForm({
   )
 }
 
+// ─── ReviewCard component ─────────────────────────────────────────────────────
+
+function ReviewCard({
+  display,
+  shootId,
+  talent,
+  studio,
+  accent,
+  onSkip,
+}: {
+  display: string
+  shootId: string
+  talent: string
+  studio: string
+  accent: string
+  onSkip: () => void
+}) {
+  function openSignTab() {
+    const url = `/sign/${encodeURIComponent(shootId)}?talent=${encodeURIComponent(talent)}&display=${encodeURIComponent(display)}&studio=${encodeURIComponent(studio)}`
+    window.open(url, "_blank", "noopener")
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)", marginBottom: 4 }}>
+        {display} — Review &amp; Sign
+      </div>
+      <p style={{ fontSize: 13, color: "var(--color-text-faint)", marginBottom: 24, lineHeight: 1.5 }}>
+        The form has been saved. Hand the device to {display} to read the agreement and confirm their signature.
+      </p>
+
+      <button
+        onClick={openSignTab}
+        style={{
+          width: "100%",
+          background: accent,
+          border: "none", borderRadius: 12, padding: "18px 20px",
+          fontSize: 16, fontWeight: 700, color: "#000",
+          cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+          marginBottom: 14,
+        }}
+      >
+        <FileText size={18} />
+        Open Agreement for {display}
+      </button>
+
+      <p style={{ fontSize: 11, color: "var(--color-text-faint)", textAlign: "center", lineHeight: 1.5, marginBottom: 8 }}>
+        Opens in a new tab. This page will advance automatically when they confirm.
+      </p>
+
+      <button
+        onClick={onSkip}
+        style={{
+          width: "100%", background: "transparent",
+          border: "none", cursor: "pointer",
+          color: "var(--color-text-faint)", fontSize: 12,
+          padding: "8px 0",
+        }}
+      >
+        Skip (already signed on paper)
+      </button>
+    </div>
+  )
+}
+
 // ─── Photo slot definition ────────────────────────────────────────────────────
 
 interface PhotoSlot {
@@ -551,7 +617,7 @@ interface Props {
 }
 
 type WizardStep = "select" | "docs" | "photos" | "upload"
-type DocsPhase = "female" | "male-known" | "male-form" | "done"
+type DocsPhase = "female" | "female-review" | "male-known" | "male-form" | "male-review" | "done"
 
 export function ComplianceView({ initialShoots, initialDate, idToken, loadError }: Props) {
   const client = api(idToken ?? null)
@@ -586,6 +652,30 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   const [syncResult, setSyncResult] = useState<{ status: string; message: string } | null>(null)
 
   const slots = selected ? buildSlots(selected.female_talent, selected.male_talent) : []
+
+  // ── Listen for sign-tab confirmations ─────────────────────────────────
+  // The /sign/[shootId] page posts "compliance:signed:{talentSlug}" when
+  // the talent taps "I Agree", allowing this tab to auto-advance.
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (e.origin !== window.location.origin) return
+      const data = String(e.data)
+      if (!data.startsWith("compliance:signed:")) return
+      const signedTalent = data.replace("compliance:signed:", "")
+      setDocsPhase(prev => {
+        if (prev === "female-review") {
+          if (!selected?.male_talent) return "done"
+          return KNOWN_MALES.has(selected.male_talent) ? "male-known" : "male-form"
+        }
+        if (prev === "male-review") return "done"
+        return prev
+      })
+      void loadDate(date)
+    }
+    window.addEventListener("message", onMessage)
+    return () => window.removeEventListener("message", onMessage)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, date])
 
   // ── Date fetch ────────────────────────────────────────────────────────
 
@@ -670,12 +760,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
       const r = await client.compliance.fillForm(selected.shoot_id, req)
       setPrepResult(r)
       void loadDate(date)
-      // Advance to male phase or done
-      if (selected.male_talent) {
-        setDocsPhase(KNOWN_MALES.has(selected.male_talent) ? "male-known" : "male-form")
-      } else {
-        setDocsPhase("done")
-      }
+      setDocsPhase("female-review")
     } catch (e) {
       setFemaleError(e instanceof Error ? e.message : "Failed to save form")
     } finally {
@@ -691,7 +776,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
       const r = await client.compliance.prepare(selected.shoot_id)
       setPrepResult(r)
       void loadDate(date)
-      setDocsPhase("done")
+      setDocsPhase("male-review")
     } catch (e) {
       setMaleError(e instanceof Error ? e.message : "Failed to generate male form")
     } finally {
@@ -708,7 +793,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
       const r = await client.compliance.fillForm(selected.shoot_id, req)
       setPrepResult(r)
       void loadDate(date)
-      setDocsPhase("done")
+      setDocsPhase("male-review")
     } catch (e) {
       setMaleError(e instanceof Error ? e.message : "Failed to save form")
     } finally {
@@ -952,14 +1037,18 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
           {/* Progress pills */}
           <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
             {[
-              { phase: "female" as const, label: selected.female_talent },
+              { phase: "female" as DocsPhase, label: selected.female_talent },
               ...(selected.male_talent ? [{ phase: (KNOWN_MALES.has(selected.male_talent) ? "male-known" : "male-form") as DocsPhase, label: selected.male_talent }] : []),
-            ].map(({ phase, label }, i) => {
-              const phases: DocsPhase[] = ["female", "male-known", "male-form", "done"]
+            ].map(({ phase, label }) => {
+              const phases: DocsPhase[] = ["female", "female-review", "male-known", "male-form", "male-review", "done"]
               const currentIdx = phases.indexOf(docsPhase)
-              const thisIdx = phases.indexOf(phase)
-              const isDone = docsPhase === "done" || currentIdx > thisIdx
-              const isActive = docsPhase === phase
+              // Consider "female-review" as the female step being active/done
+              const relatedPhases: DocsPhase[] = phase === "female"
+                ? ["female", "female-review"]
+                : ["male-known", "male-form", "male-review"]
+              const thisIdx = phases.indexOf(relatedPhases[0])
+              const isDone = docsPhase === "done" || currentIdx > thisIdx + 1
+              const isActive = relatedPhases.includes(docsPhase)
               return (
                 <div key={phase} style={{
                   flex: 1, padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
@@ -974,6 +1063,21 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               )
             })}
           </div>
+
+          {/* Phase: female review — open signed PDF in new tab */}
+          {docsPhase === "female-review" && selected && (
+            <ReviewCard
+              display={selected.female_talent}
+              shootId={selected.shoot_id}
+              talent={selected.female_talent.replace(/ /g, "")}
+              studio={selected.studio}
+              accent={accent}
+              onSkip={() => {
+                if (!selected.male_talent) { setDocsPhase("done"); return }
+                setDocsPhase(KNOWN_MALES.has(selected.male_talent) ? "male-known" : "male-form")
+              }}
+            />
+          )}
 
           {/* Phase: female form */}
           {docsPhase === "female" && (
@@ -1034,6 +1138,18 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               submitting={maleSubmitting}
               error={maleError}
               onSubmit={submitMaleForm}
+            />
+          )}
+
+          {/* Phase: male review */}
+          {docsPhase === "male-review" && selected?.male_talent && (
+            <ReviewCard
+              display={selected.male_talent}
+              shootId={selected.shoot_id}
+              talent={selected.male_talent.replace(/ /g, "")}
+              studio={selected.studio}
+              accent={accent}
+              onSkip={() => setDocsPhase("done")}
             />
           )}
 
