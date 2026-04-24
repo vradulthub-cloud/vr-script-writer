@@ -339,8 +339,6 @@ def _build_desc_user_prompt(body: DescGenRequest) -> str:
 
     if body.performers:
         lines.append(f"Performers: {body.performers}")
-    if body.sex_positions:
-        lines.append(f"Sex Positions: {body.sex_positions}")
     if body.categories:
         lines.append(f"Categories: {body.categories}")
     if body.target_keywords:
@@ -349,8 +347,21 @@ def _build_desc_user_prompt(body: DescGenRequest) -> str:
         lines.append(f"Wardrobe: {body.wardrobe}")
     if body.model_properties:
         lines.append(f"Model Notes: {body.model_properties}")
+
+    # If a plot is provided, it is the authoritative source for what happens in the
+    # scene. Derive positions and the finish type exclusively from it. An explicit
+    # sex positions field (entered manually) takes precedence if both are provided.
     if body.plot:
-        lines.append(f"Plot Summary: {body.plot}")
+        lines.append(
+            f"\nScene Plot — AUTHORITATIVE SOURCE for what happens in this scene. "
+            f"Derive ALL sex positions and the finish type from this text. "
+            f"Do NOT invent positions that are not described here:\n{body.plot}"
+        )
+    if body.sex_positions:
+        lines.append(
+            f"\nSex Positions (explicit list — use these exactly, overrides plot if both provided): "
+            f"{body.sex_positions}"
+        )
 
     return "\n".join(lines)
 

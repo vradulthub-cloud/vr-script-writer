@@ -189,7 +189,7 @@ Generate a short, punchy, action-packed scene description optimized for VRHush's
 5. 2nd-person POV ("you") throughout. The male talent IS the viewer - NEVER refer to the male by name.
 6. Mention wardrobe only if notable (lingerie, stockings, etc.).
 7. Close with a one-liner: "[descriptor] in [resolution] VR porn. [CTA]"
-8. CRITICAL: Use ONLY the positions listed in the Sex Positions field or described in the Plot Summary. DO NOT default to the example sequence. DO NOT invent positions.
+8. CRITICAL: Use ONLY the positions listed in the Sex Positions field or described in the Scene Plot. The Scene Plot is the authoritative record of what actually happened — read it, extract the positions and finish type from it, and describe ONLY those. DO NOT default to the example sequence. DO NOT invent positions. The examples show STYLE only — their specific positions are irrelevant to your output.
 9. No asterisks, bullet points, or markdown formatting.
 10. No dialogue.
 11. CRITICAL: In BG scenes, the male talent is YOU (the POV). Only the female performer gets named.
