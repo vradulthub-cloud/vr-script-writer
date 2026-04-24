@@ -10,7 +10,6 @@ import { TasksPanel } from "./tasks-panel"
 import { PromptsPanel } from "./prompts-panel"
 import { AdminTabs } from "./admin-tabs"
 import { StatStrip, type StatTile } from "./stat-strip"
-import { AnalysisPanel } from "./analysis-panel"
 
 export const dynamic = "force-dynamic"
 
@@ -90,7 +89,7 @@ export default async function AdminPage() {
 
   // Build the badge map — at-a-glance counts on the tabs themselves so admins
   // can spot e.g. "3 live tasks" without clicking into Activity.
-  const tabBadges: Partial<Record<"users" | "system" | "activity" | "prompts" | "analysis", string | number>> = {
+  const tabBadges: Partial<Record<"users" | "system" | "activity" | "prompts", string | number>> = {
     users: users.length,
     activity: liveTasks ?? undefined,
   }
@@ -138,7 +137,6 @@ export default async function AdminPage() {
             </div>
           ),
           prompts: <PromptsPanel idToken={idToken} />,
-          analysis: <AnalysisPanel />,
         }}
       />
     </div>
