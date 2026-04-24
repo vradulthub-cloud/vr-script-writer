@@ -954,7 +954,9 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
     setStep("docs")
     setPrepResult(null)
     setPrepError(null)
-    setDocsPhase("female")
+    // If both talent already have signed PDFs, skip the form flow and go
+    // straight to the "done" view so the user can view existing documents.
+    setDocsPhase(shoot.pdfs_ready ? "done" : "female")
     setFemaleSubmitting(false)
     setFemaleError(null)
     setMaleSubmitting(false)
@@ -972,7 +974,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
         male_pdf_id: "",
         male_known: false,
         dates_filled: false,
-        message: "Folder already exists",
+        message: shoot.pdfs_ready ? "Signed documents already on file" : "Folder already exists",
       })
     }
   }
@@ -1432,6 +1434,61 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
                   )}
                 </div>
               </div>
+
+              {/* Signed documents on file — view existing PDFs */}
+              {selected.pdfs_ready && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{
+                    fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase",
+                    color: "var(--color-text-faint)", marginBottom: 10,
+                  }}>
+                    Signed documents on file
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {[
+                      { display: selected.female_talent, slug: selected.female_talent.replace(/ /g, "") },
+                      ...(selected.male_talent
+                        ? [{ display: selected.male_talent, slug: selected.male_talent.replace(/ /g, "") }]
+                        : []),
+                    ].map(({ display, slug }) => (
+                      <a
+                        key={slug}
+                        href={`/api/compliance/${encodeURIComponent(selected.shoot_id)}/pdf?talent=${encodeURIComponent(slug)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: "flex", alignItems: "center", gap: 10,
+                          background: "var(--color-surface)", border: "1px solid var(--color-border)",
+                          borderRadius: 10, padding: "12px 14px",
+                          color: "var(--color-text)", fontSize: 14, fontWeight: 600,
+                          textDecoration: "none",
+                        }}
+                      >
+                        <FileText size={16} color={accent} />
+                        <span style={{ flex: 1 }}>{display}</span>
+                        <span style={{ fontSize: 11, color: "var(--color-text-faint)", fontWeight: 500 }}>
+                          View signed PDF
+                        </span>
+                        <ExternalLink size={13} color="var(--color-text-faint)" />
+                      </a>
+                    ))}
+                  </div>
+                  {prepResult?.folder_url && (
+                    <a
+                      href={prepResult.folder_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 6,
+                        marginTop: 10, fontSize: 12, color: "var(--color-text-faint)",
+                        textDecoration: "none",
+                      }}
+                    >
+                      <FolderOpen size={12} /> Open Drive folder
+                    </a>
+                  )}
+                </div>
+              )}
 
               <button
                 onClick={() => setStep("photos")}
