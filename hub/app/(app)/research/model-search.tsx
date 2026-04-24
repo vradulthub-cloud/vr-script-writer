@@ -241,16 +241,21 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
       {trending && trending.length > 0 && (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-2">
-            {trending.map(t => (
-              <ModelCard
-                key={t.name}
-                name={t.name}
-                photoSrc={t.photo_url}
-                statLine={[t.platform, t.scenes ? `${t.scenes} scenes` : "", t.followers].filter(Boolean).join(" · ")}
-                score={scoreFor(t.name)}
-                onView={() => openProfile(t.name)}
-              />
-            ))}
+            {trending.map(t => {
+              const m = models.find(mo => mo.name.toLowerCase() === t.name.toLowerCase())
+              return (
+                <ModelCard
+                  key={t.name}
+                  name={t.name}
+                  photoSrc={t.photo_url}
+                  statLine={[t.platform, t.scenes ? `${t.scenes} scenes` : "", t.followers].filter(Boolean).join(" · ")}
+                  score={scoreFor(t.name)}
+                  rank={m?.rank}
+                  bookings={m?.bookings_count}
+                  onView={() => openProfile(t.name)}
+                />
+              )
+            })}
           </div>
           {trending.length >= trendingCount && (
             <button
@@ -302,6 +307,8 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
               photoSrc={photo}
               statLine={statLine}
               score={score}
+              rank={m?.rank}
+              bookings={m?.bookings_count}
               onView={() => openProfile(p.name)}
             />
           )
