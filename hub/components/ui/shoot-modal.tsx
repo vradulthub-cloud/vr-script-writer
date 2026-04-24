@@ -3,8 +3,8 @@
 import { useEffect, useState, useMemo } from "react"
 import { createPortal } from "react-dom"
 import Link from "next/link"
-import { X, ChevronDown, ChevronUp, FileText } from "lucide-react"
-import { api, type Shoot, type Script, type LegalDocFile, type LegalDocsResult, SHOOT_ASSET_ORDER, SHOOT_ASSET_LABELS } from "@/lib/api"
+import { X, ChevronDown, ChevronUp, FileText, ClipboardCheck } from "lucide-react"
+import { api, type Shoot, type Script, type LegalDocFile, type LegalDocsResult, type ComplianceShoot, SHOOT_ASSET_ORDER, SHOOT_ASSET_LABELS } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { studioAbbr, studioColor } from "@/lib/studio-colors"
 
@@ -43,6 +43,8 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
   const [expandedScenes, setExpandedScenes] = useState<Set<string>>(new Set())
   // Legal docs fetched from Drive for the W9 display in TalentRow
   const [legalDocs, setLegalDocs] = useState<LegalDocsResult | null>(null)
+  // Compliance status for this shoot
+  const [complianceShoot, setComplianceShoot] = useState<ComplianceShoot | null | undefined>(undefined)
 
   useEffect(() => {
     let cancelled = false
@@ -82,6 +84,21 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
       .catch(() => setLegalDocsLoading(false))
   }, [idToken, shoot.shoot_id])
 
+  useEffect(() => {
+    if (!idToken) return
+    const shootDate = (shoot.shoot_date || "").slice(0, 10)
+    if (!shootDate) return
+    const client = api(idToken)
+    client.compliance.shoots(shootDate)
+      .then(list => {
+        const match = list.find(s =>
+          s.female_talent.trim().toLowerCase() === (shoot.female_talent || "").trim().toLowerCase(),
+        )
+        setComplianceShoot(match ?? null)
+      })
+      .catch(() => setComplianceShoot(null))
+  }, [idToken, shoot.shoot_id, shoot.shoot_date, shoot.female_talent])
+
   const hasScriptContent = useMemo(
     () => scripts.some(s => (s.theme?.trim() || s.plot?.trim())),
     [scripts],
@@ -93,6 +110,7 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
   const dateDisplay = formatFullDate(shoot.shoot_date)
   const callSheetHref = `/call-sheets?date=${encodeURIComponent((shoot.shoot_date || "").slice(0, 10))}`
   const scriptsHref = `/scripts?shoot=${encodeURIComponent(shoot.shoot_id)}`
+  const complianceHref = `/compliance?date=${encodeURIComponent((shoot.shoot_date || "").slice(0, 10))}`
 
   let validated = 0
   let total = 0
@@ -273,6 +291,13 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
               Jump to shoot →
             </Link>
           </div>
+
+          {/* Compliance status */}
+          <ComplianceRow
+            complianceShoot={complianceShoot}
+            href={complianceHref}
+            shoot={shoot}
+          />
 
           {/* Script(s) — sits right under the two quick-access links so the
               director can skim theme/plot before deciding whether to open the
@@ -522,6 +547,114 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
       </div>
     </div>,
     document.body,
+  )
+}
+
+function ComplianceRow({
+  complianceShoot,
+  href,
+  shoot,
+}: {
+  complianceShoot: ComplianceShoot | null | undefined
+  href: string
+  shoot: Shoot
+}) {
+  const loading = complianceShoot === undefined
+
+  let statusLabel = "Not started"
+  let statusColor = "var(--color-text-faint)"
+  let statusBg = "rgba(255,255,255,0.04)"
+  let statusBorder = "var(--color-border)"
+
+  if (complianceShoot?.is_complete) {
+    statusLabel = "Complete"
+    statusColor = "var(--color-lime)"
+    statusBg = "rgba(190,214,47,0.1)"
+    statusBorder = "rgba(190,214,47,0.3)"
+  } else if (complianceShoot?.pdfs_ready || (complianceShoot?.photos_uploaded ?? 0) > 0) {
+    statusLabel = "In progress"
+    statusColor = "#fbbf24"
+    statusBg = "rgba(251,191,36,0.08)"
+    statusBorder = "rgba(251,191,36,0.25)"
+  }
+
+  const ctaLabel = complianceShoot?.is_complete
+    ? "View →"
+    : complianceShoot?.pdfs_ready || (complianceShoot?.photos_uploaded ?? 0) > 0
+      ? "Continue →"
+      : "Start →"
+
+  const pdfTalents: { slug: string; label: string }[] = complianceShoot?.pdfs_ready
+    ? [
+        { slug: shoot.female_talent.replace(/ /g, ""), label: shoot.female_talent },
+        ...(shoot.male_talent ? [{ slug: shoot.male_talent.replace(/ /g, ""), label: shoot.male_talent }] : []),
+      ]
+    : []
+
+  const shootId = complianceShoot?.shoot_id ?? shoot.shoot_id
+
+  return (
+    <div>
+      <SectionLabel>Compliance</SectionLabel>
+      <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+        {/* Status + link row */}
+        <Link
+          href={href}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "10px 12px",
+            border: `1px solid ${statusBorder}`,
+            background: statusBg,
+            textDecoration: "none",
+          }}
+        >
+          <ClipboardCheck size={14} color={statusColor} aria-hidden="true" />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-text)", marginBottom: 1 }}>
+              {loading ? "Loading…" : statusLabel}
+            </div>
+            {!loading && complianceShoot && (
+              <div style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
+                {complianceShoot.pdfs_ready ? "Docs ready" : "No docs yet"}
+                {complianceShoot.photos_uploaded > 0 && ` · ${complianceShoot.photos_uploaded} photo${complianceShoot.photos_uploaded !== 1 ? "s" : ""}`}
+              </div>
+            )}
+          </div>
+          <span style={{ fontSize: 11, fontWeight: 700, color: statusColor, whiteSpace: "nowrap" }}>
+            {loading ? "" : ctaLabel}
+          </span>
+        </Link>
+
+        {/* Per-talent PDF view links when docs are ready */}
+        {pdfTalents.length > 0 && (
+          <div style={{ display: "flex", gap: 6 }}>
+            {pdfTalents.map(({ slug, label }) => (
+              <a
+                key={slug}
+                href={`/api/compliance/${encodeURIComponent(shootId)}/pdf?talent=${encodeURIComponent(slug)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  flex: 1,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                  padding: "8px 10px",
+                  background: "var(--color-elevated)",
+                  border: "1px solid var(--color-border)",
+                  color: "var(--color-text-muted)",
+                  fontSize: 11, fontWeight: 700, textDecoration: "none",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                <FileText size={12} />
+                {label} agreement ↗
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

@@ -12,6 +12,7 @@ import {
   Loader2,
   RefreshCw,
   Upload,
+  Video,
   X,
 } from "lucide-react"
 import { api, type ComplianceShoot, type CompliancePrepareResult, type FillFormRequest } from "@/lib/api"
@@ -153,8 +154,33 @@ function TalentForm({
       <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)", marginBottom: 4 }}>
         {talentLabel}
       </div>
+
+      {/* What you're signing — brief disclosure upfront */}
+      <div style={{
+        background: "var(--color-elevated)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 10, padding: "12px 14px", marginBottom: 20,
+      }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 8 }}>
+          What you&apos;re agreeing to
+        </div>
+        <ul style={{ margin: 0, padding: "0 0 0 16px", display: "flex", flexDirection: "column", gap: 4 }}>
+          {[
+            "Performer services agreement — confirms you are performing voluntarily",
+            "18 U.S.C. § 2257 records — ID documentation required by federal law",
+            "Model release — grants production rights to the content recorded today",
+            "You may request a copy of the signed agreement at any time",
+          ].map((line, i) => (
+            <li key={i} style={{ fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.5 }}>{line}</li>
+          ))}
+        </ul>
+        <p style={{ fontSize: 11, color: "var(--color-text-faint)", marginTop: 8, marginBottom: 0, lineHeight: 1.5 }}>
+          After submitting this form you will be shown the full agreement to read before confirming your signature.
+        </p>
+      </div>
+
       <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginBottom: 20, lineHeight: 1.5 }}>
-        Fill in all fields below. This information will be saved to the compliance PDF.
+        Fill in all fields below accurately. Your information will be used to complete your compliance paperwork.
       </p>
 
       <Section title="Identity">
@@ -304,11 +330,19 @@ function ReviewCard({
   return (
     <div>
       <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)", marginBottom: 4 }}>
-        {display} — Review &amp; Sign
+        {display} — Read &amp; Sign
       </div>
-      <p style={{ fontSize: 13, color: "var(--color-text-faint)", marginBottom: 24, lineHeight: 1.5 }}>
-        The form has been saved. Hand the device to {display} to read the agreement and confirm their signature.
+      <p style={{ fontSize: 13, color: "var(--color-text-faint)", marginBottom: 12, lineHeight: 1.5 }}>
+        Your paperwork has been prepared. Tap the button below to read the full agreement — you must read it before signing.
       </p>
+      <div style={{
+        background: "rgba(255,255,255,0.04)", border: "1px solid var(--color-border)",
+        borderRadius: 8, padding: "10px 14px", marginBottom: 20,
+        fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.6,
+      }}>
+        The document contains your performer services agreement, 2257 records disclosure, and model release.
+        Read it carefully — your electronic signature confirms you understood and agreed to its terms.
+      </div>
 
       <button
         onClick={openSignTab}
@@ -323,7 +357,7 @@ function ReviewCard({
         }}
       >
         <FileText size={18} />
-        Open Agreement for {display}
+        Read &amp; Sign Agreement — {display}
       </button>
 
       <p style={{ fontSize: 11, color: "var(--color-text-faint)", textAlign: "center", lineHeight: 1.5, marginBottom: 8 }}>
@@ -352,8 +386,9 @@ interface PhotoSlot {
   label: string  // used as filename
   display: string
   talent: "female" | "male"
-  category: "id" | "bunny"
+  category: "id" | "bunny" | "signout"
   required: boolean
+  fileType?: "image" | "video"
 }
 
 function buildSlots(female: string, male: string): PhotoSlot[] {
@@ -399,6 +434,15 @@ function buildSlots(female: string, male: string): PhotoSlot[] {
       },
     )
   }
+  slots.push({
+    id: "signout-video",
+    label: "signout-video.mp4",
+    display: "Sign Out Video",
+    talent: "female",
+    category: "signout",
+    required: true,
+    fileType: "video",
+  })
   return slots
 }
 
@@ -409,6 +453,7 @@ interface CapturedPhoto {
   label: string
   file: File
   preview: string
+  fileType?: "image" | "video"
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -486,6 +531,7 @@ function CameraButton({
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
+  const isVideo = slot.fileType === "video"
 
   function handleFile(file: File) {
     const url = URL.createObjectURL(file)
@@ -498,7 +544,7 @@ function CameraButton({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept={isVideo ? "video/*" : "image/*"}
         capture="environment"
         style={{ display: "none" }}
         onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = "" }}
@@ -506,7 +552,7 @@ function CameraButton({
       <input
         ref={uploadRef}
         type="file"
-        accept="image/*"
+        accept={isVideo ? "video/*" : "image/*"}
         style={{ display: "none" }}
         onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = "" }}
       />
@@ -518,7 +564,7 @@ function CameraButton({
           overflow: "hidden",
           background: "var(--color-elevated)",
           position: "relative",
-          aspectRatio: "4/3",
+          aspectRatio: isVideo ? "16/9" : "4/3",
           cursor: "pointer",
         }}
         onClick={() => inputRef.current?.click()}
@@ -526,11 +572,20 @@ function CameraButton({
         {captured ? (
           /* Preview */
           <>
-            <img
-              src={captured.preview}
-              alt={slot.display}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
+            {isVideo ? (
+              <video
+                src={captured.preview}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                playsInline
+                muted
+              />
+            ) : (
+              <img
+                src={captured.preview}
+                alt={slot.display}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            )}
             <div style={{
               position: "absolute", bottom: 0, left: 0, right: 0,
               background: "linear-gradient(transparent, rgba(0,0,0,0.7))",
@@ -548,7 +603,7 @@ function CameraButton({
                 }}
                 onClick={e => { e.stopPropagation(); inputRef.current?.click() }}
               >
-                <RefreshCw size={11} /> Retake
+                <RefreshCw size={11} /> {isVideo ? "Re-record" : "Retake"}
               </button>
             </div>
             <div style={{
@@ -571,7 +626,10 @@ function CameraButton({
               background: "rgba(255,255,255,0.06)",
               display: "flex", alignItems: "center", justifyContent: "center",
             }}>
-              <Camera size={22} color="var(--color-text-muted)" />
+              {isVideo
+                ? <Video size={22} color="var(--color-text-muted)" />
+                : <Camera size={22} color="var(--color-text-muted)" />
+              }
             </div>
             <span style={{ fontSize: 12, color: "var(--color-text-muted)", textAlign: "center", lineHeight: 1.3 }}>
               {slot.display}
@@ -585,7 +643,7 @@ function CameraButton({
                 }}
                 onClick={e => { e.stopPropagation(); inputRef.current?.click() }}
               >
-                <Camera size={12} /> Camera
+                {isVideo ? <><Video size={12} /> Record</> : <><Camera size={12} /> Camera</>}
               </button>
               <button
                 style={{
@@ -806,7 +864,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   function capturePhoto(slot: PhotoSlot, file: File, preview: string) {
     setPhotos(prev => {
       const without = prev.filter(p => p.slotId !== slot.id)
-      return [...without, { slotId: slot.id, label: slot.label, file, preview }]
+      return [...without, { slotId: slot.id, label: slot.label, file, preview, fileType: slot.fileType }]
     })
   }
 
@@ -1241,6 +1299,28 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
             </div>
           )}
 
+          {/* Sign Out Video */}
+          {(() => {
+            const videoSlot = slots.find(s => s.category === "signout")
+            if (!videoSlot) return null
+            const captured = photos.find(p => p.slotId === videoSlot.id)
+            return (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 6 }}>
+                  Sign Out Video
+                </div>
+                <p style={{ fontSize: 11, color: "var(--color-text-faint)", marginBottom: 10, lineHeight: 1.4 }}>
+                  Record talent confirming they participated willingly and were treated respectfully.
+                </p>
+                <CameraButton
+                  slot={videoSlot}
+                  captured={captured}
+                  onCapture={(file, preview) => capturePhoto(videoSlot, file, preview)}
+                />
+              </div>
+            )
+          })()}
+
           {/* Required check */}
           {(() => {
             const required = slots.filter(s => s.required)
@@ -1329,7 +1409,21 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
               {photos.map(p => (
                 <div key={p.slotId} style={{ position: "relative", aspectRatio: "1", borderRadius: 8, overflow: "hidden" }}>
-                  <img src={p.preview} alt={p.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  {p.fileType === "video" ? (
+                    <div style={{
+                      width: "100%", height: "100%",
+                      background: "var(--color-elevated)",
+                      display: "flex", flexDirection: "column",
+                      alignItems: "center", justifyContent: "center", gap: 4,
+                    }}>
+                      <Video size={18} color="var(--color-lime)" />
+                      <span style={{ fontSize: 9, color: "var(--color-text-faint)", textAlign: "center", padding: "0 4px" }}>
+                        {p.label}
+                      </span>
+                    </div>
+                  ) : (
+                    <img src={p.preview} alt={p.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  )}
                   <button
                     onClick={() => removePhoto(p.slotId)}
                     style={{
