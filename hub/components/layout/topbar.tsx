@@ -24,9 +24,10 @@ interface TopbarProps {
   session: Session
   idToken: string | undefined
   userRole: string
+  disablePolling?: boolean
 }
 
-export function Topbar({ session, idToken, userRole }: TopbarProps) {
+export function Topbar({ session, idToken, userRole, disablePolling }: TopbarProps) {
   const pathname = usePathname()
   const pageName = Object.entries(PAGE_NAMES).find(([key]) => pathname.startsWith(key))?.[1]
 
@@ -93,7 +94,7 @@ export function Topbar({ session, idToken, userRole }: TopbarProps) {
 
         <HelpButton />
 
-        <NotificationBell idToken={idToken} />
+        <NotificationBell idToken={idToken} disablePolling={disablePolling} />
 
         <div className="flex items-center gap-2">
           {session.user?.image ? (

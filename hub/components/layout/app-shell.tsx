@@ -25,7 +25,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         allowedTabs={userProfile.allowed_tabs}
         userRole={userProfile.role}
       />
-      <Topbar session={session} idToken={idToken} userRole={userProfile.role} />
+      <Topbar session={session} idToken={idToken} userRole={userProfile.role} disablePolling={skipAuth} />
       <main
         className="overflow-y-auto"
         style={{

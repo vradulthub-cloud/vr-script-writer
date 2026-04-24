@@ -17,9 +17,10 @@ const FallbackIcon = Pin
 
 interface NotificationBellProps {
   idToken: string | undefined
+  disablePolling?: boolean
 }
 
-export function NotificationBell({ idToken: serverToken }: NotificationBellProps) {
+export function NotificationBell({ idToken: serverToken, disablePolling }: NotificationBellProps) {
   const idToken = useIdToken(serverToken)
   const client = useMemo(() => api(idToken ?? null), [idToken])
 
@@ -32,6 +33,7 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
 
   // Poll unread count every 60s
   const fetchUnread = useCallback(async () => {
+    if (disablePolling) return
     try {
       const { count } = await client.notifications.unreadCount()
       setUnread(count)
@@ -43,7 +45,7 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
       }
       // Other failures: silently ignore — bell just won't show a badge
     }
-  }, [client])
+  }, [client, disablePolling])
 
   useEffect(() => {
     fetchUnread()
@@ -53,7 +55,7 @@ export function NotificationBell({ idToken: serverToken }: NotificationBellProps
 
   // Fetch full list when panel opens
   useEffect(() => {
-    if (!open) return
+    if (!open || disablePolling) return
     setLoading(true)
     client.notifications.list(30).then((data) => {
       setNotifications(data)
