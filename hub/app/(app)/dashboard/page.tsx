@@ -70,6 +70,7 @@ export default async function DashboardPage() {
   return (
     <div style={{ maxWidth: 1400 }}>
       <PageHeader
+        compact
         title={`${greeting}, ${firstName}`}
         eyebrow={eyebrow}
         actions={
