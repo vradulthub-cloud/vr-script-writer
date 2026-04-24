@@ -85,9 +85,11 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
         className={cn(
           "flex items-center gap-2.5 py-1.5 transition-colors",
           "flex-col gap-0.5 lg:flex-col lg:justify-center lg:px-0",
-          "xl:flex-row xl:justify-start xl:px-4 xl:gap-2.5",
+          "xl:flex-row xl:justify-start xl:gap-2.5",
           "text-sm leading-none",
-          active ? "font-medium" : "hover:bg-[--color-elevated]",
+          active
+            ? "font-medium bg-[--color-elevated] xl:border-l-2 xl:border-[--color-lime] xl:pl-[14px]"
+            : "hover:bg-[--color-elevated] xl:pl-4",
         )}
         style={{ color: active ? "var(--color-text)" : "var(--color-text-muted)" }}
       >

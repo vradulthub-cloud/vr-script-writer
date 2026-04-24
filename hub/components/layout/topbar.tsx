@@ -52,11 +52,14 @@ export function Topbar({ session, idToken, userRole, disablePolling }: TopbarPro
         </span>
       )}
 
-      {/* Desktop page title — lightweight orientation label */}
+      {/* Desktop breadcrumb — uppercase tracked, prototype crumbs style */}
       {pageName && (
         <span
           className="hidden md:block"
-          style={{ fontSize: 12, color: "var(--color-text-muted)", letterSpacing: "0.01em" }}
+          style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: "0.14em",
+            textTransform: "uppercase", color: "var(--color-text-muted)",
+          }}
         >
           {pageName}
         </span>

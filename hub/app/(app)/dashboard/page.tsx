@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { auth } from "@/auth"
-import { api, type SceneStats, type Shoot } from "@/lib/api"
-import { studioAbbr } from "@/lib/studio-colors"
+import { api, type Scene, type SceneStats, type Shoot } from "@/lib/api"
+import { studioAbbr, STUDIO_COLOR } from "@/lib/studio-colors"
 import { PageHeader } from "@/components/ui/page-header"
 import { WeekCalendar } from "@/components/ui/week-calendar"
 import { type Briefing, toneForCount } from "@/components/ui/today-briefing"
@@ -58,6 +58,16 @@ export default async function DashboardPage() {
     .toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
     .toUpperCase()
 
+  // Due Soon: scenes releasing within 14 days, derived from already-fetched data
+  const dueSoon = recentScenes
+    .filter(sc => {
+      if (!sc.release_date) return false
+      const diff = new Date(sc.release_date).getTime() - now.getTime()
+      return diff >= 0 && diff <= 14 * 24 * 60 * 60 * 1000
+    })
+    .sort((a, b) => new Date(a.release_date).getTime() - new Date(b.release_date).getTime())
+    .slice(0, 8)
+
   const briefing = computeBriefing({
     shoots,
     missingTotal: sceneStats?.missing_any ?? 0,
@@ -98,6 +108,32 @@ export default async function DashboardPage() {
           ) : undefined
         }
       />
+
+      {/* ── KPI stats cluster ─────────────────────────────────────────── */}
+      <div className="ec-stats" style={{ marginBottom: 20 }}>
+        <div className="s">
+          <div className="k">Scenes Live</div>
+          <div className="v">{sceneStats?.total ?? "—"}</div>
+          <div className="d">across all studios</div>
+        </div>
+        <div className="s">
+          <div className="k">Shoots Active</div>
+          <div className="v">{shoots.length || "—"}</div>
+          <div className="d">in tracker</div>
+        </div>
+        <div className="s">
+          <div className="k">Scripts Queued</div>
+          <div className="v">{scripts.length || "—"}</div>
+          <div className="d">need writing</div>
+        </div>
+        <div className="s">
+          <div className="k">Missing Assets</div>
+          <div className="v" style={sceneStats && sceneStats.missing_any > 0 ? { color: "var(--color-warn)" } : undefined}>
+            {sceneStats?.missing_any ?? "—"}
+          </div>
+          <div className="d">scenes incomplete</div>
+        </div>
+      </div>
 
       <BriefingCache briefing={briefing} />
 
@@ -147,12 +183,12 @@ export default async function DashboardPage() {
         </div>
 
         <div className="flex flex-col gap-3.5">
+          {dueSoon.length > 0 && <DueSoonPanel scenes={dueSoon} />}
           <NotificationFeed
             initialNotifications={notifications}
             idToken={idToken}
             unreadCount={unreadCount}
           />
-
         </div>
       </div>
     </div>
@@ -246,6 +282,53 @@ function computeBriefing(input: {
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 const STUDIO_ORDER = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
+
+function DueSoonPanel({ scenes }: { scenes: Scene[] }) {
+  return (
+    <div className="ec-block" style={{ borderRadius: 0 }}>
+      <header>
+        <h2>Due Soon</h2>
+        <div className="act">
+          <Link href="/missing" prefetch={false} style={{ textDecoration: "none" }}>All →</Link>
+        </div>
+      </header>
+      <div>
+        {scenes.map(sc => {
+          const relDate = new Date(sc.release_date)
+          const daysLeft = Math.ceil((relDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+          const studioColor = STUDIO_COLOR[sc.studio] ?? "var(--color-text-muted)"
+          return (
+            <div
+              key={sc.id}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "7px 16px", borderBottom: "1px solid var(--color-border-subtle)",
+                gap: 8,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {sc.title}
+                </div>
+                <div style={{ fontSize: 10, color: studioColor, letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 2 }}>
+                  {sc.site_code ?? studioAbbr(sc.studio)}
+                </div>
+              </div>
+              <div
+                style={{
+                  fontSize: 10, fontWeight: 700, whiteSpace: "nowrap",
+                  color: daysLeft <= 3 ? "var(--color-err)" : daysLeft <= 7 ? "var(--color-warn)" : "var(--color-text-muted)",
+                }}
+              >
+                {daysLeft}d
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 function SceneCountStrip({ stats }: { stats: SceneStats }) {
   const entries = STUDIO_ORDER
