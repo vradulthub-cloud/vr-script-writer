@@ -7,6 +7,7 @@ import { isEclatechV2 } from "@/lib/eclatech-flag"
 import { PageHeader } from "@/components/ui/page-header"
 import { Panel } from "@/components/ui/panel"
 import { WeekCalendar } from "@/components/ui/week-calendar"
+import { TodayBriefing, type Briefing, toneForCount } from "@/components/ui/today-briefing"
 import { NotificationFeed } from "./notification-feed"
 import { TriageFeed } from "./triage-feed"
 
@@ -64,6 +65,7 @@ export default async function DashboardPage() {
     shoots,
     missingTotal: sceneStats?.missing_any ?? 0,
     scriptCount: scripts.length,
+    shootsFetchFailed: shootsRes.status !== "fulfilled",
   })
 
   return (
@@ -121,6 +123,31 @@ export default async function DashboardPage() {
             scripts={scripts}
             idToken={idToken}
           />
+
+          {/* Closing tail — gives the page an ending instead of fading out. */}
+          <div
+            style={{
+              marginTop: 4,
+              paddingTop: 18,
+              borderTop: "1px solid var(--color-border-subtle)",
+              display: "flex",
+              justifyContent: "flex-end",
+            }}
+          >
+            <Link
+              href="/missing"
+              prefetch={false}
+              style={{
+                fontSize: 11,
+                letterSpacing: "0.06em",
+                color: "var(--color-text-faint)",
+                textDecoration: "none",
+              }}
+              className="hover:text-[--color-text-muted]"
+            >
+              See the full catalog in Grail Assets →
+            </Link>
+          </div>
         </div>
 
         <div className="flex flex-col gap-3.5">
@@ -139,28 +166,35 @@ export default async function DashboardPage() {
   )
 }
 
-// ─── Today briefing ─────────────────────────────────────────────────────────
+// ─── Today briefing computation ─────────────────────────────────────────────
 //
-// Single focal action for the dashboard. Computes the most urgent pending work
+// Single focal action for the dashboard. Picks the most urgent pending work
 // and surfaces it as a hero line with one primary CTA. Everything else on the
 // page is reference / browse. The briefing is the daily starting point.
-
-type BriefingTone = "urgent" | "attention" | "calm"
-interface Briefing {
-  tone: BriefingTone
-  count: number
-  headline: string
-  detail: string
-  cta: { href: string; label: string } | null
-  secondary: string[]
-}
+//
+// Tone ramps by magnitude via `toneForCount` so a single aging item doesn't
+// wear the same red as 50. `error` tone short-circuits when the underlying
+// fetch failed — we don't want to say "All clear" when we don't actually know.
 
 function computeBriefing(input: {
   shoots: Shoot[]
   missingTotal: number
   scriptCount: number
+  shootsFetchFailed?: boolean
 }): Briefing {
-  const { shoots, missingTotal, scriptCount } = input
+  const { shoots, missingTotal, scriptCount, shootsFetchFailed } = input
+
+  if (shootsFetchFailed) {
+    return {
+      tone: "error",
+      count: 0,
+      headline: "Can't reach the production server",
+      detail: "Today's briefing couldn't be computed. Work is still reachable below, but urgency counts may be stale.",
+      cta: null,
+      secondary: [],
+    }
+  }
+
   const agingShoots = shoots.filter(s => {
     if (s.aging_hours < 72) return false
     let validated = 0, total = 0
@@ -174,22 +208,23 @@ function computeBriefing(input: {
   if (agingShoots.length > 0) secondary.push(`${agingShoots.length} stuck shoot${agingShoots.length === 1 ? "" : "s"}`)
 
   if (agingShoots.length > 0) {
+    const n = agingShoots.length
     return {
-      tone: "urgent",
-      count: agingShoots.length,
-      headline: `shoot${agingShoots.length === 1 ? "" : "s"} stuck past 72h`,
-      detail: agingShoots.length === 1
+      tone: toneForCount(n),
+      count: n,
+      headline: `${n.toLocaleString()} shoot${n === 1 ? "" : "s"} stuck past 72h`,
+      detail: n === 1
         ? "One shoot has incomplete assets more than three days after wrap."
-        : `${agingShoots.length} shoots have incomplete assets more than three days after wrap.`,
+        : `${n} shoots have incomplete assets more than three days after wrap.`,
       cta: { href: "/shoots", label: "Open shoots" },
       secondary: secondary.filter(s => !s.includes("stuck")),
     }
   }
   if (missingTotal >= 10) {
     return {
-      tone: "attention",
+      tone: toneForCount(Math.min(missingTotal, 25)),
       count: missingTotal,
-      headline: "scenes need validation",
+      headline: `${missingTotal.toLocaleString()} scenes need validation`,
       detail: "Assets are missing across the catalog. Triage the queue to clear the backlog.",
       cta: { href: "/missing", label: "Open triage" },
       secondary: secondary.filter(s => !s.includes("missing assets")),
@@ -197,9 +232,9 @@ function computeBriefing(input: {
   }
   if (scriptCount > 0) {
     return {
-      tone: "attention",
+      tone: toneForCount(scriptCount),
       count: scriptCount,
-      headline: `script${scriptCount === 1 ? "" : "s"} queued for writing`,
+      headline: `${scriptCount} script${scriptCount === 1 ? "" : "s"} queued for writing`,
       detail: "Scripts are ready to be drafted before their shoot dates.",
       cta: { href: "/scripts", label: "Start writing" },
       secondary: secondary.filter(s => !s.includes("queued")),
@@ -213,120 +248,6 @@ function computeBriefing(input: {
     cta: null,
     secondary,
   }
-}
-
-function TodayBriefing({ briefing }: { briefing: Briefing }) {
-  const accentColor =
-    briefing.tone === "urgent" ? "var(--color-err)"
-    : briefing.tone === "attention" ? "var(--color-warn)"
-    : "var(--color-text-muted)"
-
-  return (
-    <section
-      aria-label="Today"
-      className="today-briefing"
-      style={{
-        marginBottom: 28,
-        display: "grid",
-        gridTemplateColumns: "auto minmax(0, 1fr) auto",
-        alignItems: "center",
-        gap: 20,
-        paddingBottom: 20,
-        borderBottom: "1px solid var(--color-border-subtle)",
-      }}
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <div
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: "0.18em",
-            textTransform: "uppercase",
-            color: "var(--color-text-faint)",
-          }}
-        >
-          Today
-        </div>
-        <div
-          style={{
-            fontFamily: "var(--font-display-hero)",
-            fontWeight: 400,
-            fontSize: briefing.count > 0 ? 64 : 44,
-            lineHeight: 0.95,
-            letterSpacing: "-0.02em",
-            color: briefing.count > 0 ? accentColor : "var(--color-text)",
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {briefing.count > 0 ? briefing.count.toLocaleString() : "✓"}
-        </div>
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: "var(--text-title)",
-            fontWeight: 600,
-            letterSpacing: "-0.01em",
-            color: "var(--color-text)",
-            lineHeight: 1.25,
-          }}
-        >
-          {briefing.count > 0 ? `${briefing.count.toLocaleString()} ${briefing.headline}` : briefing.headline}
-        </div>
-        <div
-          style={{
-            fontSize: 13,
-            color: "var(--color-text-muted)",
-            maxWidth: "65ch",
-            lineHeight: 1.45,
-          }}
-        >
-          {briefing.detail}
-        </div>
-        {briefing.secondary.length > 0 && (
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 6,
-              marginTop: 2,
-              fontSize: 11,
-              color: "var(--color-text-faint)",
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {briefing.secondary.map((s, i) => (
-              <span key={i}>{i > 0 && <span style={{ marginRight: 6, opacity: 0.5 }}>·</span>}{s}</span>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {briefing.cta && (
-        <Link
-          href={briefing.cta.href}
-          prefetch={false}
-          style={{
-            background: "var(--color-lime)",
-            color: "var(--color-lime-ink)",
-            padding: "10px 18px",
-            borderRadius: 4,
-            fontSize: 13,
-            fontWeight: 600,
-            letterSpacing: "0.02em",
-            textDecoration: "none",
-            whiteSpace: "nowrap",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          {briefing.cta.label} <span aria-hidden="true">→</span>
-        </Link>
-      )}
-    </section>
-  )
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────

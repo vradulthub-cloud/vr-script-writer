@@ -5,6 +5,7 @@ import { signOut } from "next-auth/react"
 import { LogOut } from "lucide-react"
 import type { Session } from "next-auth"
 import { NotificationBell } from "./notification-bell"
+import { HelpButton } from "@/components/ui/help-modal"
 
 const PAGE_NAMES: Record<string, string> = {
   "/dashboard":    "Dashboard",
@@ -89,6 +90,8 @@ export function Topbar({ session, idToken, userRole }: TopbarProps) {
             ⌘K
           </kbd>
         </button>
+
+        <HelpButton />
 
         <NotificationBell idToken={idToken} />
 

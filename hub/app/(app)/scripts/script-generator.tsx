@@ -12,6 +12,7 @@ import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
 import { PageHeader } from "@/components/ui/page-header"
 import { SheetRowModal } from "@/components/ui/sheet-row-modal"
+import { TodayBriefing, type Briefing } from "@/components/ui/today-briefing"
 import { studioAbbr } from "@/lib/studio-colors"
 import { BatchPanel } from "./batch-panel"
 const SCENE_TYPES = ["BG", "BGCP"]
@@ -37,9 +38,10 @@ interface Props {
   tabsError: string | null
   idToken: string | undefined
   userRole?: string
+  briefing?: Briefing | null
 }
 
-export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userRole = "editor" }: Props) {
+export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userRole = "editor", briefing }: Props) {
   const idToken = useIdToken(serverIdToken)
   const isAdmin = userRole === "admin"
 
@@ -406,6 +408,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
           </div>
         }
       />
+      {briefing && <TodayBriefing briefing={briefing} />}
       <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
         {/* Left panel — inputs. Mode tabs moved into PageHeader actions (V2). */}
         <div style={{ width: 300, flexShrink: 0 }}>

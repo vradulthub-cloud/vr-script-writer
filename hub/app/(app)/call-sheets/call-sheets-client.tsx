@@ -397,7 +397,7 @@ export function CallSheetsClient({
             marginTop: 8,
           }}
         >
-          <div style={{ fontFamily: "var(--font-display-hero)", fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--color-text)", marginBottom: 6 }}>
+          <div style={{ fontFamily: "var(--font-display-hero)", fontSize: 22, fontWeight: 400, letterSpacing: "-0.02em", color: "var(--color-text)", marginBottom: 6 }}>
             No dates in {activeTab}.
           </div>
           <p style={{ fontSize: 12, color: "var(--color-text-muted)", maxWidth: 360, margin: "0 auto" }}>
