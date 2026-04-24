@@ -873,8 +873,8 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
             }}
           >
             <span style={{ fontSize: 18, opacity: 0.4 }}>◈</span>
-            <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>Queue is empty</span>
-            <span>Select a scene from the left panel — fill the form and Generate.</span>
+            <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>Nothing in the queue</span>
+            <span>Pick a scene from the panel — autofill populates the form, then Generate.</span>
           </div>
         )}
 

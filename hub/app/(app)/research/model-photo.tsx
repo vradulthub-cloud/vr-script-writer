@@ -59,6 +59,7 @@ export function Photo({
       src={activeSrc}
       alt={decorative ? "" : name}
       aria-hidden={decorative ? "true" : undefined}
+      loading="lazy"
       referrerPolicy="no-referrer"
       onError={() => setSrcIdx(i => i + 1)}
       style={{
