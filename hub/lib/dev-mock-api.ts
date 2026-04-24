@@ -22,6 +22,7 @@ import {
   MOCK_SCRIPT_TABS,
   MOCK_SCENES,
   MOCK_SHOOTS,
+  MOCK_COMPLIANCE_SHOOTS,
   filterScenes,
 } from "./dev-fixtures"
 
@@ -456,6 +457,49 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
       status: "completed",
       results: { scenes: 1274, scripts: 482, models: 1830, shoots: 12 },
     } as unknown as T)
+  }
+
+  // ── Compliance ────────────────────────────────────────────────────────
+  if (base.startsWith("/compliance/shoots")) {
+    // List shoots for a date
+    if (base === "/compliance/shoots" || base === "/compliance/shoots/") {
+      return wait(MOCK_COMPLIANCE_SHOOTS as unknown as T)
+    }
+    // Prepare
+    const prepareMatch = base.match(/^\/compliance\/shoots\/([^/]+)\/prepare$/)
+    if (prepareMatch) {
+      const shoot = MOCK_COMPLIANCE_SHOOTS.find(s => s.shoot_id === prepareMatch[1]) ?? MOCK_COMPLIANCE_SHOOTS[0]
+      return wait({
+        folder_id: shoot.drive_folder_id ?? "mock-folder-new",
+        folder_url: shoot.drive_folder_url ?? "https://drive.google.com/drive/folders/mock-new",
+        folder_name: shoot.drive_folder_name ?? `mock-${shoot.shoot_date}`,
+        female_pdf_id: "mock-pdf-female",
+        male_pdf_id: "mock-pdf-male",
+        male_known: shoot.male_talent in { MikeMancini: 1, JaydenMarcos: 1, DannySteele: 1 },
+        dates_filled: true,
+        message: `${shoot.female_talent} PDF ready; ${shoot.male_talent} PDF + dates ready`,
+      } as unknown as T)
+    }
+    // Photos upload
+    const photosMatch = base.match(/^\/compliance\/shoots\/([^/]+)\/photos$/)
+    if (photosMatch) {
+      return wait({
+        uploaded: ["id-front.jpg", "id-back.jpg", "bunny-ear.jpg"],
+        drive_file_ids: ["mock-id-1", "mock-id-2", "mock-id-3"],
+        mega_paths: [],
+        errors: [],
+      } as unknown as T)
+    }
+    // Mega sync
+    const megaMatch = base.match(/^\/compliance\/shoots\/([^/]+)\/mega-sync$/)
+    if (megaMatch) {
+      return wait({
+        status: "ok",
+        mega_path: "mega:/Grail/FPVR/FPVR1337/Legal/",
+        files_copied: 5,
+        message: "Copied 5 files to MEGA",
+      } as unknown as T)
+    }
   }
 
   // eslint-disable-next-line no-console

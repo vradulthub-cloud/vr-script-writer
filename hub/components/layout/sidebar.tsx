@@ -15,6 +15,7 @@ import {
   Layers,
   Ticket,
   Shield,
+  ClipboardCheck,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -28,9 +29,10 @@ const NAV_SECTIONS = [
   {
     label: "Production",
     items: [
-      { href: "/shoots",      label: "Shoot Tracker",  shortLabel: "Shoots",   icon: Calendar,    tabKey: "Shoots" },
-      { href: "/call-sheets", label: "Call Sheets",    shortLabel: "Calls",    icon: CalendarDays, tabKey: "Call Sheets" },
-      { href: "/research",    label: "Model Research", shortLabel: "Research", icon: Users,       tabKey: "Model Research" },
+      { href: "/shoots",      label: "Shoot Tracker",  shortLabel: "Shoots",   icon: Calendar,         tabKey: "Shoots" },
+      { href: "/compliance",  label: "Compliance",     shortLabel: "Legal",    icon: ClipboardCheck,   tabKey: "Shoots" },
+      { href: "/call-sheets", label: "Call Sheets",    shortLabel: "Calls",    icon: CalendarDays,     tabKey: "Call Sheets" },
+      { href: "/research",    label: "Model Research", shortLabel: "Research", icon: Users,            tabKey: "Model Research" },
     ],
   },
   {

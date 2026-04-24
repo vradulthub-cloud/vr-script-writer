@@ -418,6 +418,48 @@ export interface LegalDocsResult {
   w9_name: string | null
 }
 
+// ─── Compliance ───────────────────────────────────────────────────────────────
+
+export interface ComplianceShoot {
+  shoot_id: string
+  shoot_date: string
+  female_talent: string
+  male_talent: string
+  drive_folder_url: string | null
+  drive_folder_id: string | null
+  drive_folder_name: string | null
+  pdfs_ready: boolean
+  photos_uploaded: number
+  is_complete: boolean
+  scene_id: string
+  studio: string
+}
+
+export interface CompliancePrepareResult {
+  folder_id: string
+  folder_url: string
+  folder_name: string
+  female_pdf_id: string
+  male_pdf_id: string
+  male_known: boolean
+  dates_filled: boolean
+  message: string
+}
+
+export interface PhotoUploadResult {
+  uploaded: string[]
+  drive_file_ids: string[]
+  mega_paths: string[]
+  errors: string[]
+}
+
+export interface MegaSyncResult {
+  status: string   // "ok" | "error"
+  mega_path: string
+  files_copied: number
+  message: string
+}
+
 export const SHOOT_ASSET_ORDER: readonly AssetType[] = [
   "script_done",
   "call_sheet_sent",
@@ -574,6 +616,17 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
     apiFetch<T>(path, token, { method: "POST", body: JSON.stringify(body) })
   const patch = <T>(path: string, body: unknown) =>
     apiFetch<T>(path, token, { method: "PATCH", body: JSON.stringify(body) })
+  // For multipart/form-data (file uploads) — do NOT set Content-Type, let the browser set boundary
+  const postForm = <T>(path: string, formData: FormData) => {
+    if (DEV_MOCK) return apiFetch<T>(path, token, { method: "POST" })
+    const url = `${API_BASE}/api${path}`
+    const headers: Record<string, string> = {}
+    if (token) headers["Authorization"] = `Bearer ${token}`
+    return fetch(url, { method: "POST", headers, body: formData }).then(r => {
+      if (!r.ok) throw new ApiError(r.status, r.statusText)
+      return r.json() as Promise<T>
+    })
+  }
   // For endpoints that legitimately return 204 No Content.
   const postVoid = (path: string, body: unknown) =>
     apiFetch<void>(path, token, { method: "POST", body: JSON.stringify(body), expectEmpty: true })
@@ -859,6 +912,42 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         ),
       legalDocs: (shootId: string) =>
         get<LegalDocsResult>(`/shoots/${encodeURIComponent(shootId)}/legal-docs`),
+    },
+
+    compliance: {
+      shoots: (date?: string) => {
+        const qs = date ? `?date=${encodeURIComponent(date)}` : ""
+        return get<ComplianceShoot[]>(`/compliance/shoots${qs}`)
+      },
+      prepare: (shootId: string) =>
+        post<CompliancePrepareResult>(`/compliance/shoots/${encodeURIComponent(shootId)}/prepare`, {}),
+      uploadPhotos: (
+        shootId: string,
+        photos: { file: File; label: string }[],
+        sceneId?: string,
+        studio?: string,
+      ) => {
+        const fd = new FormData()
+        for (const { file, label } of photos) {
+          fd.append("files", file, label)
+          fd.append("labels", label)
+        }
+        if (sceneId) fd.append("scene_id", sceneId)
+        if (studio)  fd.append("studio", studio)
+        return postForm<PhotoUploadResult>(
+          `/compliance/shoots/${encodeURIComponent(shootId)}/photos`,
+          fd,
+        )
+      },
+      megaSync: (shootId: string, sceneId: string, studio: string) => {
+        const fd = new FormData()
+        fd.append("scene_id", sceneId)
+        fd.append("studio", studio)
+        return postForm<MegaSyncResult>(
+          `/compliance/shoots/${encodeURIComponent(shootId)}/mega-sync`,
+          fd,
+        )
+      },
     },
   }
 }
