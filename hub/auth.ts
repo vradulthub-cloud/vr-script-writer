@@ -102,9 +102,12 @@ export const signOut  = nextAuth.signOut
 // exported middleware always returns a Response-shape.
 export const authMiddleware = nextAuth.auth
 
-// Server-component helper. In dev-mock mode this returns a hardcoded admin
-// session; in prod it delegates to NextAuth.
-export const auth: typeof nextAuth.auth = DEV_MOCK
+// Temporary production bypass — matches the SKIP_AUTH flag in proxy.ts.
+const SKIP_AUTH = process.env.SKIP_AUTH === "1"
+
+// Server-component helper. In dev-mock or skip-auth mode returns a hardcoded
+// admin session; in prod it delegates to NextAuth.
+export const auth: typeof nextAuth.auth = (DEV_MOCK || SKIP_AUTH)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ? ((async () => MOCK_SESSION) as any)
   : nextAuth.auth
