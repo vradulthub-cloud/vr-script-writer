@@ -137,6 +137,8 @@ function HelpModal({ onClose }: { onClose: () => void }) {
             <Shortcut keys={["?"]} desc="Open this help surface" />
             <Shortcut keys={["Esc"]} desc="Close any open modal or palette" />
             <Shortcut keys={["Tab"]} desc="Step through interactive elements. Focus ring is lime." />
+            <Shortcut keys={["j", "k"]} desc="Step rows up/down in the dashboard's Recent activity feed (aliases for ↑/↓)." />
+            <Shortcut keys={["Enter"]} desc="Open the focused row." />
           </Section>
 
           <Section title="Glossary">

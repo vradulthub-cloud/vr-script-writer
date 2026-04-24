@@ -1,7 +1,6 @@
 import Link from "next/link"
-import { AlertTriangle } from "lucide-react"
 import { auth } from "@/auth"
-import { api, type Scene, type SceneStats, type Shoot } from "@/lib/api"
+import { api, type SceneStats, type Shoot } from "@/lib/api"
 import { studioColor, studioAbbr } from "@/lib/studio-colors"
 import { isEclatechV2 } from "@/lib/eclatech-flag"
 import { PageHeader } from "@/components/ui/page-header"
@@ -254,61 +253,6 @@ function computeBriefing(input: {
 
 const STUDIO_ORDER = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
 
-function UpcomingShootStats({ shoots }: { shoots: Shoot[] }) {
-  const now = new Date()
-  const weekStart = new Date(now)
-  weekStart.setHours(0, 0, 0, 0)
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay())
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekEnd.getDate() + 7)
-
-  const thisWeek = shoots.filter(s => {
-    const t = Date.parse(s.shoot_date || "")
-    return Number.isFinite(t) && t >= weekStart.getTime() && t < weekEnd.getTime()
-  })
-
-  const scenesCount = thisWeek.reduce((sum, s) => sum + s.scenes.length, 0)
-
-  const talentSet = new Set<string>()
-  for (const s of thisWeek) {
-    if (s.female_talent) talentSet.add(s.female_talent.trim().toLowerCase())
-    if (s.male_talent)   talentSet.add(s.male_talent.trim().toLowerCase())
-  }
-
-  const studioSet = new Set<string>()
-  for (const s of thisWeek) for (const sc of s.scenes) studioSet.add(sc.studio)
-  const activeStudioAbbrs = Array.from(studioSet)
-    .map(s => studioAbbr(s))
-    .sort()
-
-  const shootDays = new Set(thisWeek.map(s => s.shoot_date.slice(0, 10))).size
-
-  return (
-    <div className="ec-stats">
-      <div className="s">
-        <div className="k">Shoots</div>
-        <div className="v">{thisWeek.length}<span className="unit">scheduled</span></div>
-        <div className="d">{shootDays} shoot day{shootDays === 1 ? "" : "s"}</div>
-      </div>
-      <div className="s">
-        <div className="k">Scenes</div>
-        <div className="v">{scenesCount}</div>
-        <div className="d">to produce</div>
-      </div>
-      <div className="s">
-        <div className="k">Talent</div>
-        <div className="v">{talentSet.size}</div>
-        <div className="d">on set</div>
-      </div>
-      <div className="s">
-        <div className="k">Studios</div>
-        <div className="v">{activeStudioAbbrs.length}</div>
-        <div className="d">{activeStudioAbbrs.length > 0 ? activeStudioAbbrs.join(" · ") : "None"}</div>
-      </div>
-    </div>
-  )
-}
-
 function SceneCountStrip({ stats }: { stats: SceneStats }) {
   const entries = STUDIO_ORDER
     .map(s => [s, stats.by_studio[s] ?? 0] as [string, number])
@@ -328,76 +272,6 @@ function SceneCountStrip({ stats }: { stats: SceneStats }) {
         )
       })}
     </div>
-  )
-}
-
-function DueSoonPanel({ scenes }: { scenes: Scene[] }) {
-  const now = Date.now()
-  const WEEK = 7 * 24 * 60 * 60 * 1000
-  const upcoming = scenes
-    .filter(s => {
-      const t = Date.parse(s.release_date || "")
-      if (!Number.isFinite(t)) return false
-      const delta = t - now
-      return delta > -WEEK && delta < WEEK * 2 // -7d through +14d
-    })
-    .sort((a, b) => (a.release_date ?? "").localeCompare(b.release_date ?? ""))
-    .slice(0, 6)
-
-  return (
-    <Panel
-      title="Due Soon"
-      count={upcoming.length > 0 ? upcoming.length : undefined}
-      action={
-        <Link href="/missing" style={{ fontSize: 10, color: "var(--color-text-faint)", textDecoration: "none" }}>
-          All missing →
-        </Link>
-      }
-    >
-      {upcoming.length === 0 ? (
-        <div style={{ padding: "16px 14px", textAlign: "center", color: "var(--color-text-faint)", fontSize: 12 }}>
-          Nothing on deck ✓
-        </div>
-      ) : (
-        <div>
-          {upcoming.map((s, i) => {
-            const accent = studioColor(s.studio)
-            const missingBits: string[] = []
-            if (!s.has_videos) missingBits.push("videos")
-            if (!s.has_thumbnail) missingBits.push("thumb")
-            if (!s.has_description) missingBits.push("desc")
-            if (!s.has_photos) missingBits.push("photos")
-            return (
-              <Link
-                key={s.id}
-                href={`/missing?scene=${encodeURIComponent(s.id)}`}
-                className="hover:bg-[--color-elevated]"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "8px 14px",
-                  borderBottom: i < upcoming.length - 1 ? "1px solid var(--color-border-subtle, var(--color-border))" : undefined,
-                  textDecoration: "none",
-                  color: "inherit",
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    <span style={{ fontFamily: "var(--font-mono)", color: accent, fontWeight: 700, marginRight: 8 }}>{s.id}</span>
-                    {s.female && <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>{s.female}{s.male ? ` / ${s.male}` : ""}</span>}
-                  </div>
-                  <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 2 }}>
-                    {s.release_date}
-                    {missingBits.length > 0 && <span style={{ color: "var(--color-err)" }}> · missing {missingBits.join(", ")}</span>}
-                  </div>
-                </div>
-              </Link>
-            )
-          })}
-        </div>
-      )}
-    </Panel>
   )
 }
 
@@ -435,95 +309,6 @@ function ProductionScopeStrip({ stats }: { stats: SceneStats }) {
         {stats.total.toLocaleString()} scenes · {stats.missing_any} missing
       </span>
     </div>
-  )
-}
-
-// Shoots past their completion window that still have gaps. Threshold is
-// generous (72h) so an in-progress-today shoot doesn't clutter the list.
-const AGING_THRESHOLD_HOURS = 72
-
-function AgingShootsPanel({ shoots }: { shoots: Shoot[] }) {
-  const aging = shoots
-    .filter(s => {
-      if (s.aging_hours < AGING_THRESHOLD_HOURS) return false
-      // Count cells — if validated === total, the shoot is done
-      let validated = 0
-      let total = 0
-      for (const sc of s.scenes) {
-        for (const a of sc.assets) {
-          total += 1
-          if (a.status === "validated") validated += 1
-        }
-      }
-      return total > 0 && validated < total
-    })
-    .sort((a, b) => b.aging_hours - a.aging_hours)
-    .slice(0, 5)
-
-  return (
-    <Panel
-      title="Aging Shoots"
-      count={aging.length > 0 ? aging.length : undefined}
-      tone={aging.length > 0 ? "urgent" : "default"}
-      action={
-        <Link href="/shoots" style={{ fontSize: 10, color: "var(--color-text-faint)", textDecoration: "none" }}>
-          All shoots →
-        </Link>
-      }
-    >
-      {aging.length === 0 ? (
-        <div style={{ padding: "16px 14px", textAlign: "center", color: "var(--color-text-faint)", fontSize: 12 }}>
-          Nothing stuck past 72h ✓
-        </div>
-      ) : (
-        <div>
-          {aging.map((s, i) => {
-            let validated = 0, total = 0
-            for (const sc of s.scenes) {
-              for (const a of sc.assets) {
-                total += 1
-                if (a.status === "validated") validated += 1
-              }
-            }
-            const days = Math.floor(s.aging_hours / 24)
-            const primaryStudio = s.scenes[0]?.studio ?? ""
-            const accent = primaryStudio ? studioColor(primaryStudio) : "var(--color-text-muted)"
-            return (
-              <Link
-                key={s.shoot_id}
-                href="/shoots"
-                className="hover:bg-[--color-elevated]"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "8px 14px",
-                  borderBottom: i < aging.length - 1 ? "1px solid var(--color-border-subtle, var(--color-border))" : undefined,
-                  textDecoration: "none",
-                  color: "inherit",
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {primaryStudio && (
-                      <span style={{ fontFamily: "var(--font-mono)", color: accent, fontWeight: 700, marginRight: 8, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                        {primaryStudio.slice(0, 4)}
-                      </span>
-                    )}
-                    {s.female_talent}
-                    {s.male_talent && <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}> / {s.male_talent}</span>}
-                  </div>
-                  <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 2 }}>
-                    {days}d old · {validated}/{total} done
-                  </div>
-                </div>
-                <AlertTriangle size={12} style={{ color: "var(--color-err)", flexShrink: 0 }} aria-hidden="true" />
-              </Link>
-            )
-          })}
-        </div>
-      )}
-    </Panel>
   )
 }
 
