@@ -117,7 +117,7 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
         position: "fixed",
         inset: 0,
         zIndex: 100,
-        background: "rgba(0, 0, 0, 0.72)",
+        background: "var(--color-backdrop)",
         backdropFilter: "blur(4px)",
         display: "flex",
         alignItems: "center",

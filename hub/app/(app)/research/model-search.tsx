@@ -981,6 +981,7 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
           <form onSubmit={handleSearch} style={{ display: "flex", gap: 8 }}>
             <input
               type="text"
+              aria-label="Search performers"
               placeholder="Search any performer…"
               value={searchInput}
               onChange={e => setSearchInput(e.target.value)}

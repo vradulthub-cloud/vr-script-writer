@@ -283,6 +283,8 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
                   key={mode}
                   onClick={() => setViewMode(mode)}
                   title={mode === "grid" ? "Grid view" : "List view"}
+                  aria-label={mode === "grid" ? "Grid view" : "List view"}
+                  aria-pressed={viewMode === mode}
                   style={{
                     padding: "4px 7px", cursor: "pointer",
                     background: viewMode === mode ? "var(--color-elevated)" : "transparent",

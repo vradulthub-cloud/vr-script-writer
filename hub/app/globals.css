@@ -35,6 +35,9 @@
   --color-warn: #eab308;
   --color-err:  #ef4444;
 
+  /* Backdrop — modal overlay scrim */
+  --color-backdrop: rgba(0, 0, 0, 0.72);
+
   /* Typography */
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-general-sans), var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
