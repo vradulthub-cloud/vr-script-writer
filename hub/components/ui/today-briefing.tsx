@@ -167,15 +167,21 @@ function toneSize(count: number): number {
 }
 
 /**
- * Build the tone for a *count-of-pending-items* briefing using the
- * warn → mix → err ramp. 1-5 reads amber/attention, 6-20 reads a red-orange
- * blend via color-mix (handled inline at the call site if desired), 21+ is
- * full red/urgent. Callers that already know their severity can skip this
- * helper and pass `tone` directly.
+ * Build the tone for a *count-of-pending-items* briefing.
+ *
+ * A single item used to wear amber ("attention") — the same colour we show
+ * when five things are on fire. That miscalibrated the ramp: every Monday
+ * morning with one stuck shoot looked as alarming as a real backlog, and
+ * users tuned the signal out. The thresholds below keep count=1 on neutral
+ * so the numeral still reads but without crying wolf.
+ *
+ *   0      → calm       (shows ✓)
+ *   1      → calm       (shows "1" in muted neutral — informational)
+ *   2 – 5  → attention  (amber — worth a look, not yet urgent)
+ *   6 +    → urgent     (red — backlog; interrupt the day)
  */
 export function toneForCount(count: number): BriefingTone {
-  if (count <= 0)  return "calm"
-  if (count < 6)   return "attention"
-  if (count < 21)  return "urgent"
+  if (count <= 1) return "calm"
+  if (count < 6)  return "attention"
   return "urgent"
 }
