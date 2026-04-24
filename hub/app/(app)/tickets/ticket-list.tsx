@@ -160,6 +160,19 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
 
   const activeCount = useMemo(() => tickets.filter(t => t.status !== "Closed" && t.status !== "Rejected").length, [tickets])
 
+  const queueHealth = useMemo(() => {
+    const closedOrRejected = tickets.filter(t => t.status === "Closed" || t.status === "Rejected")
+    const closedThisWeek = closedOrRejected.filter(t => {
+      const d = t.resolved_at || t.submitted_at
+      if (!d) return false
+      return Date.now() - new Date(d).getTime() <= 7 * 24 * 60 * 60 * 1000
+    }).length
+    const approvalRate = closedOrRejected.length > 0
+      ? Math.round((closedOrRejected.filter(t => t.status === "Closed").length / closedOrRejected.length) * 100)
+      : null
+    return { active: activeCount, closedThisWeek, approvalRate }
+  }, [tickets, activeCount])
+
   // Defer heavy filter work behind the input — keeps typing snappy
   const deferredSearch = useDeferredValue(searchQuery)
 
@@ -435,34 +448,22 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
           eyebrow={`${activeCount} active · ${tickets.length} total`}
           actions={
             <>
-              <div className="flex items-center gap-1 rounded-md" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "3px" }}>
+              <div className="ec-seg">
                 {([
-                  { key: "Active", label: "Active", count: activeCount, color: undefined as string | undefined },
-                  { key: "All",    label: "All",    count: tickets.length, color: undefined as string | undefined },
-                  ...STAT_CONFIGS.filter(({ key }) => (counts[key] ?? 0) > 0).map(({ key, label, color }) => ({
-                    key, label, count: counts[key] ?? 0, color: color as string | undefined,
+                  { key: "Active", label: "Active", count: activeCount },
+                  { key: "All",    label: "All",    count: tickets.length },
+                  ...STAT_CONFIGS.filter(({ key }) => (counts[key] ?? 0) > 0).map(({ key, label }) => ({
+                    key, label, count: counts[key] ?? 0,
                   })),
-                ]).map(({ key, label, count, color }) => {
-                  const isActive = statusFilter === key
-                  const chipColor = color ?? (key === "Active" ? "var(--color-lime)" : "var(--color-text-muted)")
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => setStatusFilter(key)}
-                      aria-pressed={isActive}
-                      className="rounded px-2 py-1 transition-colors"
-                      style={{
-                        fontSize: 11,
-                        fontWeight: isActive ? 600 : 400,
-                        background: isActive ? "var(--color-elevated)" : "transparent",
-                        color: isActive ? chipColor : "var(--color-text-muted)",
-                        border: "none",
-                      }}
-                    >
-                      {label} <span className="tabular-nums" style={{ opacity: 0.7 }}>{count}</span>
-                    </button>
-                  )
-                })}
+                ]).map(({ key, label, count }) => (
+                  <button
+                    key={key}
+                    onClick={() => setStatusFilter(key)}
+                    aria-selected={statusFilter === key}
+                  >
+                    {label} <span className="c">{count}</span>
+                  </button>
+                ))}
               </div>
               <button
                 onClick={() => setContentOnly(v => !v)}
@@ -494,6 +495,10 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
           }
         />
       )}
+
+      {/* Two-column layout: table left, Queue Health right */}
+      <div className="ec-cols" style={{ alignItems: "start" }}>
+      <div> {/* left column */}
 
       {/* Filter row — search left, studio chips right. Single line so the
           table starts higher; wraps gracefully on narrow viewports. */}
@@ -678,14 +683,13 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
 
       {/* Table */}
       {!error && displayTickets.length > 0 && (
-        <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-          <table className="w-full" style={{ borderCollapse: "collapse" }}>
+        <div style={{ border: "1px solid var(--color-border)", overflow: "hidden" }}>
+          <table className="ec-ctab">
             <thead>
-              <tr style={{ background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
+              <tr>
                 <th
                   scope="col"
-                  className="px-3 py-2"
-                  style={{ width: 32, fontSize: 11, color: "var(--color-text-muted)" }}
+                  style={{ width: 32 }}
                   onClick={e => e.stopPropagation()}
                 >
                   <input
@@ -713,8 +717,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                   <th
                     key={col.key}
                     scope="col"
-                    className={`text-left px-3 py-2 font-medium${col.sort ? " cursor-pointer select-none" : ""}`}
-                    style={{ fontSize: 11, color: "var(--color-text-muted)" }}
+                    className={col.sort ? "cursor-pointer select-none" : ""}
                     onClick={col.sort ? () => toggleSort(col.sort!) : undefined}
                   >
                     <span className="inline-flex items-center gap-1">
@@ -745,7 +748,6 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                     }}
                   >
                     <td
-                      className="px-3 py-2.5"
                       style={{ width: 32 }}
                       onClick={e => e.stopPropagation()}
                     >
@@ -761,24 +763,24 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                         }}
                       />
                     </td>
-                    <td className="px-3 py-2.5" style={{ whiteSpace: "nowrap" }}>
-                      <span className="font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <span className="font-mono dim" style={{ fontSize: 11 }}>
                         {ticket.ticket_id}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5" style={{ fontSize: 12 }}>
+                    <td>
                       <span className="line-clamp-1">{ticket.title}</span>
                     </td>
-                    <td className="px-3 py-2.5 whitespace-nowrap">
+                    <td style={{ whiteSpace: "nowrap" }}>
                       <StudioCellChips ticket={ticket} />
                     </td>
-                    <td className="px-3 py-2.5 whitespace-nowrap">
+                    <td style={{ whiteSpace: "nowrap" }}>
                       <Badge label={ticket.priority} color={PRIORITY_COLOR[ticket.priority] ?? "var(--color-text-muted)"} />
                     </td>
-                    <td className="px-3 py-2.5 whitespace-nowrap">
+                    <td style={{ whiteSpace: "nowrap" }}>
                       <Badge label={ticket.status} color={STATUS_COLOR[ticket.status] ?? "var(--color-text-muted)"} />
                     </td>
-                    <td className="px-3 py-2.5" style={{ fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
+                    <td className="dim" style={{ whiteSpace: "nowrap" }}>
                       <time dateTime={ticket.submitted_at || undefined}>{formatDate(ticket.submitted_at)}</time>
                     </td>
                   </tr>
@@ -788,6 +790,51 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
           </table>
         </div>
       )}
+
+      </div> {/* end left column */}
+
+      {/* Right rail — Queue Health + quick submit */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="ec-block">
+          <header>
+            <h2>Queue Health</h2>
+          </header>
+          <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-text-muted)", marginBottom: 4 }}>Active</div>
+              <div style={{ fontFamily: "var(--font-display-hero)", fontSize: 40, lineHeight: 1, letterSpacing: "-0.02em" }}>
+                {queueHealth.active}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-text-muted)", marginBottom: 4 }}>Closed This Week</div>
+              <div style={{ fontFamily: "var(--font-display-hero)", fontSize: 40, lineHeight: 1, letterSpacing: "-0.02em" }}>
+                {queueHealth.closedThisWeek}
+              </div>
+            </div>
+            {queueHealth.approvalRate !== null && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-text-muted)", marginBottom: 4 }}>Resolution Rate</div>
+                <div style={{ fontFamily: "var(--font-display-hero)", fontSize: 40, lineHeight: 1, letterSpacing: "-0.02em" }}>
+                  {queueHealth.approvalRate}<span style={{ fontSize: 16, fontFamily: "var(--font-sans)", color: "var(--color-text-muted)" }}>%</span>
+                </div>
+                <div className="ec-bar" style={{ marginTop: 8 }}>
+                  <div className="seg-bar ok" style={{ width: `${queueHealth.approvalRate}%` }} />
+                </div>
+              </div>
+            )}
+            <button
+              onClick={() => setShowCreate(true)}
+              className="ec-btn molten"
+              style={{ justifyContent: "center", marginTop: 4 }}
+            >
+              + New Ticket
+            </button>
+          </div>
+        </div>
+      </div>
+
+      </div> {/* end ec-cols */}
 
       {/* Create ticket modal */}
       {showCreate && (
