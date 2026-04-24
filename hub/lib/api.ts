@@ -584,6 +584,7 @@ export interface ExistingComp {
  * (e.g. users.me() is fetched by AppShell AND several page components).
  */
 import { cache } from "react"
+import { unstable_cache } from "next/cache"
 
 /**
  * Normalize role/allowed_tabs at the boundary so downstream comparisons
@@ -598,10 +599,24 @@ function normalizeProfile(p: UserProfile): UserProfile {
   }
 }
 
-export const cachedUsersMe = cache(
-  async (idToken: string | undefined): Promise<UserProfile> => {
+// Persist user profile in Next.js Data Cache for 5 min per token.
+// Role + allowed_tabs change rarely; this eliminates the /users/me
+// round-trip on every page navigation after the first load.
+const _fetchUserProfile = unstable_cache(
+  async (idToken: string) => {
     const raw = await apiFetch<UserProfile>("/users/me", idToken)
     return normalizeProfile(raw)
+  },
+  ["users-me"],
+  { revalidate: 300 },
+)
+
+// React cache() dedupes within a single render; _fetchUserProfile caches
+// across requests via Next.js Data Cache.
+export const cachedUsersMe = cache(
+  async (idToken: string | undefined): Promise<UserProfile> => {
+    if (!idToken) throw new ApiError(401, "No ID token")
+    return _fetchUserProfile(idToken)
   },
 )
 

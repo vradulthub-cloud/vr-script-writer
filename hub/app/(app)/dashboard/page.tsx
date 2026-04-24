@@ -1,9 +1,12 @@
+import { Suspense } from "react"
 import Link from "next/link"
 import { auth } from "@/auth"
+import type { Session } from "next-auth"
 import { api, type SceneStats, type Shoot } from "@/lib/api"
 import { studioAbbr } from "@/lib/studio-colors"
 import { PageHeader } from "@/components/ui/page-header"
 import { WeekCalendar } from "@/components/ui/week-calendar"
+import { SkeletonBar } from "@/components/ui/skeleton"
 import { type Briefing, toneForCount } from "@/components/ui/today-briefing"
 import { BriefingCache } from "./briefing-cache"
 import { NotificationFeed } from "./notification-feed"
@@ -15,12 +18,33 @@ const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
 
 export default async function DashboardPage() {
   const session = await auth()
+  const now       = new Date()
+  const hour      = now.getHours()
+  const greeting  = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
+  const firstName = session?.user?.name?.split(" ")[0] ?? "there"
+  const eyebrow = now
+    .toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+    .toUpperCase()
+
+  return (
+    <div style={{ maxWidth: 1400 }}>
+      {/* Header renders immediately — no API calls needed */}
+      <PageHeader compact title={`${greeting}, ${firstName}`} eyebrow={eyebrow} />
+
+      {/* Data body streams in — shell + greeting visible while APIs load */}
+      <Suspense fallback={<DashboardBodySkeleton />}>
+        <DashboardBody session={session} />
+      </Suspense>
+    </div>
+  )
+}
+
+// ─── Streaming body ──────────────────────────────────────────────────────────
+
+async function DashboardBody({ session }: { session: Session | null }) {
   const client = api(session)
   const idToken = (session as { idToken?: string } | null)?.idToken
 
-  // Approvals removed from the dashboard for now — the team isn't using
-  // the approvals workflow yet. The /approvals route + API are gone too;
-  // bring them back via git when the workflow's needed.
   const [
     sceneStatsRes,
     scriptsRes,
@@ -46,17 +70,8 @@ export default async function DashboardPage() {
   const recentScenes = missingResults
     .flatMap(r => r.status === "fulfilled" ? r.value : [])
 
-  const now       = new Date()
-  const hour      = now.getHours()
-  const greeting  = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
-  const firstName = session?.user?.name?.split(" ")[0] ?? "there"
   const unreadCount = notifications.filter((n) => n.read === 0).length
   const systemOk    = health !== null
-
-  // Mono-style timecode eyebrow — echoes the backstage/production vibe
-  const eyebrow = now
-    .toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-    .toUpperCase()
 
   const briefing = computeBriefing({
     shoots,
@@ -66,40 +81,33 @@ export default async function DashboardPage() {
   })
 
   return (
-    <div style={{ maxWidth: 1400 }}>
-      <PageHeader
-        compact
-        title={`${greeting}, ${firstName}`}
-        eyebrow={eyebrow}
-        actions={
-          !systemOk ? (
-            <span
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: 12,
-                color: "var(--color-err)",
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  background: "var(--color-err)",
-                  boxShadow: "0 0 0 3px color-mix(in srgb, var(--color-err) 20%, transparent)",
-                }}
-              />
-              Connection lost
-            </span>
-          ) : undefined
-        }
-      />
-
+    <>
       <BriefingCache briefing={briefing} />
+
+      {!systemOk && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 12,
+            color: "var(--color-err)",
+            marginBottom: 12,
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: "var(--color-err)",
+              boxShadow: "0 0 0 3px color-mix(in srgb, var(--color-err) 20%, transparent)",
+            }}
+          />
+          Connection lost
+        </div>
+      )}
 
       {shoots.length > 0 && (
         <div style={{ marginBottom: 20 }}>
@@ -157,19 +165,113 @@ export default async function DashboardPage() {
           />
         </div>
       </div>
-    </div>
+    </>
+  )
+}
+
+// ─── Body skeleton shown while DashboardBody fetches ─────────────────────────
+
+function DashboardBodySkeleton() {
+  return (
+    <>
+      <div
+        style={{
+          padding: "14px 16px",
+          background: "var(--color-surface)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 6,
+          marginBottom: 20,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        <SkeletonBar width={200} height={14} />
+        <SkeletonBar width={320} height={10} />
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: 8,
+          marginBottom: 20,
+        }}
+      >
+        {[0, 1, 2, 3].map((i) => (
+          <div
+            key={i}
+            style={{
+              padding: "12px 14px",
+              background: "var(--color-surface)",
+              border: "1px solid var(--color-border)",
+              borderRadius: 6,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              opacity: 1 - i * 0.12,
+            }}
+          >
+            <SkeletonBar width={40} height={9} />
+            <SkeletonBar width={70} height={22} />
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 320px", gap: 24 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[90, 75, 85, 65, 80].map((w, i) => (
+            <div
+              key={i}
+              style={{
+                padding: "10px 12px",
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 5,
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                opacity: 1 - i * 0.1,
+              }}
+            >
+              <SkeletonBar width={56} height={40} />
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                <SkeletonBar width={`${w}%`} height={11} />
+                <SkeletonBar width="50%" height={9} />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              style={{
+                padding: "10px 12px",
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 5,
+                display: "flex",
+                gap: 8,
+                alignItems: "flex-start",
+                opacity: 1 - i * 0.12,
+              }}
+            >
+              <SkeletonBar width={13} height={13} />
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+                <SkeletonBar width="80%" height={10} />
+                <SkeletonBar width="60%" height={9} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
   )
 }
 
 // ─── Today briefing computation ─────────────────────────────────────────────
-//
-// Single focal action for the dashboard. Picks the most urgent pending work
-// and surfaces it as a hero line with one primary CTA. Everything else on the
-// page is reference / browse. The briefing is the daily starting point.
-//
-// Tone ramps by magnitude via `toneForCount` so a single aging item doesn't
-// wear the same red as 50. `error` tone short-circuits when the underlying
-// fetch failed — we don't want to say "All clear" when we don't actually know.
 
 function computeBriefing(input: {
   shoots: Shoot[]
@@ -271,5 +373,3 @@ function SceneCountStrip({ stats }: { stats: SceneStats }) {
     </div>
   )
 }
-
-
