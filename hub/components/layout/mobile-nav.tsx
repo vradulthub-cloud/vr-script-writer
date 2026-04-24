@@ -13,6 +13,7 @@ import {
   Phone,
   Layers,
   Ticket,
+  ClipboardCheck,
   MoreHorizontal,
 } from "lucide-react"
 
@@ -24,6 +25,7 @@ const PRIMARY_ITEMS = [
 ]
 
 const OVERFLOW_ITEMS = [
+  { href: "/compliance",   label: "Compliance",   icon: ClipboardCheck },
   { href: "/tickets",      label: "Tickets",      icon: Ticket },
   { href: "/descriptions", label: "Descriptions", icon: AlignLeft },
   { href: "/research",     label: "Research",     icon: Users },
