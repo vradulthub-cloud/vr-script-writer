@@ -734,8 +734,8 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
             }}
           >
             <span style={{ fontSize: 18, opacity: 0.4 }}>◈</span>
-            <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>No script queued</span>
-            <span>Pick a studio, enter talent, and hit Generate — the script streams here.</span>
+            <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>Waiting on talent</span>
+            <span>Name the cast and hit Generate — the script streams in real time.</span>
           </div>
         )}
 

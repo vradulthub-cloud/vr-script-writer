@@ -456,8 +456,8 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
             }}
           >
             <span style={{ fontSize: 18, opacity: 0.4 }}>◈</span>
-            <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>No title card generated</span>
-            <span>Enter a title, choose a style, and Generate — cloud or local.</span>
+            <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>No card yet</span>
+            <span>Enter a title, pick a style, and Generate — cloud routes to ComfyUI, local to your machine.</span>
           </div>
         )}
 
