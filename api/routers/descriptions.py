@@ -379,12 +379,41 @@ class DescSaveMegaBody(BaseModel):
     meta_description: str | None = None
 
 
+# rclone lives at a fixed path; the NSSM service runs as LocalSystem so we
+# must explicitly point at the andre-user's config file.
+_RCLONE = r"C:\Users\andre\rclone.exe"
+_RCLONE_CONF = r"C:\Users\andre\.config\rclone\rclone.conf"
+
+
+def _upload_description_to_mega(tmp_dir: str, mega_path: str, scene_id: str) -> None:
+    """Background worker: copies the DOCX up to MEGA, then cleans up."""
+    try:
+        r = subprocess.run(
+            [_RCLONE, "--config", _RCLONE_CONF, "copy", tmp_dir, mega_path],
+            capture_output=True, text=True, timeout=600,
+        )
+        if r.returncode == 0:
+            _log.info("save-mega %s: uploaded to %s", scene_id, mega_path)
+        else:
+            _log.error(
+                "save-mega %s: rclone exit=%d stderr=%r",
+                scene_id, r.returncode, r.stderr[:400],
+            )
+    except Exception:
+        _log.exception("save-mega %s: background upload failed", scene_id)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 @router.post("/save-mega")
 async def save_description_to_mega(body: DescSaveMegaBody, user: CurrentUser):
     """
     Build a DOCX from the description and upload it to the scene's
-    MEGA Description/ subfolder via rclone. Also marks has_description=1.
+    MEGA Description/ subfolder. Returns immediately — rclone runs in a
+    background thread because MEGA uploads can take 1-2 minutes and the
+    browser's fetch would time out waiting for the response.
     """
+    import threading
     from io import BytesIO
     from docx import Document
     from docx.shared import Pt, RGBColor
@@ -426,33 +455,19 @@ async def save_description_to_mega(body: DescSaveMegaBody, user: CurrentUser):
     doc.save(buf)
     buf.seek(0)
 
-    # rclone lives at a fixed path; service runs as LocalSystem so we must
-    # explicitly point at the user config (LocalSystem has no rclone config).
-    rclone = r"C:\Users\andre\rclone.exe"
-    rclone_conf = r"C:\Users\andre\.config\rclone\rclone.conf"
-
+    # Write DOCX to a fresh tmp dir; the worker thread will clean it up
+    # once rclone finishes (success or failure).
     tmp_dir = tempfile.mkdtemp()
-    try:
-        docx_path = Path(tmp_dir) / filename
-        docx_path.write_bytes(buf.read())
-        _log.info("save-mega: uploading %s to %s", docx_path, mega_path)
-        r = subprocess.run(
-            [rclone, "--config", rclone_conf, "copy", str(tmp_dir), mega_path],
-            capture_output=True, text=True, timeout=120,
-        )
-        _log.info("save-mega: rclone exit=%d stdout=%r stderr=%r", r.returncode, r.stdout[:200], r.stderr[:200])
-        if r.returncode != 0:
-            detail = r.stderr.strip() or r.stdout.strip() or f"rclone exit {r.returncode}"
-            raise HTTPException(status_code=502, detail=f"rclone error: {detail[:400]}")
-    except HTTPException:
-        raise
-    except Exception as exc:
-        _log.error("save-mega unexpected error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=502, detail=str(exc))
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+    (Path(tmp_dir) / filename).write_bytes(buf.read())
+    _log.info("save-mega %s: queued upload of %s -> %s", body.scene_id, filename, mega_path)
 
-    return {"scene_id": body.scene_id, "mega_path": f"{mega_path}{filename}", "status": "saved"}
+    threading.Thread(
+        target=_upload_description_to_mega,
+        args=(tmp_dir, mega_path, body.scene_id),
+        daemon=True,
+    ).start()
+
+    return {"scene_id": body.scene_id, "mega_path": f"{mega_path}{filename}", "status": "queued"}
 
 
 # ---------------------------------------------------------------------------
