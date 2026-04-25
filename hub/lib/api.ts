@@ -635,12 +635,12 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
   const patch = <T>(path: string, body: unknown) =>
     apiFetch<T>(path, token, { method: "PATCH", body: JSON.stringify(body) })
   // For multipart/form-data (file uploads) — do NOT set Content-Type, let the browser set boundary
-  const postForm = <T>(path: string, formData: FormData) => {
+  const postForm = <T>(path: string, formData: FormData, signal?: AbortSignal) => {
     if (DEV_MOCK) return apiFetch<T>(path, token, { method: "POST" })
     const url = `${API_BASE}/api${path}`
     const headers: Record<string, string> = {}
     if (token) headers["Authorization"] = `Bearer ${token}`
-    return fetch(url, { method: "POST", headers, body: formData }).then(r => {
+    return fetch(url, { method: "POST", headers, body: formData, signal }).then(r => {
       if (!r.ok) throw new ApiError(r.status, r.statusText)
       return r.json() as Promise<T>
     })
@@ -948,6 +948,7 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         photos: { file: File; label: string }[],
         sceneId?: string,
         studio?: string,
+        signal?: AbortSignal,
       ) => {
         const fd = new FormData()
         for (const { file, label } of photos) {
@@ -959,6 +960,7 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         return postForm<PhotoUploadResult>(
           `/compliance/shoots/${encodeURIComponent(shootId)}/photos`,
           fd,
+          signal,
         )
       },
       megaSync: (shootId: string, sceneId: string, studio: string) => {
