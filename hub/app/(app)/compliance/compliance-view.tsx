@@ -1111,38 +1111,42 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
     setUploadProgress({ done: 0, total: photos.length })
     setUploadResult(null)
 
+    // Upload all files in parallel — total time = slowest single file, not the sum.
+    // MEGA sync is excluded here (no scene_id) to avoid parallel rclone calls;
+    // the separate "Sync to MEGA" button handles that in one shot afterward.
+    let done = 0
+    const results = await Promise.allSettled(
+      photos.map(photo => {
+        const abort = new AbortController()
+        const timer = setTimeout(() => abort.abort(), 120_000)
+        return client.compliance.uploadPhotos(
+          selected!.shoot_id,
+          [{ file: photo.file, label: photo.label }],
+          undefined, // skip MEGA during parallel upload
+          undefined,
+          abort.signal,
+        ).finally(() => {
+          clearTimeout(timer)
+          done++
+          setUploadProgress({ done, total: photos.length })
+        })
+      })
+    )
+
     const uploaded: string[] = []
     const errors: string[] = []
-    let mega_paths: string[] = []
-
-    // Upload one file at a time so the user sees progress and individual failures
-    // don't abort the whole batch.
-    for (let i = 0; i < photos.length; i++) {
-      setUploadProgress({ done: i, total: photos.length })
-      const photo = photos[i]
-      try {
-        // 90s abort per file — generous for a compressed ~500 KB photo over Tailscale
-        const abort = new AbortController()
-        const timer = setTimeout(() => abort.abort(), 90_000)
-        const r = await client.compliance.uploadPhotos(
-          selected.shoot_id,
-          [{ file: photo.file, label: photo.label }],
-          selected.scene_id || undefined,
-          selected.studio || undefined,
-          abort.signal,
-        )
-        clearTimeout(timer)
-        uploaded.push(...r.uploaded)
-        if (r.mega_paths?.length) mega_paths = [...mega_paths, ...r.mega_paths]
-        if (r.errors?.length) errors.push(...r.errors)
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "Upload failed"
-        errors.push(`${photo.label}: ${msg}`)
+    for (let i = 0; i < results.length; i++) {
+      const res = results[i]
+      if (res.status === "fulfilled") {
+        uploaded.push(...res.value.uploaded)
+        if (res.value.errors?.length) errors.push(...res.value.errors)
+      } else {
+        const msg = res.reason instanceof Error ? res.reason.message : "Upload failed"
+        errors.push(`${photos[i].label}: ${msg}`)
       }
     }
 
-    setUploadProgress({ done: photos.length, total: photos.length })
-    setUploadResult({ uploaded, errors, mega_paths })
+    setUploadResult({ uploaded, errors, mega_paths: [] })
     void loadDate(date)
     setUploading(false)
     setUploadProgress(null)

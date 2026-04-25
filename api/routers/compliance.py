@@ -16,6 +16,7 @@ Routes:
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -588,38 +589,53 @@ async def upload_photos(
         )
     folder_id, _ = folder_info
 
+    # ── Build (label, content, mime) tuples for every file ───────────────
+    # Read all uploads concurrently — multipart bodies are already buffered
+    # by Starlette so these awaits are fast memory reads, not network IO.
+    async def _read_one(i: int, upload_file: UploadFile):
+        label = labels[i] if i < len(labels) else (upload_file.filename or f"photo_{i + 1}.jpg")
+        if not any(label.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".mp4", ".mov", ".webm")):
+            label += ".jpg"
+        content = await upload_file.read()
+        mime = upload_file.content_type or "image/jpeg"
+        return label, content, mime
+
+    file_tuples = await asyncio.gather(*[_read_one(i, f) for i, f in enumerate(files)])
+
+    # ── Upload to Drive in parallel (thread pool — Drive HTTP is blocking) ─
+    async def _drive_one(label: str, content: bytes, mime: str):
+        return await asyncio.to_thread(_upload_to_drive, folder_id, label, content, mime, token)
+
+    drive_results = await asyncio.gather(
+        *[_drive_one(label, content, mime) for label, content, mime in file_tuples],
+        return_exceptions=True,
+    )
+
     uploaded: list[str] = []
     drive_file_ids: list[str] = []
     mega_paths: list[str] = []
     errors: list[str] = []
 
-    tmp_dir: Optional[str] = None
-    if scene_id and studio:
+    for (label, content, _mime), result in zip(file_tuples, drive_results):
+        if isinstance(result, Exception):
+            _log.warning("photo upload failed %s: %s", label, result)
+            errors.append(f"{label}: {result}")
+        else:
+            uploaded.append(label)
+            drive_file_ids.append(result)
+
+    # ── MEGA sync (single rclone call, only when caller requests it) ──────
+    if scene_id and studio and uploaded:
         tmp_dir = tempfile.mkdtemp(prefix="compliance_")
-
-    try:
-        for i, upload_file in enumerate(files):
-            label = labels[i] if i < len(labels) else (upload_file.filename or f"photo_{i + 1}.jpg")
-            if not any(label.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png")):
-                label += ".jpg"
-            try:
-                content = await upload_file.read()
-                mime = upload_file.content_type or "image/jpeg"
-                fid = _upload_to_drive(folder_id, label, content, mime, token)
-                uploaded.append(label)
-                drive_file_ids.append(fid)
-                if tmp_dir:
+        try:
+            for (label, content, _mime) in file_tuples:
+                if label in uploaded:
                     (Path(tmp_dir) / label).write_bytes(content)
-            except Exception as exc:
-                _log.warning("photo upload failed %s: %s", label, exc)
-                errors.append(f"{label}: {exc}")
-
-        # MEGA upload
-        if tmp_dir and scene_id and studio and uploaded:
             mega_studio = STUDIO_TO_MEGA.get(studio, studio)
             mega_path = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/"
             try:
-                r = subprocess.run(
+                r = await asyncio.to_thread(
+                    subprocess.run,
                     [_RCLONE, "--config", _RCLONE_CONF, "copy", tmp_dir, mega_path],
                     capture_output=True, text=True, timeout=120,
                 )
@@ -629,8 +645,7 @@ async def upload_photos(
                     errors.append(f"MEGA: {r.stderr[:200]}")
             except Exception as exc:
                 errors.append(f"MEGA: {exc}")
-    finally:
-        if tmp_dir:
+        finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return PhotoUploadResult(
