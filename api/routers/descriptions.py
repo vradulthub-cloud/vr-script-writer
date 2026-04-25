@@ -426,19 +426,29 @@ async def save_description_to_mega(body: DescSaveMegaBody, user: CurrentUser):
     doc.save(buf)
     buf.seek(0)
 
-    # rclone lives at a fixed path on the Windows server — not on system PATH
+    # rclone lives at a fixed path; service runs as LocalSystem so we must
+    # explicitly point at the user config (LocalSystem has no rclone config).
     rclone = r"C:\Users\andre\rclone.exe"
+    rclone_conf = r"C:\Users\andre\.config\rclone\rclone.conf"
 
     tmp_dir = tempfile.mkdtemp()
     try:
-        (Path(tmp_dir) / filename).write_bytes(buf.read())
+        docx_path = Path(tmp_dir) / filename
+        docx_path.write_bytes(buf.read())
+        _log.info("save-mega: uploading %s to %s", docx_path, mega_path)
         r = subprocess.run(
-            [rclone, "copy", tmp_dir, mega_path],
+            [rclone, "--config", rclone_conf, "copy", str(tmp_dir), mega_path],
             capture_output=True, text=True, timeout=120,
         )
+        _log.info("save-mega: rclone exit=%d stdout=%r stderr=%r", r.returncode, r.stdout[:200], r.stderr[:200])
         if r.returncode != 0:
             detail = r.stderr.strip() or r.stdout.strip() or f"rclone exit {r.returncode}"
             raise HTTPException(status_code=502, detail=f"rclone error: {detail[:400]}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("save-mega unexpected error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=str(exc))
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
