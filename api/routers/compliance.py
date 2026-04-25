@@ -23,6 +23,7 @@ import logging
 import shutil
 import subprocess
 import tempfile
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -143,6 +144,40 @@ class FillFormRequest(BaseModel):
 
 # ─── Drive helpers ────────────────────────────────────────────────────────────
 
+
+def _get_drive_oauth_token() -> Optional[str]:
+    """
+    Return a fresh access token derived from vr_oauth_token.json.
+
+    The service account has 0 storage quota, so any file the SA *creates*
+    in My Drive fails with 403 storageQuotaExceeded. Photo uploads must use
+    the user's OAuth credentials so files are owned by — and consume the
+    quota of — the configured Google user. Same pattern as call_sheets.py.
+    """
+    from api.config import get_settings
+    try:
+        token_path = get_settings().base_dir / "vr_oauth_token.json"
+        if not token_path.exists():
+            return None
+        with open(token_path) as f:
+            tok = json.load(f)
+        params = urllib.parse.urlencode({
+            "grant_type":    "refresh_token",
+            "refresh_token": tok["refresh_token"],
+            "client_id":     tok["client_id"],
+            "client_secret": tok["client_secret"],
+        }).encode()
+        req = urllib.request.Request(
+            tok.get("token_uri", "https://oauth2.googleapis.com/token"),
+            data=params, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read()).get("access_token")
+    except Exception as exc:
+        _log.warning("drive oauth token fetch failed: %s", exc)
+        return None
+
+
 def _drive_json(url: str, token: str, method: str = "GET",
                 body: Optional[bytes] = None,
                 content_type: str = "application/json") -> dict:
@@ -225,7 +260,12 @@ def _create_resumable_session(folder_id: str, file_name: str, mime_type: str, to
 
 def _upload_to_drive(folder_id: str, file_name: str,
                      file_bytes: bytes, mime_type: str, token: str) -> str:
-    """Multipart upload to Drive. Returns new file ID."""
+    """Multipart upload to Drive. Returns new file ID.
+
+    Raises with Drive's actual error reason on failure so the caller can
+    surface it to the UI (otherwise urllib's default repr says only
+    "HTTP Error 403: Forbidden", hiding the underlying cause).
+    """
     boundary = b"ec_boundary_01"
     metadata = json.dumps({"name": file_name, "parents": [folder_id]}).encode()
     body = (
@@ -239,15 +279,24 @@ def _upload_to_drive(folder_id: str, file_name: str,
     )
     req = urllib.request.Request(
         "https://www.googleapis.com/upload/drive/v3/files"
-        "?uploadType=multipart&fields=id",
+        "?uploadType=multipart&fields=id&supportsAllDrives=true",
         data=body, method="POST",
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": f"multipart/related; boundary={boundary.decode()}",
         },
     )
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.loads(r.read()).get("id", "")
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read()).get("id", "")
+    except urllib.error.HTTPError as exc:
+        try:
+            err_body = exc.read().decode("utf-8", errors="replace")
+            err_json = json.loads(err_body)
+            reason = (err_json.get("error") or {}).get("message") or err_body[:300]
+        except Exception:
+            reason = f"HTTP {exc.code}"
+        raise RuntimeError(f"Drive {exc.code}: {reason}") from exc
 
 
 def _format_dob(dob_iso: str) -> str:
@@ -616,12 +665,20 @@ async def upload_photos(
     if not shoot_date:
         raise HTTPException(status_code=400, detail="Invalid shoot date")
 
-    token = _get_drive_rw_token()
-    if not token:
+    # Photo uploads use the user's OAuth token so files are owned by — and
+    # consume the quota of — the configured Google user. Service accounts
+    # have 0 storage, so SA-owned multipart uploads to My Drive folders fail
+    # with 403 storageQuotaExceeded. Folder lookup still works with either
+    # token, so we fall back to the SA token if vr_oauth_token.json is missing.
+    upload_token = _get_drive_oauth_token()
+    lookup_token = upload_token or _get_drive_rw_token()
+    if not lookup_token:
         raise HTTPException(status_code=503, detail="Drive credentials unavailable")
+    if not upload_token:
+        upload_token = lookup_token
 
     folder_info = _get_shoot_folder(
-        shoot_date, shoot.female_talent, shoot.male_talent, token
+        shoot_date, shoot.female_talent, shoot.male_talent, lookup_token
     )
     if not folder_info:
         raise HTTPException(
@@ -645,7 +702,7 @@ async def upload_photos(
 
     # ── Upload to Drive in parallel (thread pool — Drive HTTP is blocking) ─
     async def _drive_one(label: str, content: bytes, mime: str):
-        return await asyncio.to_thread(_upload_to_drive, folder_id, label, content, mime, token)
+        return await asyncio.to_thread(_upload_to_drive, folder_id, label, content, mime, upload_token)
 
     drive_results = await asyncio.gather(
         *[_drive_one(label, content, mime) for label, content, mime in file_tuples],

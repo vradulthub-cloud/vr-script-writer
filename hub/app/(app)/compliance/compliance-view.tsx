@@ -1116,8 +1116,13 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
     let done = 0
     const results = await Promise.allSettled(
       photos.map(photo => {
+        const isVideo = photo.file.type.startsWith("video/")
+        const timeoutMs = isVideo ? 600_000 : 120_000
         const abort = new AbortController()
-        const timer = setTimeout(() => abort.abort(), 120_000)
+        const timer = setTimeout(
+          () => abort.abort(new DOMException(`Upload timed out after ${timeoutMs / 1000}s`, "TimeoutError")),
+          timeoutMs,
+        )
         return client.compliance.uploadPhoto(
           selected!.shoot_id,
           photo.file,
