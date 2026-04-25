@@ -1111,72 +1111,40 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
     setUploadProgress({ done: 0, total: photos.length })
     setUploadResult(null)
 
-    const errors: string[] = []
-    const uploadedNames: string[] = []
-    const uploadedIds: string[] = []
-
-    try {
-      // ── Step 1: get pre-authorized Drive session URLs (tiny metadata request) ──
-      const sessions = await client.compliance.initPhotoUploads(
-        selected.shoot_id,
-        photos.map(p => ({
-          filename: p.label,
-          mime_type: p.file.type || "image/jpeg",
-        })),
-      )
-
-      // ── Step 2: PUT files directly to Google Drive in parallel ─────────────
-      // File bytes never touch our Windows server — browser → Drive directly.
-      let done = 0
-      const results = await Promise.allSettled(
-        sessions.map((session, i) => {
-          const abort = new AbortController()
-          const timer = setTimeout(() => abort.abort(), 120_000)
-          return fetch(session.upload_url, {
-            method: "PUT",
-            headers: { "Content-Type": photos[i].file.type || "image/jpeg" },
-            body: photos[i].file,
-            signal: abort.signal,
-          })
-          .then(async r => {
-            clearTimeout(timer)
-            if (!r.ok) throw new Error(`Drive rejected upload: ${r.status}`)
-            const json = await r.json().catch(() => ({}))
-            return { filename: session.filename, id: (json as { id?: string }).id ?? "" }
-          })
-          .catch(e => { clearTimeout(timer); throw e })
-          .finally(() => {
-            done++
-            setUploadProgress({ done, total: sessions.length })
-          })
+    // All files upload in parallel through the Windows server → Drive.
+    // (Direct browser→Drive PUT was blocked by CORS on service-account session URIs.)
+    let done = 0
+    const results = await Promise.allSettled(
+      photos.map(photo => {
+        const abort = new AbortController()
+        const timer = setTimeout(() => abort.abort(), 120_000)
+        return client.compliance.uploadPhoto(
+          selected!.shoot_id,
+          photo.file,
+          photo.label,
+          abort.signal,
+        ).finally(() => {
+          clearTimeout(timer)
+          done++
+          setUploadProgress({ done, total: photos.length })
         })
-      )
+      })
+    )
 
-      for (let i = 0; i < results.length; i++) {
-        const res = results[i]
-        if (res.status === "fulfilled") {
-          uploadedNames.push(res.value.filename)
-          uploadedIds.push(res.value.id)
-        } else {
-          const msg = res.reason instanceof Error ? res.reason.message : "Upload failed"
-          errors.push(`${sessions[i].filename}: ${msg}`)
-        }
+    const uploaded: string[] = []
+    const errors: string[] = []
+    for (let i = 0; i < results.length; i++) {
+      const res = results[i]
+      if (res.status === "fulfilled") {
+        uploaded.push(...res.value.uploaded)
+        if (res.value.errors?.length) errors.push(...res.value.errors)
+      } else {
+        const msg = res.reason instanceof Error ? res.reason.message : "Upload failed"
+        errors.push(`${photos[i].label}: ${msg}`)
       }
-
-      // ── Step 3: tell our server which files landed ─────────────────────────
-      if (uploadedNames.length > 0) {
-        await client.compliance.confirmPhotoUploads(
-          selected.shoot_id,
-          uploadedNames,
-          uploadedIds,
-        )
-      }
-    } catch (e) {
-      // initPhotoUploads failed (Drive auth issue, folder missing, etc.)
-      errors.push(e instanceof Error ? e.message : "Failed to start upload")
     }
 
-    setUploadResult({ uploaded: uploadedNames, errors, mega_paths: [] })
+    setUploadResult({ uploaded, errors, mega_paths: [] })
     void loadDate(date)
     setUploading(false)
     setUploadProgress(null)
