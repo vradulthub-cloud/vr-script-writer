@@ -177,7 +177,12 @@ export function ModelSearch({ models, error, idToken: serverIdToken }: Props) {
 
       <PageHeader
         title="Model Research"
-        eyebrow={trending ? `${trending.length} trending · ${PRIORITY.length} priority outreach` : "booking intel"}
+        eyebrow="Booking intel"
+        subtitle={
+          trending
+            ? `${trending.length.toLocaleString()} trending · ${PRIORITY.length.toLocaleString()} priority outreach`
+            : undefined
+        }
         actions={
           <form onSubmit={handleSearch} style={{ display: "flex", gap: 8 }}>
             <input

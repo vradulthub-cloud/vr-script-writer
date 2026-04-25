@@ -142,12 +142,12 @@ export function SceneCard({ scene }: { scene: ModelProfile["slr_scenes"][0] }) {
           </div>
         )}
 
-        <div style={{ fontSize: 11, color: "var(--color-text-faint)", marginTop: 3 }}>
+        <div style={{ fontSize: 12, color: "var(--color-text-faint)", marginTop: 3 }}>
           {[scene.studio && `🎬 ${scene.studio}`, scene.date && `📅 ${scene.date}`, scene.duration && `⏱ ${scene.duration}`]
             .filter(Boolean).join("  ·  ")}
         </div>
         {(scene.views || scene.likes || scene.comments) && (
-          <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 2 }}>
+          <div style={{ fontSize: 11, color: "var(--color-text-faint)", marginTop: 2 }}>
             {[scene.views && `👁 ${scene.views}`, scene.likes && `❤️ ${scene.likes}`, scene.comments && `💬 ${scene.comments}`]
               .filter(Boolean).join("  ·  ")}
           </div>

@@ -102,8 +102,8 @@ function DateCard({ date, doorCode, idToken, tabName, batchResult }: DateCardPro
             {dayNum}
           </span>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text)" }}>{weekday}</div>
-            <div style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text)" }}>{weekday}</div>
+            <div style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
               {date.scenes.length} scene{date.scenes.length !== 1 ? "s" : ""}
             </div>
           </div>
@@ -153,10 +153,10 @@ function DateCard({ date, doorCode, idToken, tabName, batchResult }: DateCardPro
             >
               <span style={{ width: 3, height: 28, background: color, flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text)" }}>
                   {sc.female || "—"}
                 </div>
-                <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{secondary}</div>
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{secondary}</div>
               </div>
             </div>
           )
