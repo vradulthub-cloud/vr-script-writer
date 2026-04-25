@@ -934,6 +934,8 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   // Upload step state
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null)
+  type FileStatus = { slotId: string; label: string; state: "idle" | "uploading" | "done" | "error"; error?: string }
+  const [fileStatuses, setFileStatuses] = useState<FileStatus[]>([])
   const [uploadResult, setUploadResult] = useState<{ uploaded: string[]; errors: string[]; mega_paths: string[] } | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<{ status: string; message: string } | null>(null)
@@ -1108,14 +1110,15 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   async function uploadAll() {
     if (!selected || photos.length === 0) return
     setUploading(true)
-    setUploadProgress({ done: 0, total: photos.length })
     setUploadResult(null)
+    setFileStatuses([])  // clear previous run before setting new statuses
+    // Mark all files as "uploading" immediately — they all fire in parallel
+    setFileStatuses(photos.map(p => ({ slotId: p.slotId, label: p.label, state: "uploading" as const })))
+    setUploadProgress({ done: 0, total: photos.length })
 
-    // All files upload in parallel through the Windows server → Drive.
-    // (Direct browser→Drive PUT was blocked by CORS on service-account session URIs.)
     let done = 0
     const results = await Promise.allSettled(
-      photos.map(photo => {
+      photos.map((photo, idx) => {
         const isVideo = photo.file.type.startsWith("video/")
         const timeoutMs = isVideo ? 600_000 : 120_000
         const abort = new AbortController()
@@ -1128,7 +1131,22 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
           photo.file,
           photo.label,
           abort.signal,
-        ).finally(() => {
+        )
+        .then(r => {
+          const serverErr = r.errors?.find(e => e.includes(photo.label))
+          setFileStatuses(prev => prev.map((s, j) =>
+            j === idx ? { ...s, state: serverErr ? "error" as const : "done" as const, error: serverErr } : s
+          ))
+          return r
+        })
+        .catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : "Upload failed"
+          setFileStatuses(prev => prev.map((s, j) =>
+            j === idx ? { ...s, state: "error" as const, error: msg } : s
+          ))
+          throw e
+        })
+        .finally(() => {
           clearTimeout(timer)
           done++
           setUploadProgress({ done, total: photos.length })
@@ -1779,65 +1797,139 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
             Upload all photos to the Drive legal folder, then copy the complete package to MEGA.
           </p>
 
-          {/* Photo summary */}
+          {/* File list — shows idle grid before upload, per-file status during/after */}
           <div style={{
             background: "var(--color-surface)", border: "1px solid var(--color-border)",
-            borderRadius: 12, padding: 14, marginBottom: 14,
+            borderRadius: 12, overflow: "hidden", marginBottom: 14,
           }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-text-faint)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>
-              Photos to Upload ({photos.length})
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
-              {photos.map(p => (
-                <div key={p.slotId} style={{ position: "relative", aspectRatio: "1", borderRadius: 8, overflow: "hidden" }}>
-                  {p.fileType === "video" ? (
-                    <div style={{
-                      width: "100%", height: "100%",
-                      background: "var(--color-elevated)",
-                      display: "flex", flexDirection: "column",
-                      alignItems: "center", justifyContent: "center", gap: 4,
-                    }}>
-                      <Video size={18} color="var(--color-lime)" />
-                      <span style={{ fontSize: 9, color: "var(--color-text-faint)", textAlign: "center", padding: "0 4px" }}>
-                        {p.label}
-                      </span>
+            {/* Progress bar — only visible while uploading */}
+            {uploading && uploadProgress && (
+              <div style={{ height: 3, background: "var(--color-elevated)" }}>
+                <div style={{
+                  height: "100%",
+                  width: `${Math.round((uploadProgress.done / uploadProgress.total) * 100)}%`,
+                  background: "var(--color-lime)",
+                  transition: "width 0.3s ease",
+                }} />
+              </div>
+            )}
+
+            <div style={{ padding: 14 }}>
+              <div style={{
+                fontSize: 11, fontWeight: 700, color: "var(--color-text-faint)",
+                letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10,
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+              }}>
+                <span>Photos to Upload ({photos.length})</span>
+                {uploading && uploadProgress && (
+                  <span style={{ color: "var(--color-lime)", fontVariantNumeric: "tabular-nums" }}>
+                    {uploadProgress.done} / {uploadProgress.total}
+                  </span>
+                )}
+              </div>
+
+              {/* When not uploading: thumbnail grid with remove buttons */}
+              {!uploading && fileStatuses.length === 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+                  {photos.map(p => (
+                    <div key={p.slotId} style={{ position: "relative", aspectRatio: "1", borderRadius: 8, overflow: "hidden" }}>
+                      {p.fileType === "video" ? (
+                        <div style={{
+                          width: "100%", height: "100%", background: "var(--color-elevated)",
+                          display: "flex", flexDirection: "column",
+                          alignItems: "center", justifyContent: "center", gap: 4,
+                        }}>
+                          <Video size={18} color="var(--color-lime)" />
+                          <span style={{ fontSize: 9, color: "var(--color-text-faint)", textAlign: "center", padding: "0 4px" }}>{p.label}</span>
+                        </div>
+                      ) : (
+                        <img src={p.preview} alt={p.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      )}
+                      <button onClick={() => removePhoto(p.slotId)} style={{
+                        position: "absolute", top: 3, right: 3,
+                        background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%",
+                        width: 20, height: 20, cursor: "pointer", color: "#fff",
+                        display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
+                      }}>
+                        <X size={11} />
+                      </button>
                     </div>
-                  ) : (
-                    <img src={p.preview} alt={p.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  )}
-                  <button
-                    onClick={() => removePhoto(p.slotId)}
-                    style={{
-                      position: "absolute", top: 3, right: 3,
-                      background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%",
-                      width: 20, height: 20, cursor: "pointer", color: "#fff",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      padding: 0,
-                    }}
-                  >
-                    <X size={11} />
-                  </button>
+                  ))}
                 </div>
-              ))}
+              )}
+
+              {/* During/after upload: per-file status rows */}
+              {fileStatuses.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  {fileStatuses.map((fs, i) => {
+                    const photo = photos[i]
+                    const isDone    = fs.state === "done"
+                    const isError   = fs.state === "error"
+                    const isActive  = fs.state === "uploading"
+                    return (
+                      <div key={fs.slotId} style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "7px 10px", borderRadius: 8,
+                        background: isDone  ? "rgba(190,214,47,0.06)"
+                                  : isError ? "rgba(239,68,68,0.06)"
+                                  : isActive ? "rgba(255,255,255,0.03)"
+                                  : "transparent",
+                        transition: "background 0.2s",
+                      }}>
+                        {/* Thumbnail / video icon */}
+                        <div style={{
+                          width: 32, height: 32, borderRadius: 6, overflow: "hidden",
+                          flexShrink: 0, background: "var(--color-elevated)",
+                        }}>
+                          {photo?.fileType === "video" ? (
+                            <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <Video size={14} color="var(--color-lime)" />
+                            </div>
+                          ) : photo?.preview ? (
+                            <img src={photo.preview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          ) : null}
+                        </div>
+
+                        {/* Label + error */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: 12, fontWeight: 500,
+                            color: isDone ? "var(--color-text)" : isError ? "#f87171" : "var(--color-text-muted)",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            {fs.label}
+                          </div>
+                          {isError && fs.error && (
+                            <div style={{ fontSize: 10, color: "#f87171", marginTop: 1, opacity: 0.8 }}>
+                              {fs.error.replace(`${fs.label}: `, "")}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Status icon */}
+                        <div style={{ flexShrink: 0, width: 18, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {isActive && <Loader2 size={14} className="animate-spin" color="var(--color-text-faint)" />}
+                          {isDone  && <CheckCircle2 size={14} color="#bed62f" />}
+                          {isError && <X size={14} color="#f87171" />}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Upload result */}
-          {uploadResult && (
+          {/* Upload summary (shown after completion, errors only if any) */}
+          {uploadResult && uploadResult.errors.length === 0 && uploadResult.uploaded.length > 0 && (
             <div style={{
-              background: uploadResult.errors.length > 0 ? "rgba(239,68,68,0.08)" : "rgba(190,214,47,0.08)",
-              border: `1px solid ${uploadResult.errors.length > 0 ? "rgba(239,68,68,0.3)" : "rgba(190,214,47,0.3)"}`,
-              borderRadius: 10, padding: "12px 14px", marginBottom: 14,
+              background: "rgba(190,214,47,0.08)", border: "1px solid rgba(190,214,47,0.25)",
+              borderRadius: 10, padding: "10px 14px", marginBottom: 14,
+              display: "flex", alignItems: "center", gap: 8, fontSize: 13,
+              color: "var(--color-lime)",
             }}>
-              {uploadResult.uploaded.length > 0 && (
-                <p style={{ fontSize: 12, color: "var(--color-lime)", marginBottom: 4 }}>
-                  <CheckCircle2 size={12} style={{ display: "inline", marginRight: 4 }} />
-                  {uploadResult.uploaded.length} file{uploadResult.uploaded.length !== 1 ? "s" : ""} uploaded to Drive
-                </p>
-              )}
-              {uploadResult.errors.map((e, i) => (
-                <p key={i} style={{ fontSize: 12, color: "#f87171" }}>{e}</p>
-              ))}
+              <CheckCircle2 size={14} />
+              {uploadResult.uploaded.length} file{uploadResult.uploaded.length !== 1 ? "s" : ""} uploaded to Drive
             </div>
           )}
 
@@ -1890,13 +1982,15 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
             >
               {uploading
                 ? <><Loader2 size={16} className="animate-spin" />
-                    {uploadProgress
-                      ? `Uploading ${uploadProgress.done + 1} / ${uploadProgress.total}…`
-                      : "Uploading…"}
+                    {uploadProgress && uploadProgress.done < uploadProgress.total
+                      ? `${uploadProgress.total - uploadProgress.done} remaining…`
+                      : "Finishing…"}
                   </>
-                : uploadResult?.uploaded.length
-                  ? <><CheckCircle2 size={16} /> Re-Upload Photos</>
-                  : <><Upload size={16} /> Upload to Drive</>
+                : uploadResult && uploadResult.errors.length > 0 && uploadResult.uploaded.length === 0
+                  ? <><Upload size={16} /> Retry Upload</>
+                  : uploadResult?.uploaded.length
+                    ? <><CheckCircle2 size={16} /> Re-Upload Photos</>
+                    : <><Upload size={16} /> Upload to Drive</>
               }
             </button>
 
