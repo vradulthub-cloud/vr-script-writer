@@ -493,6 +493,29 @@ function formatDob(iso: string): string {
   return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
 }
 
+// Resize a captured image to a max edge of `maxEdge` and re-encode as JPEG
+// at the given quality. Phone JPEGs (5-10 MB at 12 MP) come back at ~300-800 KB
+// at 2048 px / 0.82 quality — uploads complete in seconds instead of minutes.
+async function compressImage(file: File, maxEdge: number, quality: number): Promise<File> {
+  const bitmap = await createImageBitmap(file)
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height))
+  const w = Math.round(bitmap.width  * scale)
+  const h = Math.round(bitmap.height * scale)
+  const canvas = document.createElement("canvas")
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext("2d")
+  if (!ctx) throw new Error("canvas 2d context unavailable")
+  ctx.drawImage(bitmap, 0, 0, w, h)
+  bitmap.close()
+  const blob: Blob = await new Promise((resolve, reject) =>
+    canvas.toBlob(b => b ? resolve(b) : reject(new Error("toBlob failed")), "image/jpeg", quality)
+  )
+  // Preserve original filename but force .jpg extension
+  const baseName = file.name.replace(/\.(heic|heif|png|webp|jpe?g)$/i, "")
+  return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() })
+}
+
 // ─── ReviewCard component ─────────────────────────────────────────────────────
 
 function ReviewCard({
@@ -726,9 +749,21 @@ function CameraButton({
   const uploadRef = useRef<HTMLInputElement>(null)
   const isVideo = slot.fileType === "video"
 
-  function handleFile(file: File) {
-    const url = URL.createObjectURL(file)
-    onCapture(file, url)
+  async function handleFile(file: File) {
+    // For images, compress to max 2048px / ~80% JPEG to keep upload sizes
+    // sane (phone JPEGs are 5-10MB; this gets us to ~300-800KB).
+    // Videos pass through unchanged.
+    let outFile = file
+    if (!isVideo && file.type.startsWith("image/")) {
+      try {
+        outFile = await compressImage(file, 2048, 0.82)
+      } catch {
+        // fall back to original on any failure
+        outFile = file
+      }
+    }
+    const url = URL.createObjectURL(outFile)
+    onCapture(outFile, url)
   }
 
   return (
@@ -1120,7 +1155,11 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   const stepIdx = STEPS.findIndex(s => s.key === step)
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--color-bg)", padding: "0 0 80px" }}>
+    <div style={{
+      minHeight: "100vh", background: "var(--color-bg)",
+      padding: "0 0 80px",
+      maxWidth: 720, margin: "0 auto",
+    }}>
 
       {/* ── Header ── */}
       <div style={{
