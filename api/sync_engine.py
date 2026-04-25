@@ -84,6 +84,11 @@ def sync_tickets() -> int:
       10 Admin Notes     → notes
       11 Assigned To     → assignee
       12 Date Resolved   → resolved_at
+
+    Side effect: detects new tickets and status transitions vs the previous
+    DB snapshot and fires notifications. This closes the gap where tickets
+    created via ticket_tools.py (Mac → Sheets directly) bypassed the FastAPI
+    POST /tickets endpoint and never produced notifications.
     """
     sh = open_tickets()
     # Tab is named "Sheet1" in the actual spreadsheet
@@ -91,6 +96,14 @@ def sync_tickets() -> int:
     rows = fetch_all_rows(ws)
 
     with get_db() as conn:
+        # Snapshot pre-wipe state so we can diff after re-insert.
+        prior_state: dict[str, dict] = {
+            r["ticket_id"]: dict(r)
+            for r in conn.execute(
+                "SELECT ticket_id, status, assignee, submitted_by, title FROM tickets"
+            ).fetchall()
+        }
+
         conn.execute("DELETE FROM tickets")
         for row in rows:
             if len(row) < 9 or not row[0]:
@@ -121,7 +134,137 @@ def sync_tickets() -> int:
     count = len([r for r in rows if r and r[0]])
     update_sync_meta("tickets", row_count=count)
     _log.info("Synced %d tickets", count)
+
+    # Skip diff-notify on the first-ever sync (empty prior state) — otherwise
+    # we'd spam admins with hundreds of "new ticket" notifications.
+    if prior_state:
+        try:
+            _notify_ticket_diffs(prior_state, rows)
+        except Exception:
+            _log.exception("sync_tickets: notification dispatch failed")
+
     return count
+
+
+def _notify_ticket_diffs(prior: dict, current_rows: list) -> None:
+    """Fire notifications for newly-appeared tickets and status transitions.
+
+    Called from sync_tickets after the DB has been refreshed. `prior` is the
+    pre-sync ticket state keyed by ticket_id; `current_rows` is the raw sheet
+    rows we just inserted. We cross-reference them to detect:
+      - new ticket_id not present in prior → ticket_created (notify all admins
+        except the submitter)
+      - status changed from prior → ticket_status (notify submitter)
+      - assignee changed and is not empty → ticket_assigned (notify assignee)
+    """
+    from api.routers.notifications import (
+        create_notification,
+        notify_multiple,
+        get_admin_names,
+        TYPE_TICKET_CREATED,
+        TYPE_TICKET_STATUS,
+        TYPE_TICKET_ASSIGNED,
+    )
+
+    # Build current-state map from raw rows (avoid second DB read).
+    current: dict[str, dict] = {}
+    for row in current_rows:
+        if len(row) < 9 or not row[0]:
+            continue
+        padded = row + [""] * (13 - len(row))
+        current[padded[0]] = {
+            "ticket_id":    padded[0],
+            "submitted_by": padded[2],
+            "title":        padded[6],
+            "status":       padded[8],
+            "assignee":     padded[11],
+        }
+
+    admin_names = get_admin_names()
+
+    # Submitter strings vary ("Drew", "andrew", "andrewrowe72@gmail.com",
+    # "Claude" — see ticket_tools.py callers). To exclude the submitter from
+    # the admin fan-out we match against both name and email of every user.
+    with get_db() as conn:
+        user_lookup = {
+            (dict(r)["email"] or "").lower(): dict(r)["name"]
+            for r in conn.execute("SELECT name, email FROM users").fetchall()
+        }
+        name_lookup = {
+            dict(r)["name"].lower(): dict(r)["name"]
+            for r in conn.execute("SELECT name FROM users").fetchall()
+        }
+
+    def _resolve_submitter_name(submitted_by: str) -> str | None:
+        s = (submitted_by or "").strip().lower()
+        if not s:
+            return None
+        if s in user_lookup:
+            return user_lookup[s]
+        if s in name_lookup:
+            return name_lookup[s]
+        return None
+
+    new_count = status_count = assign_count = 0
+
+    for tid, cur in current.items():
+        prev = prior.get(tid)
+        if prev is None:
+            # New ticket
+            submitter_name = _resolve_submitter_name(cur["submitted_by"])
+            recipients = [
+                a for a in admin_names
+                if not submitter_name or a != submitter_name
+            ]
+            if recipients:
+                # Display the canonical user name when we can resolve it,
+                # otherwise fall back to whatever the submitter wrote.
+                shown = submitter_name or cur["submitted_by"] or "Someone"
+                notify_multiple(
+                    recipients,
+                    TYPE_TICKET_CREATED,
+                    f"New ticket: {tid}",
+                    f'{shown} submitted "{cur["title"]}"',
+                    "/tickets",
+                )
+                new_count += 1
+        else:
+            # Existing ticket — check for status / assignee transitions.
+            if cur["status"] and cur["status"] != prev.get("status"):
+                # Notify the submitter that their ticket status changed,
+                # but only if we can resolve them to a known user.
+                submitter_name = _resolve_submitter_name(cur["submitted_by"])
+                if submitter_name:
+                    create_notification(
+                        submitter_name,
+                        TYPE_TICKET_STATUS,
+                        f"{tid}: {cur['status']}",
+                        f'"{cur["title"]}" is now {cur["status"]}',
+                        "/tickets",
+                    )
+                    status_count += 1
+
+            if (
+                cur["assignee"]
+                and cur["assignee"] != prev.get("assignee")
+            ):
+                # Notify the new assignee, if they're a known user.
+                assignee_name = _resolve_submitter_name(cur["assignee"])
+                if assignee_name:
+                    create_notification(
+                        assignee_name,
+                        TYPE_TICKET_ASSIGNED,
+                        f"Assigned: {tid}",
+                        f'You\'re now on "{cur["title"]}"',
+                        "/tickets",
+                    )
+                    assign_count += 1
+
+    if new_count or status_count or assign_count:
+        _log.info(
+            "sync_tickets notifications: %d new, %d status, %d assigned",
+            new_count, status_count, assign_count,
+        )
 
 
 def sync_notifications() -> int:

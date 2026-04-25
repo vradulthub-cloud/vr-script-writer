@@ -5,6 +5,7 @@ import { Bell, Ticket, RefreshCw, UserCheck, Pin } from "lucide-react"
 import { signOut } from "next-auth/react"
 import { api, ApiError, type Notification } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
+import { parseUtcTimestamp, relativeTime } from "@/lib/utils"
 
 // Approval icons removed when the team paused the approvals workflow.
 // Legacy notifications with type approval_* fall through to FallbackIcon.
@@ -84,20 +85,11 @@ export function NotificationBell({ idToken: serverToken, disablePolling }: Notif
     setNotifications((prev) => prev.map((n) => ({ ...n, read: 1 })))
   }
 
-  function timeAgo(timestamp: string): string {
-    const diff = Date.now() - new Date(timestamp + "Z").getTime()
-    const mins = Math.floor(diff / 60_000)
-    if (mins < 1) return "just now"
-    if (mins < 60) return `${mins}m ago`
-    const hrs = Math.floor(mins / 60)
-    if (hrs < 24) return `${hrs}h ago`
-    const days = Math.floor(hrs / 24)
-    return `${days}d ago`
-  }
-
   // TKT-0119: group notifications by Today / Yesterday / Older
   function dateGroup(timestamp: string): string {
-    const d = new Date(timestamp + "Z")
+    const t = parseUtcTimestamp(timestamp)
+    if (!Number.isFinite(t)) return "Older"
+    const d = new Date(t)
     const now = new Date()
     const todayStr = now.toDateString()
     const yestStr = new Date(now.getTime() - 86_400_000).toDateString()
@@ -256,7 +248,7 @@ export function NotificationBell({ idToken: serverToken, disablePolling }: Notif
                       {n.message}
                     </div>
                     <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 2 }}>
-                      {timeAgo(n.timestamp)}
+                      {relativeTime(n.timestamp)}
                     </div>
                   </div>
                   {!n.read && (

@@ -6,6 +6,7 @@ import { Bell, Check, Ticket } from "lucide-react"
 import type { Notification } from "@/lib/api"
 import { API_BASE_URL } from "@/lib/api"
 import { showToast } from "@/components/ui/toast"
+import { relativeTime } from "@/lib/utils"
 
 // Approval icons + the /approvals link mapping were removed when the team
 // paused the approvals workflow. If a legacy notification with link "Approvals"
@@ -31,17 +32,6 @@ function normalizeNotifLink(link: string | null | undefined): string {
     Shoots: "/shoots",
   }
   return map[link] ?? "#"
-}
-
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const m = Math.floor(diff / 60_000)
-  if (m < 2)  return "just now"
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.floor(h / 24)
-  return `${d}d ago`
 }
 
 interface NotificationFeedProps {

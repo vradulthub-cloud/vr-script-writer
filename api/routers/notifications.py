@@ -99,6 +99,79 @@ async def mark_all_read(user: CurrentUser):
     return {"updated": updated}
 
 
+@router.get("/diagnostic")
+async def diagnostic(user: CurrentUser):
+    """Admin-only health check — counts and recent activity for the
+    notifications subsystem. Use this to verify the system is alive without
+    SSH'ing into the server."""
+    if user.get("role") != "admin":
+        from fastapi import HTTPException, status as st
+        raise HTTPException(status_code=st.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    with get_db() as conn:
+        admins = [
+            dict(r)["name"]
+            for r in conn.execute(
+                "SELECT name FROM users WHERE LOWER(role) = 'admin' ORDER BY name"
+            ).fetchall()
+        ]
+        totals = dict(conn.execute(
+            "SELECT COUNT(*) AS total, "
+            "SUM(CASE WHEN read=0 THEN 1 ELSE 0 END) AS unread "
+            "FROM notifications"
+        ).fetchone())
+        latest_row = conn.execute(
+            "SELECT timestamp FROM notifications ORDER BY timestamp DESC LIMIT 1"
+        ).fetchone()
+        per_recipient = [
+            dict(r) for r in conn.execute(
+                "SELECT recipient, COUNT(*) AS total, "
+                "SUM(CASE WHEN read=0 THEN 1 ELSE 0 END) AS unread "
+                "FROM notifications GROUP BY recipient ORDER BY total DESC"
+            ).fetchall()
+        ]
+        per_type = [
+            dict(r) for r in conn.execute(
+                "SELECT type, COUNT(*) AS total FROM notifications "
+                "GROUP BY type ORDER BY total DESC"
+            ).fetchall()
+        ]
+        my_unread = conn.execute(
+            "SELECT COUNT(*) AS c FROM notifications "
+            "WHERE LOWER(recipient) = LOWER(?) AND read = 0",
+            (user["name"],),
+        ).fetchone()["c"]
+
+    return {
+        "current_user": user["name"],
+        "current_user_unread": my_unread,
+        "admins": admins,
+        "totals": {"total": totals["total"], "unread": totals["unread"] or 0},
+        "latest_timestamp": latest_row["timestamp"] if latest_row else None,
+        "per_recipient": per_recipient,
+        "per_type": per_type,
+    }
+
+
+@router.post("/test")
+async def send_test_notification(user: CurrentUser):
+    """Admin-only — fire a test notification at the calling user. Lets you
+    verify the bell, polling, and timestamps are working without provoking
+    a real event."""
+    if user.get("role") != "admin":
+        from fastapi import HTTPException, status as st
+        raise HTTPException(status_code=st.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    notif_id = create_notification(
+        user["name"],
+        "ticket_status",
+        "Test notification",
+        "If you can see this, the notification pipeline is working end-to-end.",
+        "/tickets",
+    )
+    return {"notif_id": notif_id, "recipient": user["name"]}
+
+
 @router.get("/stream")
 async def stream_notifications(
     request: Request,
@@ -181,7 +254,10 @@ def create_notification(
     Returns the notification ID.
     """
     notif_id = f"N-{uuid.uuid4().hex[:12]}"
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    # ISO-8601 with explicit Z so JS clients parse as UTC unambiguously across
+    # browsers. Legacy rows use "YYYY-MM-DD HH:MM" (UTC, unmarked); the frontend
+    # parser handles both.
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     with get_db() as conn:
         conn.execute(

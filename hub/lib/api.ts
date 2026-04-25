@@ -894,6 +894,7 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       list: (limit = 50) => get<Notification[]>(`/notifications/?limit=${limit}`),
       unreadCount: () => get<{ count: number }>("/notifications/unread-count"),
       markRead: () => post<{ updated: number }>("/notifications/mark-read", {}),
+      test: () => post<{ notif_id: string; recipient: string }>("/notifications/test", {}),
     },
 
     calendarEvents: {
