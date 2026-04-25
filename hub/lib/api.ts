@@ -963,6 +963,27 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
           signal,
         )
       },
+      /** Step 1 of direct-to-Drive upload: get pre-authorized resumable session URLs. */
+      initPhotoUploads: (
+        shootId: string,
+        files: { filename: string; mime_type: string }[],
+      ) =>
+        post<{ filename: string; upload_url: string }[]>(
+          `/compliance/shoots/${encodeURIComponent(shootId)}/photos/init-uploads`,
+          files,
+        ),
+
+      /** Step 2 of direct-to-Drive upload: record completions after browser→Drive PUT. */
+      confirmPhotoUploads: (
+        shootId: string,
+        filenames: string[],
+        file_ids: string[],
+      ) =>
+        post<PhotoUploadResult>(
+          `/compliance/shoots/${encodeURIComponent(shootId)}/photos/confirm-uploads`,
+          { filenames, file_ids },
+        ),
+
       megaSync: (shootId: string, sceneId: string, studio: string) => {
         const fd = new FormData()
         fd.append("scene_id", sceneId)

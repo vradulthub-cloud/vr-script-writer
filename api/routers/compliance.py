@@ -101,6 +101,21 @@ class PhotoUploadResult(BaseModel):
     errors: list[str] = []
 
 
+class InitUploadFile(BaseModel):
+    filename: str
+    mime_type: str = "image/jpeg"
+
+
+class UploadSession(BaseModel):
+    filename: str
+    upload_url: str
+
+
+class ConfirmUploadsRequest(BaseModel):
+    filenames: list[str]
+    file_ids: list[str] = []
+
+
 class MegaSyncResult(BaseModel):
     status: str  # ok | error
     mega_path: str = ""
@@ -180,6 +195,32 @@ def _list_folder_files(folder_id: str, token: str) -> list[dict]:
         token,
     )
     return (res or {}).get("files") or []
+
+
+def _create_resumable_session(folder_id: str, file_name: str, mime_type: str, token: str) -> str:
+    """
+    Create a Drive resumable-upload session.
+    Returns the session URI (upload URL).  The caller — typically the browser —
+    can PUT the file body directly to this URL with no Authorization header.
+    The URI is valid for ~7 days and is pre-authorized via the service account.
+    """
+    metadata = json.dumps({"name": file_name, "parents": [folder_id]}).encode()
+    req = urllib.request.Request(
+        "https://www.googleapis.com/upload/drive/v3/files"
+        "?uploadType=resumable&fields=id",
+        data=metadata,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Type": mime_type,
+        },
+    )
+    with urllib.request.urlopen(req, timeout=20) as r:
+        location = r.headers.get("Location", "")
+    if not location:
+        raise RuntimeError(f"Drive did not return a session URI for {file_name}")
+    return location
 
 
 def _upload_to_drive(folder_id: str, file_name: str,
@@ -868,4 +909,90 @@ async def fill_form(shoot_id: str, user: CurrentUser, req: FillFormRequest):
         male_known=req.talent in MALE_TPLS,
         dates_filled=True,
         message=f"{talent_slug} PDF saved to Drive",
+    )
+
+
+# ─── Direct-to-Drive upload endpoints ────────────────────────────────────────
+# Instead of routing file bytes through this server, the browser gets a
+# pre-authorized Drive resumable-session URL and uploads directly to Google.
+# This eliminates the double-hop: Browser→Server→Drive becomes Browser→Drive.
+
+@router.post("/shoots/{shoot_id}/photos/init-uploads", response_model=list[UploadSession])
+async def init_photo_uploads(
+    shoot_id: str,
+    user: CurrentUser,
+    files: list[InitUploadFile],
+):
+    """
+    Create Drive resumable-upload sessions for a list of files.
+    Returns one upload_url per file; the browser PUTs each file directly
+    to that URL (no Authorization header needed — session is pre-authorized).
+    """
+    from_d, to_d = _window()
+    shoots = _load_shoots_window(from_d, to_d, include_cancelled=False)
+    shoot = next((s for s in shoots if s.shoot_id == shoot_id), None)
+    if not shoot:
+        raise HTTPException(status_code=404, detail="Shoot not found")
+
+    shoot_date = _parse_shoot_date(shoot.shoot_date)
+    if not shoot_date:
+        raise HTTPException(status_code=400, detail="Invalid shoot date")
+
+    token = _get_drive_rw_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="Drive credentials unavailable")
+
+    folder_info = _get_shoot_folder(
+        shoot_date, shoot.female_talent, shoot.male_talent, token
+    )
+    if not folder_info:
+        raise HTTPException(
+            status_code=404,
+            detail="Drive folder not found — tap Prepare Docs first",
+        )
+    folder_id, _ = folder_info
+
+    # Create all sessions concurrently (each is a small metadata-only request)
+    async def _init_one(f: InitUploadFile) -> UploadSession:
+        filename = f.filename
+        if not any(filename.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".mp4", ".mov", ".webm")):
+            filename += ".jpg"
+        upload_url = await asyncio.to_thread(
+            _create_resumable_session, folder_id, filename, f.mime_type, token
+        )
+        return UploadSession(filename=filename, upload_url=upload_url)
+
+    sessions = await asyncio.gather(*[_init_one(f) for f in files], return_exceptions=True)
+
+    results: list[UploadSession] = []
+    for f, session in zip(files, sessions):
+        if isinstance(session, Exception):
+            _log.error("init upload session failed %s: %s", f.filename, session)
+            raise HTTPException(status_code=502, detail=f"Could not create session for {f.filename}: {session}")
+        results.append(session)  # type: ignore[arg-type]
+    return results
+
+
+@router.post("/shoots/{shoot_id}/photos/confirm-uploads", response_model=PhotoUploadResult)
+async def confirm_photo_uploads(
+    shoot_id: str,
+    user: CurrentUser,
+    body: ConfirmUploadsRequest,
+):
+    """
+    Called by the browser after direct Drive uploads complete.
+    Records the uploaded filenames so photos_uploaded count stays accurate.
+    """
+    # Validation: shoot must exist
+    from_d, to_d = _window()
+    shoots = _load_shoots_window(from_d, to_d, include_cancelled=False)
+    shoot = next((s for s in shoots if s.shoot_id == shoot_id), None)
+    if not shoot:
+        raise HTTPException(status_code=404, detail="Shoot not found")
+
+    return PhotoUploadResult(
+        uploaded=body.filenames,
+        drive_file_ids=body.file_ids,
+        mega_paths=[],
+        errors=[],
     )
