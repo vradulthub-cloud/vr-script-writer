@@ -933,6 +933,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
 
   // Upload step state
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null)
   const [uploadResult, setUploadResult] = useState<{ uploaded: string[]; errors: string[]; mega_paths: string[] } | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<{ status: string; message: string } | null>(null)
@@ -1107,21 +1108,44 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   async function uploadAll() {
     if (!selected || photos.length === 0) return
     setUploading(true)
+    setUploadProgress({ done: 0, total: photos.length })
     setUploadResult(null)
-    try {
-      const r = await client.compliance.uploadPhotos(
-        selected.shoot_id,
-        photos.map(p => ({ file: p.file, label: p.label })),
-        selected.scene_id || undefined,
-        selected.studio || undefined,
-      )
-      setUploadResult(r)
-      void loadDate(date)
-    } catch (e) {
-      setUploadResult({ uploaded: [], errors: [e instanceof Error ? e.message : "Upload failed"], mega_paths: [] })
-    } finally {
-      setUploading(false)
+
+    const uploaded: string[] = []
+    const errors: string[] = []
+    let mega_paths: string[] = []
+
+    // Upload one file at a time so the user sees progress and individual failures
+    // don't abort the whole batch.
+    for (let i = 0; i < photos.length; i++) {
+      setUploadProgress({ done: i, total: photos.length })
+      const photo = photos[i]
+      try {
+        // 90s abort per file — generous for a compressed ~500 KB photo over Tailscale
+        const abort = new AbortController()
+        const timer = setTimeout(() => abort.abort(), 90_000)
+        const r = await client.compliance.uploadPhotos(
+          selected.shoot_id,
+          [{ file: photo.file, label: photo.label }],
+          selected.scene_id || undefined,
+          selected.studio || undefined,
+          abort.signal,
+        )
+        clearTimeout(timer)
+        uploaded.push(...r.uploaded)
+        if (r.mega_paths?.length) mega_paths = [...mega_paths, ...r.mega_paths]
+        if (r.errors?.length) errors.push(...r.errors)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Upload failed"
+        errors.push(`${photo.label}: ${msg}`)
+      }
     }
+
+    setUploadProgress({ done: photos.length, total: photos.length })
+    setUploadResult({ uploaded, errors, mega_paths })
+    void loadDate(date)
+    setUploading(false)
+    setUploadProgress(null)
   }
 
   async function syncMega() {
@@ -1215,24 +1239,73 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
       {step === "select" && (
         <div style={{ padding: "16px 16px 0" }}>
 
-          {/* Date picker */}
-          <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
-            <label style={{ fontSize: 11, color: "var(--color-text-faint)", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", flexShrink: 0 }}>
-              Shoot Date
-            </label>
-            <input
-              type="date"
-              value={date}
-              onChange={e => handleDateChange(e.target.value)}
-              style={{
-                background: "var(--color-elevated)",
-                border: "1px solid var(--color-border)",
-                borderRadius: 8, padding: "8px 12px",
-                color: "var(--color-text)", fontSize: 14,
-                flex: 1, cursor: "pointer",
-              }}
-            />
-          </div>
+          {/* Date navigation */}
+          {(() => {
+            const isToday = date === new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date())
+            const label = new Date(date + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })
+            function shiftDay(delta: number) {
+              const d = new Date(date + "T12:00:00")
+              d.setDate(d.getDate() + delta)
+              const next = d.toISOString().slice(0, 10)
+              handleDateChange(next)
+            }
+            return (
+              <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 0 }}>
+                <button
+                  onClick={() => shiftDay(-1)}
+                  aria-label="Previous day"
+                  style={{
+                    background: "var(--color-elevated)", border: "1px solid var(--color-border)",
+                    borderRight: "none", borderRadius: "8px 0 0 8px",
+                    color: "var(--color-text)", cursor: "pointer",
+                    padding: "10px 14px", lineHeight: 1, display: "flex", alignItems: "center",
+                  }}
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <div style={{
+                  flex: 1, background: "var(--color-elevated)", border: "1px solid var(--color-border)",
+                  padding: "10px 12px", textAlign: "center",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text)" }}>{label}</span>
+                  {isToday && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, letterSpacing: "0.06em",
+                      textTransform: "uppercase", color: "#bed62f",
+                      background: "rgba(190,214,47,0.12)", borderRadius: 4,
+                      padding: "2px 6px",
+                    }}>Today</span>
+                  )}
+                  {!isToday && (
+                    <button
+                      onClick={() => handleDateChange(new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date()))}
+                      style={{
+                        fontSize: 10, fontWeight: 700, letterSpacing: "0.06em",
+                        textTransform: "uppercase", color: "var(--color-text-faint)",
+                        background: "var(--color-surface)", border: "1px solid var(--color-border)",
+                        borderRadius: 4, padding: "2px 6px", cursor: "pointer",
+                      }}
+                    >
+                      Today
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={() => shiftDay(1)}
+                  aria-label="Next day"
+                  style={{
+                    background: "var(--color-elevated)", border: "1px solid var(--color-border)",
+                    borderLeft: "none", borderRadius: "0 8px 8px 0",
+                    color: "var(--color-text)", cursor: "pointer",
+                    padding: "10px 14px", lineHeight: 1, display: "flex", alignItems: "center",
+                  }}
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )
+          })()}
 
           {loadError && (
             <div style={{
@@ -1809,7 +1882,11 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               }}
             >
               {uploading
-                ? <><Loader2 size={16} className="animate-spin" /> Uploading…</>
+                ? <><Loader2 size={16} className="animate-spin" />
+                    {uploadProgress
+                      ? `Uploading ${uploadProgress.done + 1} / ${uploadProgress.total}…`
+                      : "Uploading…"}
+                  </>
                 : uploadResult?.uploaded.length
                   ? <><CheckCircle2 size={16} /> Re-Upload Photos</>
                   : <><Upload size={16} /> Upload to Drive</>

@@ -16,7 +16,9 @@ export default async function CompliancePage({
   const client = api(session)
 
   const sp = await searchParams
-  const today = new Date().toISOString().slice(0, 10)
+  // Use America/New_York so "today" is correct for production shoots regardless
+  // of the Vercel edge node's UTC offset.
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date())
   const initialDate = sp.date ?? today
   let shoots: ComplianceShoot[] = []
   let error: string | null = null
