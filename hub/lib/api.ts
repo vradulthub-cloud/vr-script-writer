@@ -696,10 +696,11 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
     },
 
     scenes: {
-      list: (filters?: { studio?: string; missing_only?: boolean; search?: string; page?: number; limit?: number }) => {
+      list: (filters?: { studio?: string; missing_only?: boolean; missing_descriptions?: boolean; search?: string; page?: number; limit?: number }) => {
         const params = new URLSearchParams()
         if (filters?.studio) params.set("studio", filters.studio)
         if (filters?.missing_only) params.set("missing_only", "true")
+        if (filters?.missing_descriptions) params.set("missing_descriptions", "true")
         if (filters?.search) params.set("search", filters.search)
         if (filters?.page) params.set("page", String(filters.page))
         if (filters?.limit) params.set("limit", String(filters.limit))
@@ -943,26 +944,6 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<CompliancePrepareResult>(`/compliance/shoots/${encodeURIComponent(shootId)}/prepare`, {}),
       fillForm: (shootId: string, req: FillFormRequest) =>
         post<CompliancePrepareResult>(`/compliance/shoots/${encodeURIComponent(shootId)}/fill-form`, req),
-      uploadPhotos: (
-        shootId: string,
-        photos: { file: File; label: string }[],
-        sceneId?: string,
-        studio?: string,
-        signal?: AbortSignal,
-      ) => {
-        const fd = new FormData()
-        for (const { file, label } of photos) {
-          fd.append("files", file, label)
-          fd.append("labels", label)
-        }
-        if (sceneId) fd.append("scene_id", sceneId)
-        if (studio)  fd.append("studio", studio)
-        return postForm<PhotoUploadResult>(
-          `/compliance/shoots/${encodeURIComponent(shootId)}/photos`,
-          fd,
-          signal,
-        )
-      },
       /** Step 1 of direct-to-Drive upload: get pre-authorized resumable session URLs. */
       initPhotoUploads: (
         shootId: string,

@@ -28,17 +28,20 @@ Asset-state inference:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import logging
 import re
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from api.auth import CurrentUser
+from api.auth import CurrentUser, validate_sse_token
 from api.database import get_db
 
 _log = logging.getLogger(__name__)
@@ -1053,6 +1056,69 @@ async def revalidate_asset(shoot_id: str, position: int, asset_type: str, user: 
                 if a.asset_type == asset_type:
                     return a
     raise HTTPException(status_code=404, detail="Asset cell not found")
+
+
+# ---------------------------------------------------------------------------
+# SSE stream endpoint
+# ---------------------------------------------------------------------------
+
+@router.get("/stream")
+async def stream_shoots(
+    request: Request,
+    token: Optional[str] = Query(default=None),
+):
+    """
+    Server-Sent Events stream for the shoot board.
+
+    Browsers connect via:
+        new EventSource('/api/shoots/stream?token=<jwt>')
+
+    The EventSource API cannot set custom headers, so the JWT is passed as a
+    query parameter.  The same Google ID token validation that CurrentUser
+    performs is applied here via validate_sse_token.
+
+    Event format:
+        data: <JSON array of Shoot objects>\\n\\n
+
+    A heartbeat comment is sent every 15 s to keep the connection alive
+    through proxies and load-balancers that close idle connections.
+    """
+    user = await validate_sse_token(request, token)
+
+    async def _generator() -> AsyncGenerator[str, None]:
+        last_hash = ""
+        default_from, default_to = _default_window()
+        try:
+            while True:
+                try:
+                    shoots = _load_shoots_window(default_from, default_to, include_cancelled=False)
+                    payload = json.dumps(
+                        [s.model_dump() for s in shoots],
+                        default=str,
+                    )
+                    current_hash = hashlib.sha256(payload.encode()).hexdigest()
+                    if current_hash != last_hash:
+                        last_hash = current_hash
+                        yield f"data: {payload}\n\n"
+                except Exception as exc:
+                    _log.warning("shoots SSE: error building shoots: %s", exc)
+
+                # Heartbeat comment — keeps connection alive, ignored by EventSource
+                yield ": heartbeat\n\n"
+                await asyncio.sleep(15)
+        except asyncio.CancelledError:
+            # Client disconnected cleanly
+            _log.debug("shoots SSE: client disconnected (%s)", user.get("name"))
+
+    return StreamingResponse(
+        _generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering
+        },
+    )
+
 
 # ---------------------------------------------------------------------------
 # Legal docs endpoint — appended patch

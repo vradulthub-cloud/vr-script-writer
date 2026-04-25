@@ -11,8 +11,6 @@ import { TriageFeed } from "./triage-feed"
 
 export const dynamic = "force-dynamic"
 
-const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
-
 export default async function DashboardPage() {
   const session = await auth()
   const client = api(session)
@@ -27,14 +25,14 @@ export default async function DashboardPage() {
     notificationsRes,
     healthRes,
     shootsRes,
-    ...missingResults
+    recentScenesRes,
   ] = await Promise.allSettled([
     client.scenes.stats(),
     client.scripts.list({ needs_script: true }),
     client.notifications.list(12),
     client.health(),
     client.shoots.list(),
-    ...STUDIOS.map(s => client.scenes.list({ studio: s, limit: 5 })),
+    client.scenes.list({ limit: 20, missing_only: true }),
   ])
 
   const sceneStats     = sceneStatsRes.status    === "fulfilled" ? sceneStatsRes.value    : null
@@ -43,8 +41,7 @@ export default async function DashboardPage() {
   const health         = healthRes.status        === "fulfilled" ? healthRes.value        : null
   const shoots         = shootsRes.status        === "fulfilled" ? shootsRes.value        : []
 
-  const recentScenes = missingResults
-    .flatMap(r => r.status === "fulfilled" ? r.value : [])
+  const recentScenes = recentScenesRes.status === "fulfilled" ? recentScenesRes.value : []
 
   const now       = new Date()
   const hour      = now.getHours()

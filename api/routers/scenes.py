@@ -166,6 +166,7 @@ async def list_scenes(
     user: CurrentUser,
     studio: Optional[str] = None,
     missing_only: bool = False,
+    missing_descriptions: bool = False,
     search: Optional[str] = None,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=50, ge=1, le=2000),
@@ -175,6 +176,7 @@ async def list_scenes(
 
     - studio: filter by studio UI name (e.g. "VRHush")
     - missing_only: only scenes missing at least one core asset
+    - missing_descriptions: only scenes that have no description yet
     - search: substring search in title or performers
     - page/limit: pagination
     """
@@ -190,6 +192,9 @@ async def list_scenes(
             " AND (has_description=0 OR has_videos=0"
             " OR has_thumbnail=0 OR has_photos=0 OR has_storyboard=0)"
         )
+
+    if missing_descriptions:
+        query += " AND has_description=0"
 
     if search:
         query += " AND (title LIKE ? OR performers LIKE ?)"

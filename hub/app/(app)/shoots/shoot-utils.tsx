@@ -1,7 +1,7 @@
 import { CheckCircle2, AlertTriangle, Circle, Clock } from "lucide-react"
 import type { AssetStatus, AssetType, Shoot } from "@/lib/api"
 
-export const POLL_MS = 30_000
+export const POLL_MS = 60_000
 export const AGING_WARN_HOURS = 48
 export const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"] as const
 

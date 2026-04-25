@@ -13,7 +13,7 @@ Provides FastAPI dependency injection for:
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from google.oauth2 import id_token
@@ -29,24 +29,15 @@ GRAIL_WRITERS = {"Drew", "David", "Duc"}
 USER_MANAGERS = {"Drew", "David"}
 
 
-async def get_current_user(request: Request) -> dict:
+async def _validate_token(token: str) -> dict:
     """
-    Validate the Google OAuth token from the Authorization header.
+    Core token validation logic shared by get_current_user and
+    validate_sse_token.  Accepts a raw JWT string (no "Bearer " prefix).
 
     Returns a user dict with: email, name, role, allowed_tabs.
-    Raises 401 if token is invalid or user not in the system.
+    Raises 401/403 on failure.
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid Authorization header",
-        )
-
-    token = auth_header[7:]  # Strip "Bearer "
-
     try:
-        # Verify the Google ID token
         idinfo = id_token.verify_oauth2_token(
             token,
             google_requests.Request(),
@@ -59,7 +50,6 @@ async def get_current_user(request: Request) -> dict:
             detail="Invalid or expired token",
         )
 
-    # Look up user in the local database
     with get_db() as conn:
         row = conn.execute(
             "SELECT name, role, allowed_tabs FROM users WHERE LOWER(email) = ?",
@@ -78,6 +68,51 @@ async def get_current_user(request: Request) -> dict:
         "role": dict(row)["role"],
         "allowed_tabs": dict(row)["allowed_tabs"],
     }
+
+
+async def get_current_user(request: Request) -> dict:
+    """
+    Validate the Google OAuth token from the Authorization header.
+
+    Returns a user dict with: email, name, role, allowed_tabs.
+    Raises 401 if token is invalid or user not in the system.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid Authorization header",
+        )
+
+    token = auth_header[7:]  # Strip "Bearer "
+    return await _validate_token(token)
+
+
+async def validate_sse_token(
+    request: Request,
+    token: Optional[str] = None,
+) -> dict:
+    """
+    Auth helper for SSE endpoints, where EventSource cannot set custom headers.
+
+    Accepts the JWT from either:
+      - The standard Authorization: Bearer <jwt> header, OR
+      - A `token` query parameter (?token=<jwt>)
+
+    The query-param path is the primary SSE path; the header path is kept for
+    completeness and testing.  Raises 401/403 on failure.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        raw_token = auth_header[7:]
+    elif token:
+        raw_token = token
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing token — provide Authorization header or ?token= query param",
+        )
+    return await _validate_token(raw_token)
 
 
 # Type alias for dependency injection
