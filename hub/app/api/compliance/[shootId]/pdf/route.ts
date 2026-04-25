@@ -28,8 +28,8 @@ export async function GET(
 
   if (!res.ok) return new NextResponse("PDF not found", { status: res.status })
 
-  const bytes = await res.arrayBuffer()
-  return new NextResponse(bytes, {
+  // Pipe the upstream stream directly — don't buffer the whole PDF in memory
+  return new NextResponse(res.body, {
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `inline; filename="${talent}.pdf"`,

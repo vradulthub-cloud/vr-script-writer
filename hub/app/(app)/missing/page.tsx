@@ -20,11 +20,10 @@ export default async function MissingPage() {
   let sceneSyncedAt: string | null = null
 
   try {
-    const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
-    const [statsResult, syncResult, ...studioResults] = await Promise.allSettled([
+    const [statsResult, syncResult, scenesResult] = await Promise.allSettled([
       client.scenes.stats(),
       client.sync.status(),
-      ...STUDIOS.map(s => client.scenes.list({ studio: s, limit: 5, missing_only: true })),
+      client.scenes.list({ limit: 20, missing_only: true }),
     ])
     if (statsResult.status === "fulfilled") stats = statsResult.value
     else error = "Failed to load scenes"
@@ -32,7 +31,7 @@ export default async function MissingPage() {
       const sceneSync = syncResult.value.find(s => s.source === "scenes")
       sceneSyncedAt = sceneSync?.last_synced_at ?? null
     }
-    scenes = studioResults.flatMap(r => r.status === "fulfilled" ? r.value : [])
+    scenes = scenesResult.status === "fulfilled" ? scenesResult.value : []
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load scenes"
   }

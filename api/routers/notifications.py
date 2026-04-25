@@ -11,16 +11,20 @@ Also provides a helper function for other routers to create notifications.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
 import logging
 import threading
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from api.auth import CurrentUser
+from api.auth import CurrentUser, validate_sse_token
 from api.database import get_db
 from api.sheets_client import open_tickets, get_or_create_worksheet, with_retry
 
@@ -93,6 +97,71 @@ async def mark_all_read(user: CurrentUser):
     ).start()
 
     return {"updated": updated}
+
+
+@router.get("/stream")
+async def stream_notifications(
+    request: Request,
+    token: Optional[str] = Query(default=None),
+):
+    """
+    Server-Sent Events stream for notifications.
+
+    Browsers connect via:
+        new EventSource('/api/notifications/stream?token=<jwt>')
+
+    The EventSource API cannot set custom headers, so the JWT is passed as a
+    query parameter.  The same Google ID token validation that CurrentUser
+    performs is applied here via validate_sse_token.
+
+    Event format:
+        data: <JSON array of notification objects>\\n\\n
+
+    A heartbeat comment is sent every 30 s to keep the connection alive.
+    """
+    user = await validate_sse_token(request, token)
+
+    async def _generator() -> AsyncGenerator[str, None]:
+        last_hash = ""
+        recipient = user["name"]
+        try:
+            while True:
+                try:
+                    with get_db() as conn:
+                        rows = conn.execute(
+                            """
+                            SELECT notif_id, timestamp, recipient, type, title,
+                                   message, read, link
+                            FROM notifications
+                            WHERE LOWER(recipient) = LOWER(?)
+                            ORDER BY timestamp DESC
+                            LIMIT 50
+                            """,
+                            (recipient,),
+                        ).fetchall()
+                    payload = json.dumps([dict(r) for r in rows], default=str)
+                    current_hash = hashlib.sha256(payload.encode()).hexdigest()
+                    if current_hash != last_hash:
+                        last_hash = current_hash
+                        yield f"data: {payload}\n\n"
+                except Exception as exc:
+                    _log.warning("notifications SSE: error fetching notifications: %s", exc)
+
+                # Heartbeat comment — keeps connection alive, ignored by EventSource
+                yield ": heartbeat\n\n"
+                await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            # Client disconnected cleanly
+            _log.debug("notifications SSE: client disconnected (%s)", recipient)
+
+    return StreamingResponse(
+        _generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

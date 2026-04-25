@@ -17,13 +17,10 @@ export default async function DescriptionsPage() {
   let error: string | null = null
 
   try {
-    // `missing_only` narrows to scenes missing at least one core asset
-    // (description, videos, thumbnail, photos, storyboard). The queue in
-    // DescGenerator then filters locally to the ones still lacking a
-    // description. Without missing_only + a high limit, scenes that need
-    // descriptions get buried past the first 100 rows sorted by id DESC —
-    // which is exactly the "no new scenes show up" bug we hit on 2026-04-21.
-    scenes = await client.scenes.list({ limit: 500, missing_only: true })
+    // `missing_descriptions` is a targeted backend filter that returns only
+    // scenes that are actually missing a description — no client-side filtering
+    // needed, and no artificial limit required.
+    scenes = await client.scenes.list({ missing_descriptions: true })
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load scenes"
   }

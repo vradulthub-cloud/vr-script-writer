@@ -106,6 +106,14 @@ export function ShootBoard({
     return () => clearInterval(id)
   }, [refresh])
 
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === "visible") void refresh()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => document.removeEventListener("visibilitychange", onVisible)
+  }, [refresh])
+
   const filtered = useMemo(() => {
     if (studioFilter === "All") return shoots
     return shoots.filter(s => s.scenes.some(sc => sc.studio === studioFilter))
@@ -148,7 +156,7 @@ export function ShootBoard({
       {!hideHeader && (
         <PageHeader
           title="Shoot Tracker"
-          eyebrow={`${filtered.length} in window · ${refreshing ? "refreshing" : "auto-refresh 30s"}`}
+          eyebrow={`${filtered.length} in window · ${refreshing ? "refreshing" : "auto-refresh 60s"}`}
           studioAccent={studioFilter !== "All" ? studioFilter : undefined}
           actions={
             <>

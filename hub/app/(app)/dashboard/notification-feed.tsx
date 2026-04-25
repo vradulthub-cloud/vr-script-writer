@@ -61,10 +61,11 @@ export function NotificationFeed({
 
   useEffect(() => {
     if (!idToken) return
-    const interval = setInterval(async () => {
+
+    async function fetchNotifications() {
       try {
         const res = await fetch(`${API_BASE_URL}/api/notifications/?limit=12`, {
-          headers: { Authorization: `Bearer ${idToken}` },
+          headers: { Authorization: `Bearer ${idToken!}` },
         })
         if (res.ok) {
           const data: Notification[] = await res.json()
@@ -72,8 +73,19 @@ export function NotificationFeed({
           setUnreadCount(data.filter(n => n.read === 0).length)
         }
       } catch {}
-    }, 60_000)
-    return () => clearInterval(interval)
+    }
+
+    const interval = setInterval(fetchNotifications, 300_000)
+
+    function onVisible() {
+      if (document.visibilityState === "visible") void fetchNotifications()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
   }, [idToken])
 
   async function markAllRead() {
