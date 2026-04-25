@@ -113,10 +113,10 @@ export function ProfileView({ model, profile, loading, profileError, onBack, onR
               const suspicious = showSource && isSuspiciousStat(label, value)
               return (
                 <tr key={label}>
-                  <td style={{ fontSize: 11, color: "var(--color-text-faint)", padding: "3px 10px 3px 0", whiteSpace: "nowrap" }}>
+                  <td style={{ fontSize: 12, color: "var(--color-text-faint)", padding: "3px 10px 3px 0", whiteSpace: "nowrap" }}>
                     {label}
                   </td>
-                  <td style={{ fontSize: 12, fontWeight: 600, color: suspicious ? "var(--color-warn)" : "var(--color-text)" }}>
+                  <td style={{ fontSize: 13, fontWeight: 600, color: suspicious ? "var(--color-warn)" : "var(--color-text)" }}>
                     {suspicious ? "⚠ " : ""}{value}
                     {showSource && source && (
                       <span style={{
@@ -348,16 +348,16 @@ export function ProfileView({ model, profile, loading, profileError, onBack, onR
               <div style={{ color: "var(--color-ok)", fontSize: 20, fontWeight: 700, lineHeight: 1 }}>
                 {bh.total}× booked
               </div>
-              <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 6 }}>
+              <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 6 }}>
                 Last: {bh.last_display || bh.last_date}
               </div>
               {model.rate && (
-                <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
                   Rate: {model.rate}
                 </div>
               )}
               {bh.studios && Object.keys(bh.studios).length > 0 && (
-                <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 6 }}>
+                <div style={{ fontSize: 11, color: "var(--color-text-faint)", marginTop: 6 }}>
                   {Object.entries(bh.studios)
                     .sort(([, a], [, b]) => b - a)
                     .map(([s, n]) => `${s} (${n}×)`)
@@ -465,8 +465,8 @@ export function ProfileView({ model, profile, loading, profileError, onBack, onR
 
           {bio["about"] && (
             <p style={{
-              fontSize: 12, color: "var(--color-text)", lineHeight: 1.55,
-              marginTop: 10, fontStyle: "italic",
+              fontSize: 13, color: "var(--color-text)", lineHeight: 1.6,
+              marginTop: 10, fontStyle: "italic", maxWidth: "65ch",
             }}>
               {bio["about"]}
             </p>
@@ -480,7 +480,7 @@ export function ProfileView({ model, profile, loading, profileError, onBack, onR
                 Competitor Activity
               </div>
               {competitors.map((c, i) => (
-                <div key={i} style={{ fontSize: 11, color: "var(--color-text-faint)", marginBottom: 3 }}>
+                <div key={i} style={{ fontSize: 12, color: "var(--color-text-faint)", marginBottom: 3, lineHeight: 1.45 }}>
                   <span style={{ fontWeight: 600, color: "var(--color-text-muted)" }}>{c.studio}</span>
                   {c.date && ` · ${c.date}`}
                   {c.title && ` — `}
@@ -523,7 +523,7 @@ export function ProfileView({ model, profile, loading, profileError, onBack, onR
                 ? <>
                     {slr.slice(0, 6).map((sc, i) => <SceneCard key={i} scene={sc} />)}
                     {slr.length > 6 && (
-                      <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 6 }}>
+                      <p style={{ fontSize: 11, color: "var(--color-text-faint)", marginTop: 6 }}>
                         Showing 6 of {slr.length} scenes
                       </p>
                     )}
@@ -537,7 +537,7 @@ export function ProfileView({ model, profile, loading, profileError, onBack, onR
                 ? <>
                     {vrp.slice(0, 6).map((sc, i) => <SceneCard key={i} scene={sc} />)}
                     {vrp.length > 6 && (
-                      <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 6 }}>
+                      <p style={{ fontSize: 11, color: "var(--color-text-faint)", marginTop: 6 }}>
                         Showing 6 of {vrp.length} scenes
                       </p>
                     )}

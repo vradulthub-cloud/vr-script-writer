@@ -131,7 +131,19 @@ export function NotificationFeed({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <h3 style={{ margin: 0 }}>Notifications</h3>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: "0.8125rem",
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: "var(--color-text-muted)",
+              lineHeight: 1.2,
+            }}
+          >
+            Notifications
+          </h2>
           {unreadCount > 0 && (
             <span
               // Status indicator, not a commit — demoted from saturated lime
@@ -229,7 +241,7 @@ export function NotificationFeed({
                   {n.message && (
                     <div
                       style={{
-                        fontSize: 10,
+                        fontSize: 11,
                         color: "var(--color-text-faint)",
                         lineHeight: 1.35,
                         marginTop: 2,
@@ -247,9 +259,10 @@ export function NotificationFeed({
                 <div
                   style={{
                     flexShrink: 0,
-                    fontSize: 10,
+                    fontSize: 11,
                     color: "var(--color-text-faint)",
                     paddingTop: 2,
+                    fontVariantNumeric: "tabular-nums",
                   }}
                 >
                   {relativeTime(n.timestamp)}
@@ -261,7 +274,7 @@ export function NotificationFeed({
             <div
               style={{
                 padding: "7px 14px",
-                fontSize: 10,
+                fontSize: 11,
                 color: "var(--color-text-faint)",
                 textAlign: "center",
                 borderTop: "1px solid var(--color-border-subtle)",

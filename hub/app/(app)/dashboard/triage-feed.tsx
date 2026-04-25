@@ -262,9 +262,21 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
       }}
     >
       <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--color-border)" }}>
-        <h3 style={{ margin: 0 }}>{title}</h3>
+        <h2
+          style={{
+            margin: 0,
+            fontSize: "0.8125rem",
+            fontWeight: 600,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            color: "var(--color-text-muted)",
+            lineHeight: 1.2,
+          }}
+        >
+          {title}
+        </h2>
         {subtitle && (
-          <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--color-text-faint)" }}>{subtitle}</p>
+          <p style={{ margin: "3px 0 0", fontSize: 12, color: "var(--color-text-faint)", lineHeight: 1.4, maxWidth: "65ch" }}>{subtitle}</p>
         )}
       </div>
       {children}

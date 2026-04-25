@@ -2,12 +2,16 @@
 
 /* ─── Design tokens ───────────────────────────────────────────────────────── */
 @theme {
-  /* Surfaces — tinted toward lime hue (82°) for subtle warmth */
-  --color-base:     oklch(7% 0.005 82);
-  --color-surface:  oklch(11% 0.005 82);
-  --color-elevated: oklch(15% 0.008 82);
-  --color-border:   oklch(20% 0.006 82);
-  --color-border-subtle: oklch(14% 0.004 82);
+  /* Surfaces — tinted toward lime hue (82°) for subtle warmth.
+     Base lifted off near-black (was 7%) so the warm tint is perceptible
+     and the page no longer reads as pure #000. Whole scale bumped up
+     in lockstep so the surface→elevated→border hierarchy stays legible
+     on top of the brighter base. */
+  --color-base:     oklch(17% 0.012 82);
+  --color-surface:  oklch(20% 0.01 82);
+  --color-elevated: oklch(24% 0.011 82);
+  --color-border:   oklch(29% 0.008 82);
+  --color-border-subtle: oklch(22% 0.006 82);
 
   /* Text — slightly warm instead of pure gray.
      TKT-0109: muted + faint bumped up (was 60% / 45%) to clear WCAG AA
@@ -775,11 +779,11 @@ button[style*="color-lime"]:hover:not(:disabled) {
   display: flex; flex-direction: column; justify-content: center; gap: 1px;
 }
 .ec-cal .lane .label .who {
-  font-weight: 800; font-size: 11px; letter-spacing: 0.06em;
+  font-weight: 800; font-size: 12px; letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .ec-cal .lane .label .sub {
-  font-size: 9px; font-weight: 500; letter-spacing: 0.04em;
+  font-size: 11px; font-weight: 500; letter-spacing: 0.02em;
   color: var(--color-text-faint); text-transform: none;
 }
 .ec-cal .lane .label.fpvr .who { color: var(--color-fpvr); }
@@ -791,33 +795,38 @@ button[style*="color-lime"]:hover:not(:disabled) {
   background-image: linear-gradient(to right, var(--color-border-subtle) 1px, transparent 1px);
   background-size: calc(100%/7) 100%;
 }
+/* Event tile: ink-on-color, not white-on-color.
+   White-on-studio fails 4.5:1 across all four colors (orange 3.0, blue 3.7,
+   pink 3.5, purple 4.2). A near-black ink lands at 6:1+ on every studio
+   color and is more in line with "studio color owns its context" — the
+   color reads as identity, the ink reads as content. */
 .ec-cal .lane .ev {
-  position: absolute; top: 6px; bottom: 6px; padding: 6px 7px;
-  color: #fff; background: var(--color-text);
+  position: absolute; top: 6px; bottom: 6px; padding: 6px 8px;
+  color: oklch(15% 0.012 82); background: var(--color-text);
   display: flex; flex-direction: column; justify-content: flex-start; gap: 2px;
   overflow: hidden; border-radius: 4px;
 }
 .ec-cal .lane .ev .meta-row {
   display: flex; align-items: center; gap: 6px;
-  font-size: 9px; font-weight: 700; letter-spacing: 0.08em;
-  text-transform: uppercase; opacity: 0.85;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; opacity: 0.78;
   line-height: 1;
 }
 .ec-cal .lane .ev .meta-row .count {
   font-family: var(--font-mono); letter-spacing: 0.02em;
-  background: rgba(0, 0, 0, 0.22); padding: 1px 5px; border-radius: 2px;
+  background: rgba(0, 0, 0, 0.18); padding: 1px 5px; border-radius: 2px;
 }
 .ec-cal .lane .ev .meta-row .types {
   font-family: var(--font-mono); letter-spacing: 0.04em;
-  opacity: 0.9;
+  opacity: 0.85;
 }
 .ec-cal .lane .ev .meta-row:empty { display: none; }
-.ec-cal .lane .ev .t { font-weight: 600; font-size: 11px; letter-spacing: -0.02em; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-top: 2px; color: #fff; }
-.ec-cal .lane .ev .m { font-size: 11px; font-weight: 400; letter-spacing: -0.02em; text-transform: none; opacity: 0.78; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; line-height: 1.2; }
-.ec-cal .lane .ev.fpvr { background: var(--color-fpvr); color: #fff; }
-.ec-cal .lane .ev.vrh  { background: var(--color-vrh);  color: #fff; }
-.ec-cal .lane .ev.vra  { background: var(--color-vra);  color: #fff; }
-.ec-cal .lane .ev.njoi { background: var(--color-njoi); color: #fff; }
+.ec-cal .lane .ev .t { font-weight: 700; font-size: 12px; letter-spacing: -0.02em; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-top: 2px; color: inherit; }
+.ec-cal .lane .ev .m { font-size: 12px; font-weight: 500; letter-spacing: -0.02em; text-transform: none; opacity: 0.72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; line-height: 1.2; color: inherit; }
+.ec-cal .lane .ev.fpvr { background: var(--color-fpvr); }
+.ec-cal .lane .ev.vrh  { background: var(--color-vrh);  }
+.ec-cal .lane .ev.vra  { background: var(--color-vra);  }
+.ec-cal .lane .ev.njoi { background: var(--color-njoi); }
 
 /* Generic list primitive */
 .ec-list { padding: 0; margin: 0; list-style: none; }
