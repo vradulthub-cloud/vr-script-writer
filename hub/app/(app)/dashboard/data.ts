@@ -49,12 +49,18 @@ export const getShoots = cache(async (
   }
 })
 
+// Fetch per-studio so a studio with heavier recent activity (e.g. VRH) can't
+// crowd FPVR / VRA out of a global limit. Triage feed shows top 5 per studio.
+const RECENT_SCENE_STUDIOS = ["FuckPassVR", "VRHush", "VRAllure"] as const
+
 export const getRecentScenes = cache(async (idToken: string | undefined): Promise<Scene[]> => {
-  try {
-    return await api(idToken ?? null).scenes.list({ limit: 20, missing_only: true })
-  } catch {
-    return []
-  }
+  const client = api(idToken ?? null)
+  const results = await Promise.all(
+    RECENT_SCENE_STUDIOS.map(studio =>
+      client.scenes.list({ studio, limit: 5, missing_only: true }).catch(() => [] as Scene[])
+    )
+  )
+  return results.flat()
 })
 
 export const getNotifications = cache(async (idToken: string | undefined): Promise<Notification[]> => {

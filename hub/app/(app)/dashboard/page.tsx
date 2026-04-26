@@ -27,12 +27,16 @@ export default async function DashboardPage() {
   const session = await auth()
   const idToken = (session as { idToken?: string } | null)?.idToken
 
+  // The team works on LA time; Vercel renders in UTC. Without a fixed timeZone
+  // the eyebrow flips to tomorrow's weekday once UTC rolls past midnight while
+  // it's still afternoon/evening in LA.
+  const TZ = "America/Los_Angeles"
   const now       = new Date()
-  const hour      = now.getHours()
-  const greeting  = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
+  const laHour    = Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", hour12: false }).format(now))
+  const greeting  = laHour < 12 ? "Good morning" : laHour < 17 ? "Good afternoon" : "Good evening"
   const firstName = session?.user?.name?.split(" ")[0] ?? "there"
   const eyebrow   = now
-    .toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+    .toLocaleDateString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric" })
     .toUpperCase()
 
   return (
