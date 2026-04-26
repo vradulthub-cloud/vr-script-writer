@@ -719,6 +719,7 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
             comp={comp}
             studioColor={studioColor}
             onClose={() => setExpandedComp(null)}
+            serverIdToken={serverIdToken}
           />
         )
       })()}

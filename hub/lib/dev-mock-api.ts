@@ -405,6 +405,21 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
       },
     ] as unknown as T)
   }
+  // PATCH /compilations/{comp_id} — echo back the patched fields so the modal
+  // can confirm a successful save in dev-mock without a real backend.
+  const compPatch = base.match(/^\/compilations\/([A-Z]+-C\d{4})$/)
+  if (compPatch && (_options.method || "").toUpperCase() === "PATCH") {
+    const comp_id = compPatch[1]
+    const body = _options.body ? JSON.parse(_options.body as string) : {}
+    return wait({
+      status: "ok",
+      comp_id,
+      title: body.title ?? "",
+      volume: body.volume ?? "",
+      comp_status: body.status ?? "",
+      description: body.description ?? "",
+    } as unknown as T)
+  }
 
   // ── Shoots ────────────────────────────────────────────────────────────
   if (base === "/shoots/") {
