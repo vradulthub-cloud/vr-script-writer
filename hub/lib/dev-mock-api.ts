@@ -406,11 +406,27 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
     ] as unknown as T)
   }
   // PATCH /compilations/{comp_id} — echo back the patched fields so the modal
-  // can confirm a successful save in dev-mock without a real backend.
+  // can confirm a successful save in dev-mock without a real backend. If the
+  // request includes an `if_match` whose title is the magic string
+  // "__force_conflict__", simulate a 409 so the conflict UI is testable.
   const compPatch = base.match(/^\/compilations\/([A-Z]+-C\d{4})$/)
   if (compPatch && (_options.method || "").toUpperCase() === "PATCH") {
     const comp_id = compPatch[1]
     const body = _options.body ? JSON.parse(_options.body as string) : {}
+    if (body.if_match?.title === "__force_conflict__") {
+      const { ApiError } = await import("./api")
+      throw new ApiError(409, JSON.stringify({
+        detail: {
+          message: "Compilation was modified by someone else.",
+          current: {
+            title: "Best of Blondes Vol. 3 (their edit)",
+            volume: "Vol. 3",
+            status: "Published",
+            description: "Updated by another editor while you were typing.",
+          },
+        },
+      }))
+    }
     return wait({
       status: "ok",
       comp_id,

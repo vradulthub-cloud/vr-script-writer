@@ -12,10 +12,12 @@ Routes:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 import threading
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -67,6 +69,14 @@ STATUS_COLORS: dict[str, dict] = {
 
 def _rgb(r: float, g: float, b: float) -> dict:
     return {"red": r, "green": g, "blue": b}
+
+
+# Per-studio locks for ID allocation + multi-row writes. The save and PATCH
+# paths each do read-modify-write cycles against a shared sheet; without
+# serializing per studio, two concurrent saves can claim the same comp_id and
+# both write blocks. FastAPI runs sync routes in threads, so a stdlib Lock is
+# enough — we do not span processes.
+_STUDIO_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +366,12 @@ async def save_compilation(body: CompSaveBody, user: CurrentUser):
 
 
 def _write_comp_to_index(body: CompSaveBody, created_by: str) -> None:
-    """Write a v3 comp block to the studio's Index worksheet."""
+    """Write a v3 comp block to the studio's Index worksheet.
+
+    Holds the studio lock across the read-modify-write cycle so two concurrent
+    saves can't claim the same comp_id. The MEGA link loop happens before the
+    lock — it's the slow part and is pure work on the body, no shared state.
+    """
     try:
         from api.sheets_client import with_retry
 
@@ -365,8 +380,6 @@ def _write_comp_to_index(body: CompSaveBody, created_by: str) -> None:
             _log.warning("Unknown studio on save: %s", body.studio)
             return
 
-        ws = _open_index_ws(studio_key)
-        comp_id = _next_comp_id(ws, studio_key)
         now_dt = datetime.now(timezone.utc)
         date_str = f"{now_dt.day} {now_dt.strftime('%b %Y')}"  # "19 Apr 2026"
 
@@ -381,7 +394,9 @@ def _write_comp_to_index(body: CompSaveBody, created_by: str) -> None:
                 ).fetchall()
             scene_meta = {dict(r)["id"]: dict(r) for r in rows}
 
-        # Generate MEGA links per scene (slow — shells to MEGAcmd)
+        # Generate MEGA links per scene (slow — shells to MEGAcmd). Done
+        # OUTSIDE the studio lock; this is pure read work on the body and
+        # the lock should only span shared-state mutation.
         scene_rows_data: list[dict] = []
         for i, sid in enumerate(body.scene_ids, start=1):
             meta = scene_meta.get(sid, {})
@@ -402,26 +417,34 @@ def _write_comp_to_index(body: CompSaveBody, created_by: str) -> None:
             meta_parts.append(body.description)
         meta_text = "\n".join(meta_parts)
 
-        # v3 block rows — 8 columns (A-H)
-        block_rows: list[list] = [
-            ["", comp_id, "", body.title, vol_status, "", "", ""],     # title row
-            ["", "", "", meta_text, "", "", "", ""],                   # meta row
-            ["", "#", "SCENE ID", "SCENE TITLE", "PERFORMERS", "MEGA", "SLR", "NOTES"],  # sub-header
-        ]
-        for sd in scene_rows_data:
-            block_rows.append([
-                "", str(sd["num"]), sd["scene_id"], sd["title"],
-                sd["performers"], sd["mega_url"], "", "",
-            ])
-        block_rows.append(["", "", "", "", "", "", "", ""])  # spacer
+        # ID allocation + write must be atomic per studio. Without the lock,
+        # two concurrent saves both read max(B)=N and both append a row at
+        # comp_id N+1.
+        with _STUDIO_LOCKS[studio_key]:
+            ws = _open_index_ws(studio_key)
+            comp_id = _next_comp_id(ws, studio_key)
 
-        # Append data then apply formatting
-        all_vals = with_retry(lambda: ws.get_all_values())
-        start_idx = len(all_vals)  # 0-indexed row where this block starts
+            # v3 block rows — 8 columns (A-H)
+            block_rows: list[list] = [
+                ["", comp_id, "", body.title, vol_status, "", "", ""],     # title row
+                ["", "", "", meta_text, "", "", "", ""],                   # meta row
+                ["", "#", "SCENE ID", "SCENE TITLE", "PERFORMERS", "MEGA", "SLR", "NOTES"],  # sub-header
+            ]
+            for sd in scene_rows_data:
+                block_rows.append([
+                    "", str(sd["num"]), sd["scene_id"], sd["title"],
+                    sd["performers"], sd["mega_url"], "", "",
+                ])
+            block_rows.append(["", "", "", "", "", "", "", ""])  # spacer
 
-        with_retry(lambda: ws.append_rows(block_rows, value_input_option="USER_ENTERED"))
-        _format_comp_block(ws, studio_key, status, start_idx, n_scenes)
-        _log.info("Wrote comp block %s (%s) — %d scenes", comp_id, studio_key, n_scenes)
+            # Find append position via col B length (cheap) instead of
+            # get_all_values (entire tab, expensive).
+            col_b = with_retry(lambda: ws.col_values(2))
+            start_idx = len(col_b)  # 0-indexed row where this block starts
+
+            with_retry(lambda: ws.append_rows(block_rows, value_input_option="USER_ENTERED"))
+            _format_comp_block(ws, studio_key, status, start_idx, n_scenes)
+            _log.info("Wrote comp block %s (%s) — %d scenes", comp_id, studio_key, n_scenes)
     except Exception as exc:
         _log.error("Failed to write comp block to Index tab: %s", exc, exc_info=True)
 
@@ -759,20 +782,40 @@ async def list_existing_comps(
 # Inline edit — title / volume / status / description on an existing block
 # ---------------------------------------------------------------------------
 
+class CompIfMatch(BaseModel):
+    """Pre-edit snapshot the client saw. Server compares before write to
+    reject silent overwrites when two users edit the same comp."""
+    title: str
+    volume: str = ""
+    status: str = ""
+    description: str = ""
+
+
 class CompPatchBody(BaseModel):
     title: Optional[str] = None
     volume: Optional[str] = None
     status: Optional[str] = None
     description: Optional[str] = None
+    if_match: Optional[CompIfMatch] = None
+
+
+def _comp_etag(title: str, volume: str, status: str, description: str) -> str:
+    """Stable hash of the user-editable fields. Order/format must match what
+    list_existing_comps returns so a freshly-loaded client agrees with the
+    server on the etag."""
+    payload = f"{title}␟{volume}␟{status}␟{description}"
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
 
 
 @router.patch("/{comp_id}")
 async def patch_existing_comp(comp_id: str, body: CompPatchBody, user: CurrentUser):
     """Update title / volume / status / description on an existing v3 block.
 
-    Locates the block by scanning col B for the comp_id, then rewrites col D/E
-    of the title row and col D of the meta row in place. Scene rows are not
-    touched — scene-list editing belongs in a separate flow (block reflow).
+    Locates the block by scanning col B (cheap) instead of the whole tab,
+    reads only the two affected rows, then rewrites cols D/E in place.
+    Optimistic-locking: if `if_match` is supplied and any field has changed
+    on the server since the client loaded it, returns 409 with the latest
+    snapshot so the client can show a conflict UI.
     """
     from api.sheets_client import with_retry
 
@@ -783,62 +826,96 @@ async def patch_existing_comp(comp_id: str, body: CompPatchBody, user: CurrentUs
     if key not in STUDIO_ACCENTS:
         raise HTTPException(status_code=400, detail=f"Unknown studio key: {key}")
 
-    try:
-        ws = _open_index_ws(key)
-        all_rows = with_retry(lambda: ws.get_all_values())
-    except Exception as exc:
-        _log.error("Could not open Index for %s: %s", key, exc)
-        raise HTTPException(status_code=502, detail="Sheet read failed") from exc
+    # Hold the studio lock across the read-modify-write so a save of a new
+    # comp can't insert a row mid-PATCH and shift our index.
+    with _STUDIO_LOCKS[key]:
+        try:
+            ws = _open_index_ws(key)
+            col_b = with_retry(lambda: ws.col_values(2))
+        except Exception as exc:
+            _log.error("Could not open Index for %s: %s", key, exc)
+            raise HTTPException(status_code=502, detail="Sheet read failed") from exc
 
-    title_row_idx: Optional[int] = None  # 0-indexed
-    for i, row in enumerate(all_rows):
-        r = (list(row) + [""] * 8)[:8]
-        if r[1].strip() == comp_id:
-            title_row_idx = i
-            break
-    if title_row_idx is None:
-        raise HTTPException(status_code=404, detail=f"Comp not found: {comp_id}")
+        title_row_idx: Optional[int] = None  # 0-indexed
+        for i, cell in enumerate(col_b):
+            if cell.strip() == comp_id:
+                title_row_idx = i
+                break
+        if title_row_idx is None:
+            raise HTTPException(status_code=404, detail=f"Comp not found: {comp_id}")
 
-    title_row = (list(all_rows[title_row_idx]) + [""] * 8)[:8]
-    meta_row = (list(all_rows[title_row_idx + 1]) + [""] * 8)[:8] if title_row_idx + 1 < len(all_rows) else [""] * 8
+        title_row_n = title_row_idx + 1   # gspread is 1-indexed
+        meta_row_n = title_row_idx + 2
 
-    cur_title = title_row[3].strip()
-    cur_vol, cur_status = _parse_vol_status(title_row[4].strip())
-    cur_meta = meta_row[3]
-    cur_desc = ""
-    cur_meta_head = cur_meta
-    if "\n" in cur_meta:
-        cur_meta_head, cur_desc = cur_meta.split("\n", 1)
-        cur_desc = cur_desc.strip()
+        # Read only the two rows we touch — D:E of the title row, D of the meta row.
+        try:
+            window = with_retry(lambda: ws.get(f"D{title_row_n}:E{meta_row_n}"))
+        except Exception as exc:
+            _log.error("Could not read rows for %s: %s", comp_id, exc)
+            raise HTTPException(status_code=502, detail="Sheet read failed") from exc
 
-    new_title = body.title.strip() if body.title is not None else cur_title
-    new_vol = body.volume.strip() if body.volume is not None else cur_vol
-    new_status = body.status.strip() if body.status is not None else cur_status
-    new_desc = body.description if body.description is not None else cur_desc
+        window = (list(window) + [[""], [""]])[:2]
+        title_window = (list(window[0]) + ["", ""])[:2]
+        meta_window = (list(window[1]) + ["", ""])[:2]
 
-    if new_status and new_status not in STATUS_COLORS:
-        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
+        cur_title = title_window[0].strip()
+        cur_vol, cur_status = _parse_vol_status(title_window[1].strip())
+        cur_meta = meta_window[0]
+        cur_meta_head = cur_meta
+        cur_desc = ""
+        if "\n" in cur_meta:
+            cur_meta_head, cur_desc = cur_meta.split("\n", 1)
+            cur_desc = cur_desc.strip()
 
-    new_vol_status = f"{new_vol}  ·  {new_status}" if new_vol else (new_status or "")
-    new_meta = f"{cur_meta_head}\n{new_desc}".rstrip() if new_desc else cur_meta_head
+        # Optimistic check — if the client's snapshot doesn't match what's on
+        # the sheet now, surface the conflict instead of clobbering.
+        if body.if_match is not None:
+            client_tag = _comp_etag(
+                body.if_match.title,
+                body.if_match.volume,
+                body.if_match.status or "Draft",
+                body.if_match.description,
+            )
+            server_tag = _comp_etag(cur_title, cur_vol, cur_status or "Draft", cur_desc)
+            if client_tag != server_tag:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": "Compilation was modified by someone else.",
+                        "current": {
+                            "title": cur_title,
+                            "volume": cur_vol,
+                            "status": cur_status,
+                            "description": cur_desc,
+                        },
+                    },
+                )
 
-    title_row_n = title_row_idx + 1  # gspread is 1-indexed
-    meta_row_n = title_row_idx + 2
+        new_title = body.title.strip() if body.title is not None else cur_title
+        new_vol = body.volume.strip() if body.volume is not None else cur_vol
+        new_status = body.status.strip() if body.status is not None else cur_status
+        new_desc = body.description if body.description is not None else cur_desc
 
-    try:
-        with_retry(lambda: ws.update(
-            f"D{title_row_n}:E{title_row_n}",
-            [[new_title, new_vol_status]],
-            value_input_option="USER_ENTERED",
-        ))
-        with_retry(lambda: ws.update(
-            f"D{meta_row_n}",
-            [[new_meta]],
-            value_input_option="USER_ENTERED",
-        ))
-    except Exception as exc:
-        _log.error("Failed to patch %s: %s", comp_id, exc, exc_info=True)
-        raise HTTPException(status_code=502, detail="Sheet write failed") from exc
+        if new_status and new_status not in STATUS_COLORS:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
+
+        new_vol_status = f"{new_vol}  ·  {new_status}" if new_vol else (new_status or "")
+        new_meta = f"{cur_meta_head}\n{new_desc}".rstrip() if new_desc else cur_meta_head
+
+        try:
+            with_retry(lambda: ws.update(
+                f"D{title_row_n}:E{title_row_n}",
+                [[new_title, new_vol_status]],
+                value_input_option="USER_ENTERED",
+            ))
+            with_retry(lambda: ws.update(
+                f"D{meta_row_n}",
+                [[new_meta]],
+                value_input_option="USER_ENTERED",
+            ))
+        except Exception as exc:
+            _log.error("Failed to patch %s: %s", comp_id, exc, exc_info=True)
+            raise HTTPException(status_code=502, detail="Sheet write failed") from exc
 
     _log.info("Patched comp %s by %s", comp_id, user.email)
     return {

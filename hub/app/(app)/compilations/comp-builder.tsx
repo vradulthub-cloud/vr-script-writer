@@ -15,8 +15,6 @@ import { studioAbbr } from "@/lib/studio-colors"
 type Mode = "ideas" | "builder" | "existing"
 
 interface Props {
-  allScenes: Scene[]
-  scenesError: string | null
   idToken: string | undefined
 }
 
@@ -61,7 +59,7 @@ function parseIdeas(raw: string): ParsedIdea[] {
 // Main component
 // ---------------------------------------------------------------------------
 
-export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: Props) {
+export function CompBuilder({ idToken: serverIdToken }: Props) {
   const idToken = useIdToken(serverIdToken)
   const client = api(idToken ?? null)
 
@@ -72,6 +70,13 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
   const [sceneSearch, setSceneSearch] = useState("")
   const [ideasNotes, setIdeasNotes] = useState("")
   const [ideasCount, setIdeasCount] = useState(6)
+
+  // Scene catalog — lazy-loaded the first time Builder mode is opened so
+  // landing on Ideas/Existing doesn't pay for the 200-row fetch.
+  const [allScenes, setAllScenes] = useState<Scene[]>([])
+  const [scenesLoaded, setScenesLoaded] = useState(false)
+  const [scenesLoading, setScenesLoading] = useState(false)
+  const [scenesError, setScenesError] = useState<string | null>(null)
 
   // Existing comps state (rich shape from /compilations/existing)
   const [existingComps, setExistingComps] = useState<ExistingComp[]>([])
@@ -88,6 +93,18 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
     client.compilations.existing(studio).then(setExistingComps).catch((e) => { console.warn("[comps] Failed to load existing:", e); setExistingComps([]) }).finally(() => setExistingLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, studio])
+
+  // Lazy-load the scene catalog the first time Builder is opened.
+  useEffect(() => {
+    if (mode !== "builder" || scenesLoaded || scenesLoading) return
+    setScenesLoading(true)
+    setScenesError(null)
+    client.scenes.list({ limit: 200 })
+      .then(s => { setAllScenes(s); setScenesLoaded(true) })
+      .catch(e => setScenesError(e instanceof Error ? e.message : "Failed to load scenes"))
+      .finally(() => setScenesLoading(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
 
   const eligibleScenes = useMemo(
     () => allScenes.filter(s => s.studio === studio),
@@ -502,6 +519,10 @@ export function CompBuilder({ allScenes, scenesError, idToken: serverIdToken }: 
                 {scenesError ? (
                   <div className="rounded-b px-3 py-2 text-xs" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-err)" }}>
                     {scenesError}
+                  </div>
+                ) : scenesLoading && !scenesLoaded ? (
+                  <div className="rounded-b px-3 py-2 text-xs" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text-faint)" }}>
+                    Loading scenes…
                   </div>
                 ) : (
                   <div className="rounded-b overflow-auto" style={{ border: "1px solid var(--color-border)", background: "var(--color-surface)", maxHeight: 220 }}>

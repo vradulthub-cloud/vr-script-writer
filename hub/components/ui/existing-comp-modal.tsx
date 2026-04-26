@@ -41,6 +41,12 @@ export function ExistingCompModal({
   const [description, setDescription] = useState(comp.description)
   const [saving, setSaving] = useState(false)
   const [saveErr, setSaveErr] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<{
+    title: string
+    volume: string
+    status: string
+    description: string
+  } | null>(null)
 
   const [photosetOpen, setPhotosetOpen] = useState(false)
 
@@ -77,12 +83,21 @@ export function ExistingCompModal({
   async function save() {
     setSaving(true)
     setSaveErr(null)
+    setConflict(null)
     try {
       await client.compilations.patch(comp.comp_id, {
         title,
         volume,
         status,
         description,
+        // Snapshot of what the client thinks is on the server. Backend rejects
+        // with 409 if any field has changed since this modal was opened.
+        if_match: {
+          title: comp.title,
+          volume: comp.volume,
+          status: comp.status || "Draft",
+          description: comp.description,
+        },
       })
       setEditing(false)
       // The parent's list won't auto-refresh; mutate the local comp object so
@@ -92,10 +107,42 @@ export function ExistingCompModal({
       comp.status = status
       comp.description = description
     } catch (e) {
+      // ApiError carries `status` + raw body string. For 409 the body is a
+      // JSON-stringified `{detail: {message, current}}` from FastAPI's
+      // HTTPException; surface the snapshot to the user.
+      const status = (e as { status?: number })?.status
+      const body = (e as { body?: string })?.body
+      if (status === 409 && body) {
+        try {
+          const parsed = JSON.parse(body)
+          const current = parsed?.detail?.current
+          if (current) {
+            setConflict(current)
+            setSaveErr("Someone else edited this — review their changes below.")
+            return
+          }
+        } catch {
+          // Fall through to plain error
+        }
+      }
       setSaveErr(e instanceof Error ? e.message : "Save failed")
     } finally {
       setSaving(false)
     }
+  }
+
+  function acceptTheirChanges() {
+    if (!conflict) return
+    comp.title = conflict.title
+    comp.volume = conflict.volume
+    comp.status = conflict.status
+    comp.description = conflict.description
+    setTitle(conflict.title)
+    setVolume(conflict.volume)
+    setStatus(conflict.status || "Draft")
+    setDescription(conflict.description)
+    setConflict(null)
+    setSaveErr(null)
   }
 
   function cancel() {
@@ -296,6 +343,71 @@ export function ExistingCompModal({
 
         {/* Body */}
         <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 18, overflowY: "auto", flex: "1 1 auto", minHeight: 0 }}>
+          {conflict && (
+            <div
+              role="alert"
+              style={{
+                padding: "12px 14px",
+                background: "color-mix(in srgb, var(--color-warn, #f59e0b) 12%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--color-warn, #f59e0b) 35%, transparent)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--color-warn, #f59e0b)" }}>
+                Edit conflict
+              </div>
+              <div style={{ fontSize: 12, color: "var(--color-text)" }}>
+                Someone else saved changes to this compilation while you were editing.
+                Their version is shown below — load it to start over, or keep editing
+                to overwrite.
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", fontSize: 11, color: "var(--color-text-muted)" }}>
+                <span>Title</span><span style={{ color: "var(--color-text)" }}>{conflict.title || "—"}</span>
+                <span>Volume</span><span style={{ color: "var(--color-text)" }}>{conflict.volume || "—"}</span>
+                <span>Status</span><span style={{ color: "var(--color-text)" }}>{conflict.status || "—"}</span>
+                <span>Desc</span><span style={{ color: "var(--color-text)", whiteSpace: "pre-wrap" }}>{conflict.description || "—"}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                <button
+                  type="button"
+                  onClick={acceptTheirChanges}
+                  style={{
+                    fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase",
+                    padding: "5px 12px", background: "var(--color-text)", color: "var(--color-base)",
+                    border: "1px solid transparent", cursor: "pointer",
+                  }}
+                >
+                  Load their version
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // The user is explicitly choosing to overwrite. Adopt the
+                    // server's current state as the if_match snapshot so the
+                    // next save passes the optimistic check; the form's local
+                    // values (their edits) are sent unchanged.
+                    if (conflict) {
+                      comp.title = conflict.title
+                      comp.volume = conflict.volume
+                      comp.status = conflict.status
+                      comp.description = conflict.description
+                    }
+                    setConflict(null)
+                    setSaveErr(null)
+                  }}
+                  style={{
+                    fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase",
+                    padding: "5px 12px", background: "transparent", color: "var(--color-text-muted)",
+                    border: "1px solid var(--color-border)", cursor: "pointer",
+                  }}
+                >
+                  Keep my edits
+                </button>
+              </div>
+            </div>
+          )}
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <SectionLabel>Description</SectionLabel>
             {editing ? (
