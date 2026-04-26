@@ -756,6 +756,102 @@ async def list_existing_comps(
 
 
 # ---------------------------------------------------------------------------
+# Inline edit — title / volume / status / description on an existing block
+# ---------------------------------------------------------------------------
+
+class CompPatchBody(BaseModel):
+    title: Optional[str] = None
+    volume: Optional[str] = None
+    status: Optional[str] = None
+    description: Optional[str] = None
+
+
+@router.patch("/{comp_id}")
+async def patch_existing_comp(comp_id: str, body: CompPatchBody, user: CurrentUser):
+    """Update title / volume / status / description on an existing v3 block.
+
+    Locates the block by scanning col B for the comp_id, then rewrites col D/E
+    of the title row and col D of the meta row in place. Scene rows are not
+    touched — scene-list editing belongs in a separate flow (block reflow).
+    """
+    from api.sheets_client import with_retry
+
+    m = re.match(r"^([A-Z]+)-C\d{4}$", comp_id)
+    if not m:
+        raise HTTPException(status_code=400, detail=f"Invalid comp_id: {comp_id}")
+    key = m.group(1)
+    if key not in STUDIO_ACCENTS:
+        raise HTTPException(status_code=400, detail=f"Unknown studio key: {key}")
+
+    try:
+        ws = _open_index_ws(key)
+        all_rows = with_retry(lambda: ws.get_all_values())
+    except Exception as exc:
+        _log.error("Could not open Index for %s: %s", key, exc)
+        raise HTTPException(status_code=502, detail="Sheet read failed") from exc
+
+    title_row_idx: Optional[int] = None  # 0-indexed
+    for i, row in enumerate(all_rows):
+        r = (list(row) + [""] * 8)[:8]
+        if r[1].strip() == comp_id:
+            title_row_idx = i
+            break
+    if title_row_idx is None:
+        raise HTTPException(status_code=404, detail=f"Comp not found: {comp_id}")
+
+    title_row = (list(all_rows[title_row_idx]) + [""] * 8)[:8]
+    meta_row = (list(all_rows[title_row_idx + 1]) + [""] * 8)[:8] if title_row_idx + 1 < len(all_rows) else [""] * 8
+
+    cur_title = title_row[3].strip()
+    cur_vol, cur_status = _parse_vol_status(title_row[4].strip())
+    cur_meta = meta_row[3]
+    cur_desc = ""
+    cur_meta_head = cur_meta
+    if "\n" in cur_meta:
+        cur_meta_head, cur_desc = cur_meta.split("\n", 1)
+        cur_desc = cur_desc.strip()
+
+    new_title = body.title.strip() if body.title is not None else cur_title
+    new_vol = body.volume.strip() if body.volume is not None else cur_vol
+    new_status = body.status.strip() if body.status is not None else cur_status
+    new_desc = body.description if body.description is not None else cur_desc
+
+    if new_status and new_status not in STATUS_COLORS:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
+
+    new_vol_status = f"{new_vol}  ·  {new_status}" if new_vol else (new_status or "")
+    new_meta = f"{cur_meta_head}\n{new_desc}".rstrip() if new_desc else cur_meta_head
+
+    title_row_n = title_row_idx + 1  # gspread is 1-indexed
+    meta_row_n = title_row_idx + 2
+
+    try:
+        with_retry(lambda: ws.update(
+            f"D{title_row_n}:E{title_row_n}",
+            [[new_title, new_vol_status]],
+            value_input_option="USER_ENTERED",
+        ))
+        with_retry(lambda: ws.update(
+            f"D{meta_row_n}",
+            [[new_meta]],
+            value_input_option="USER_ENTERED",
+        ))
+    except Exception as exc:
+        _log.error("Failed to patch %s: %s", comp_id, exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="Sheet write failed") from exc
+
+    _log.info("Patched comp %s by %s", comp_id, user.email)
+    return {
+        "status": "ok",
+        "comp_id": comp_id,
+        "title": new_title,
+        "volume": new_vol,
+        "comp_status": new_status,
+        "description": new_desc,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Grail write (unchanged — flags scenes as is_compilation)
 # ---------------------------------------------------------------------------
 

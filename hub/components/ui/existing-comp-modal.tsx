@@ -3,25 +3,59 @@
 import { useEffect, useState } from "react"
 import { createPortal } from "react-dom"
 import { X } from "lucide-react"
-import type { ExistingComp } from "@/lib/api"
+import { api, type ExistingComp } from "@/lib/api"
+import { useIdToken } from "@/hooks/use-id-token"
+
+const STATUSES = ["Draft", "Planned", "Published"] as const
 
 /** Detail modal for a single existing compilation row. Lifts the scene grid
  *  + description + metadata out of the inline accordion so the Existing
- *  table stays a clean list, and the detail view has room to breathe. */
+ *  table stays a clean list, and the detail view has room to breathe.
+ *
+ *  Title / Volume / Status / Description are inline-editable — click the
+ *  pencil to enter edit mode, save persists to the studio Index sheet via
+ *  PATCH /api/compilations/{comp_id}. Scene-list editing is intentionally
+ *  out of scope here (separate flow).
+ */
 export function ExistingCompModal({
   comp,
   studioColor,
   onClose,
+  serverIdToken,
 }: {
   comp: ExistingComp
   studioColor: string
   onClose: () => void
+  serverIdToken?: string
 }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
 
+  const idToken = useIdToken(serverIdToken)
+  const client = api(idToken ?? null)
+
+  const [editing, setEditing] = useState(false)
+  const [title, setTitle] = useState(comp.title)
+  const [volume, setVolume] = useState(comp.volume)
+  const [status, setStatus] = useState(comp.status || "Draft")
+  const [description, setDescription] = useState(comp.description)
+  const [saving, setSaving] = useState(false)
+  const [saveErr, setSaveErr] = useState<string | null>(null)
+
+  const [photosetOpen, setPhotosetOpen] = useState(false)
+
+  // Stay in sync if the parent swaps the comp object (e.g. list refresh).
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    setTitle(comp.title)
+    setVolume(comp.volume)
+    setStatus(comp.status || "Draft")
+    setDescription(comp.description)
+    setEditing(false)
+    setSaveErr(null)
+  }, [comp.comp_id, comp.title, comp.volume, comp.status, comp.description])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !editing) onClose() }
     document.addEventListener("keydown", onKey)
     const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
@@ -29,18 +63,58 @@ export function ExistingCompModal({
       document.removeEventListener("keydown", onKey)
       document.body.style.overflow = prev
     }
-  }, [onClose])
+  }, [onClose, editing])
 
   if (!mounted) return null
 
-  const stat = statusColors(comp.status)
+  const stat = statusColors(status)
+  const dirty =
+    title !== comp.title ||
+    volume !== comp.volume ||
+    status !== (comp.status || "Draft") ||
+    description !== comp.description
+
+  async function save() {
+    setSaving(true)
+    setSaveErr(null)
+    try {
+      await client.compilations.patch(comp.comp_id, {
+        title,
+        volume,
+        status,
+        description,
+      })
+      setEditing(false)
+      // The parent's list won't auto-refresh; mutate the local comp object so
+      // subsequent reopens show the new values until the user reloads.
+      comp.title = title
+      comp.volume = volume
+      comp.status = status
+      comp.description = description
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Save failed")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function cancel() {
+    setTitle(comp.title)
+    setVolume(comp.volume)
+    setStatus(comp.status || "Draft")
+    setDescription(comp.description)
+    setSaveErr(null)
+    setEditing(false)
+  }
+
+  const photosetCmd = `python3 ~/Scripts/comp_photoset.py --comp-id ${comp.comp_id} --scenes ${comp.scenes.map(s => s.scene_id).join(",")} --output ~/Desktop/Compilations --zip`
 
   return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="comp-modal-title"
-      onClick={onClose}
+      onClick={() => !editing && onClose()}
       style={{
         position: "fixed",
         inset: 0,
@@ -79,7 +153,7 @@ export function ExistingCompModal({
             flexShrink: 0,
           }}
         >
-          <div style={{ minWidth: 0 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div
               style={{
                 fontFamily: "var(--font-mono)",
@@ -89,39 +163,107 @@ export function ExistingCompModal({
                 textTransform: "uppercase",
                 color: studioColor,
                 marginBottom: 6,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
               }}
             >
-              {comp.comp_id}{comp.volume ? ` · ${comp.volume}` : ""}
+              <span>{comp.comp_id}</span>
+              {!editing ? (
+                volume && <span style={{ color: "var(--color-text-faint)" }}>· {volume}</span>
+              ) : (
+                <input
+                  value={volume}
+                  onChange={e => setVolume(e.target.value)}
+                  placeholder="Vol. 1 / New"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 10,
+                    letterSpacing: "0.16em",
+                    textTransform: "uppercase",
+                    background: "var(--color-elevated)",
+                    border: "1px solid var(--color-border)",
+                    color: "var(--color-text)",
+                    padding: "2px 6px",
+                    width: 110,
+                    outline: "none",
+                  }}
+                />
+              )}
             </div>
-            <h2
-              id="comp-modal-title"
-              style={{
-                fontFamily: "var(--font-display-hero)",
-                fontWeight: 400,
-                fontSize: 28,
-                lineHeight: 1.05,
-                letterSpacing: "-0.02em",
-                color: "var(--color-text)",
-                margin: 0,
-              }}
-            >
-              {comp.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}
-            </h2>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-              <span
+            {editing ? (
+              <input
+                id="comp-modal-title"
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                placeholder="Title"
                 style={{
-                  fontSize: 9,
-                  fontWeight: 800,
-                  letterSpacing: "0.12em",
-                  textTransform: "uppercase",
-                  padding: "3px 8px",
-                  color: stat.fg,
-                  background: stat.bg,
-                  border: `1px solid ${stat.border}`,
+                  fontFamily: "var(--font-display-hero)",
+                  fontWeight: 400,
+                  fontSize: 28,
+                  lineHeight: 1.05,
+                  letterSpacing: "-0.02em",
+                  color: "var(--color-text)",
+                  background: "var(--color-elevated)",
+                  border: "1px solid var(--color-border)",
+                  padding: "4px 8px",
+                  width: "100%",
+                  outline: "none",
+                }}
+              />
+            ) : (
+              <h2
+                id="comp-modal-title"
+                style={{
+                  fontFamily: "var(--font-display-hero)",
+                  fontWeight: 400,
+                  fontSize: 28,
+                  lineHeight: 1.05,
+                  letterSpacing: "-0.02em",
+                  color: "var(--color-text)",
+                  margin: 0,
                 }}
               >
-                {comp.status || "Draft"}
-              </span>
+                {comp.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}
+              </h2>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+              {editing ? (
+                <select
+                  value={status}
+                  onChange={e => setStatus(e.target.value)}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    padding: "3px 6px",
+                    color: stat.fg,
+                    background: stat.bg,
+                    border: `1px solid ${stat.border}`,
+                    outline: "none",
+                  }}
+                >
+                  {STATUSES.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              ) : (
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 800,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    padding: "3px 8px",
+                    color: stat.fg,
+                    background: stat.bg,
+                    border: `1px solid ${stat.border}`,
+                  }}
+                >
+                  {comp.status || "Draft"}
+                </span>
+              )}
               <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
                 {comp.scene_count} scene{comp.scene_count === 1 ? "" : "s"}
               </span>
@@ -154,14 +296,32 @@ export function ExistingCompModal({
 
         {/* Body */}
         <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 18, overflowY: "auto", flex: "1 1 auto", minHeight: 0 }}>
-          {comp.description && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <SectionLabel>Description</SectionLabel>
-              <p style={{ fontSize: 12.5, color: "var(--color-text)", lineHeight: 1.65, whiteSpace: "pre-wrap", margin: 0 }}>
-                {comp.description}
-              </p>
-            </div>
-          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <SectionLabel>Description</SectionLabel>
+            {editing ? (
+              <textarea
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                rows={5}
+                placeholder="Compilation description"
+                style={{
+                  fontSize: 12.5,
+                  color: "var(--color-text)",
+                  lineHeight: 1.65,
+                  background: "var(--color-elevated)",
+                  border: "1px solid var(--color-border)",
+                  padding: "8px 10px",
+                  resize: "vertical",
+                  outline: "none",
+                  fontFamily: "inherit",
+                }}
+              />
+            ) : (
+              comp.description
+                ? <p style={{ fontSize: 12.5, color: "var(--color-text)", lineHeight: 1.65, whiteSpace: "pre-wrap", margin: 0 }}>{comp.description}</p>
+                : <p style={{ fontSize: 12, color: "var(--color-text-faint)", margin: 0, fontStyle: "italic" }}>No description.</p>
+            )}
+          </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <SectionLabel>Scenes</SectionLabel>
@@ -251,6 +411,77 @@ export function ExistingCompModal({
               ))}
             </div>
           </div>
+
+          {/* Photoset build helper — copy-paste command for the local Mac
+              script. Mirrors the affordance in Builder mode but prefilled
+              with this comp's real ID and scene IDs. */}
+          <div>
+            <SectionLabel>Photoset (Mac-local)</SectionLabel>
+            <div style={{ marginTop: 6, border: "1px solid var(--color-border)", background: "var(--color-elevated)" }}>
+              <button
+                type="button"
+                onClick={() => setPhotosetOpen(o => !o)}
+                aria-expanded={photosetOpen}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  width: "100%",
+                  padding: "8px 12px",
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--color-text-muted)",
+                  fontSize: 11,
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <span aria-hidden style={{ fontSize: 9, color: "var(--color-text-faint)", transform: photosetOpen ? "rotate(90deg)" : undefined, transition: "transform 150ms" }}>▶</span>
+                Build Photoset (rclone + Pillow)
+                <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--color-text-faint)" }}>
+                  {comp.scenes.length} scene{comp.scenes.length === 1 ? "" : "s"}
+                </span>
+              </button>
+              {photosetOpen && (
+                <div style={{ padding: "0 12px 12px", borderTop: "1px solid var(--color-border)" }}>
+                  <pre
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 11,
+                      color: "var(--color-text)",
+                      background: "var(--color-base)",
+                      padding: "10px 12px",
+                      margin: "10px 0 6px",
+                      overflow: "auto",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-all",
+                    }}
+                  >{photosetCmd}</pre>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <p style={{ fontSize: 10, color: "var(--color-text-faint)", margin: 0 }}>
+                      Run on your Mac. Requires rclone + Pillow.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard?.writeText(photosetCmd)}
+                      style={{
+                        fontSize: 10,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        padding: "4px 10px",
+                        background: "transparent",
+                        color: "var(--color-text-muted)",
+                        border: "1px solid var(--color-border)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Footer */}
@@ -270,23 +501,91 @@ export function ExistingCompModal({
             {comp.created_by ? `By ${comp.created_by}` : "—"}
             {comp.updated && comp.updated !== comp.created && ` · Updated ${comp.updated}`}
           </span>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              padding: "6px 14px",
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              background: "transparent",
-              color: "var(--color-text-muted)",
-              border: "1px solid var(--color-border)",
-              cursor: "pointer",
-            }}
-          >
-            Close
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {saveErr && (
+              <span style={{ fontSize: 10, color: "var(--color-err)", letterSpacing: "0.04em" }}>
+                {saveErr}
+              </span>
+            )}
+            {editing ? (
+              <>
+                <button
+                  type="button"
+                  onClick={cancel}
+                  disabled={saving}
+                  style={{
+                    padding: "6px 14px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    background: "transparent",
+                    color: "var(--color-text-muted)",
+                    border: "1px solid var(--color-border)",
+                    cursor: saving ? "wait" : "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={saving || !dirty}
+                  style={{
+                    padding: "6px 14px",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    background: "var(--color-lime)",
+                    color: "var(--color-lime-ink)",
+                    border: "1px solid transparent",
+                    cursor: saving || !dirty ? "not-allowed" : "pointer",
+                    opacity: !dirty ? 0.5 : 1,
+                  }}
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  style={{
+                    padding: "6px 14px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    background: "transparent",
+                    color: "var(--color-text)",
+                    border: "1px solid var(--color-border)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  style={{
+                    padding: "6px 14px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    background: "transparent",
+                    color: "var(--color-text-muted)",
+                    border: "1px solid var(--color-border)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Close
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>,
