@@ -852,7 +852,16 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       },
       grailWrite: (body: { studio: string; title: string; scene_ids: string[] }) =>
         post<{ status: string; scene_count: number }>("/compilations/grail-write", body),
-      patch: (compId: string, body: { title?: string; volume?: string; status?: string; description?: string }) =>
+      patch: (
+        compId: string,
+        body: {
+          title?: string
+          volume?: string
+          status?: string
+          description?: string
+          if_match?: { title: string; volume?: string; status?: string; description?: string }
+        },
+      ) =>
         patch<{
           status: string
           comp_id: string
