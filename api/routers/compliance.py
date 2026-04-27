@@ -30,10 +30,23 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
-from pydantic import BaseModel
+import base64
+import re
+
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from pydantic import BaseModel, Field
 
 from api.auth import CurrentUser
+from api.config import get_settings
+from api.compliance_db import (
+    SignedTalent,
+    contract_version,
+    get_signed_pdf_path,
+    is_shoot_complete,
+    list_signed_talents,
+    upsert_signature,
+)
+from api.compliance_pdf import render_agreement_pdf
 from api.routers.shoots import (
     LEGAL_ROOT_FOLDER,
     _get_drive_rw_token,
@@ -140,6 +153,68 @@ class FillFormRequest(BaseModel):
     id2_number: str = ""
     signature: str = ""
     company_name: str = ""
+
+
+# ─── Hub-only signing flow (TKT-0150) ────────────────────────────────────────
+
+
+class SignRequest(BaseModel):
+    """Single payload from the iPad form. Drives the new compliance flow:
+    captures every field that lives on the legacy Drive PDF templates plus a
+    drawn signature image (base64-encoded PNG)."""
+    talent_role: str = Field(..., pattern=r"^(female|male)$")
+    talent_slug: str
+    talent_display: str
+
+    # W-9 (page 1 of legacy template)
+    legal_name: str
+    business_name: str = ""
+    tax_classification: str = Field("individual", pattern=r"^(individual|c_corp|s_corp|partnership|trust_estate|llc|other)$")
+    llc_class: str = ""              # 'C' | 'S' | 'P' (only used when tax_classification='llc')
+    other_classification: str = ""
+    exempt_payee_code: str = ""
+    fatca_code: str = ""
+    tin_type: str = Field("ssn", pattern=r"^(ssn|ein)$")
+    tin: str                          # raw digits, no formatting
+
+    # 2257 Performer Names Disclosure (page 6 of legacy template)
+    dob: str                          # YYYY-MM-DD
+    place_of_birth: str
+    street_address: str
+    city_state_zip: str
+    phone: str
+    email: str
+    id1_type: str
+    id1_number: str
+    id2_type: str = ""
+    id2_number: str = ""
+    stage_names: str = ""
+    professional_names: str = ""
+    nicknames_aliases: str = ""
+    previous_legal_names: str = ""
+
+    # Drawn signature, sent as a base64 data-URL or raw base64 PNG
+    signature_png: str
+
+
+class SignResult(BaseModel):
+    shoot_id: str
+    talent_role: str
+    talent_slug: str
+    signed_at: str
+    pdf_local_path: str
+    pdf_mega_path: str
+    contract_version: str
+
+
+class SignedSummary(BaseModel):
+    """Per-talent summary returned by /shoots/{id}/signed for the UI."""
+    talent_role: str
+    talent_slug: str
+    talent_display: str
+    legal_name: str
+    signed_at: str
+    pdf_mega_path: str
 
 
 # ─── Drive helpers ────────────────────────────────────────────────────────────
@@ -469,6 +544,10 @@ async def list_compliance_shoots(
 
     shoots = _load_shoots_window(target_date, target_date, include_cancelled=False)
     token = _get_drive_token()
+    # Bulk-fetch DB-backed signatures so is_complete + pdfs_ready don't depend
+    # on Drive folder presence (the Drive proxy false-positives the moment
+    # prepare copies blank templates — see TKT-0150).
+    signed_by_shoot = list_signed_talents([s.shoot_id for s in shoots])
     results: list[ComplianceShoot] = []
 
     for shoot in shoots:
@@ -481,10 +560,10 @@ async def list_compliance_shoots(
         studio = primary.studio or ""
 
         folder_url = folder_id = folder_name = None
-        pdfs_ready = False
         photos_count = 0
-        is_complete = False
 
+        # Drive folder lookup is now PURELY for displaying the legacy folder
+        # link in the UI. Completion comes from compliance_signatures.
         if token:
             shoot_date_obj = _parse_shoot_date(shoot.shoot_date)
             if shoot_date_obj:
@@ -496,18 +575,44 @@ async def list_compliance_shoots(
                         folder_id, folder_name = info
                         folder_url = f"https://drive.google.com/drive/folders/{folder_id}"
                         files = _list_folder_files(folder_id, token)
-                        pdf_count = sum(1 for f in files if f.get("name", "").lower().endswith(".pdf"))
-                        jpg_count = sum(1 for f in files if f.get("name", "").lower().endswith((".jpg", ".jpeg", ".png")))
-                        need_pdfs = 2 if shoot.male_talent else 1
-                        pdfs_ready = pdf_count >= need_pdfs
-                        photos_count = jpg_count
+                        photos_count = sum(
+                            1 for f in files
+                            if f.get("name", "").lower().endswith((".jpg", ".jpeg", ".png"))
+                        )
                 except Exception as exc:
                     _log.debug("compliance folder lookup: %s", exc)
 
-        for sc in bg_scenes:
-            for asset in sc.assets:
-                if asset.asset_type == "legal_docs_uploaded" and asset.status == "validated":
-                    is_complete = True
+        # Completion: prefer DB-backed signatures (new flow), fall back to the
+        # legacy Drive-folder check so shoots completed via the old prepare/
+        # fill-form path still show as complete during the cutover. Once the
+        # Hub UI is fully rewired, the Drive fallback can be removed.
+        signed = signed_by_shoot.get(shoot.shoot_id, [])
+        signed_roles = {t.talent_role for t in signed}
+        needed_roles = {"female", "male"} if shoot.male_talent else {"female"}
+        if signed:
+            is_complete = needed_roles.issubset(signed_roles)
+            pdfs_ready = True
+        else:
+            # Legacy fallback — mirror the pre-TKT-0150 logic
+            is_complete_legacy = False
+            for sc in bg_scenes:
+                for asset in sc.assets:
+                    if asset.asset_type == "legal_docs_uploaded" and asset.status == "validated":
+                        is_complete_legacy = True
+            is_complete = is_complete_legacy
+            # pdfs_ready ← legacy file-count check
+            need_pdfs = 2 if shoot.male_talent else 1
+            try:
+                if folder_id and token:
+                    files_for_pdf = _list_folder_files(folder_id, token)
+                    pdfs_ready = sum(
+                        1 for f in files_for_pdf
+                        if f.get("name", "").lower().endswith(".pdf")
+                    ) >= need_pdfs
+                else:
+                    pdfs_ready = False
+            except Exception:
+                pdfs_ready = False
 
         results.append(ComplianceShoot(
             shoot_id=shoot.shoot_id,
@@ -836,9 +941,31 @@ async def get_filled_pdf(
     user: CurrentUser,
     talent: str = Query(...),
 ):
-    """Serve the filled PDF for a talent from their Drive legal folder."""
+    """Serve the agreement PDF for a talent.
+
+    Preferred source: `pdf_local_path` from `compliance_signatures` (written
+    by the new /sign flow). Falls back to the legacy Drive folder so the
+    existing prepare/fill-form path keeps working until the Hub UI is
+    rewired to the new endpoints."""
     from fastapi.responses import Response as FastAPIResponse
 
+    talent_slug = talent.replace(" ", "")
+
+    # 1. New flow — DB-backed local PDF
+    pdf_path = (
+        get_signed_pdf_path(shoot_id, "female", talent_slug)
+        or get_signed_pdf_path(shoot_id, "male", talent_slug)
+    )
+    if pdf_path:
+        p = Path(pdf_path)
+        if p.exists():
+            return FastAPIResponse(
+                content=p.read_bytes(),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"inline; filename={p.name}"},
+            )
+
+    # 2. Legacy fallback — Drive folder (the old fill-form path writes here)
     from_d, to_d = _window()
     shoots = _load_shoots_window(from_d, to_d, include_cancelled=False)
     shoot = next((s for s in shoots if s.shoot_id == shoot_id), None)
@@ -851,17 +978,15 @@ async def get_filled_pdf(
 
     token = _get_drive_token()
     if not token:
-        raise HTTPException(status_code=503, detail="Drive credentials unavailable")
+        raise HTTPException(status_code=404, detail="Talent has not signed yet")
 
     folder_info = _get_shoot_folder(
         shoot_date, shoot.female_talent, shoot.male_talent, token
     )
     if not folder_info:
-        raise HTTPException(status_code=404, detail="Drive folder not found — run Prepare first")
+        raise HTTPException(status_code=404, detail="Talent has not signed yet")
     folder_id, _ = folder_info
-
     files = _list_folder_files(folder_id, token)
-    talent_slug = talent.replace(" ", "")
     date_code = shoot_date.strftime("%m%d%y")
     pdf_name = f"{talent_slug}-{date_code}.pdf"
     pdf_file = next(
@@ -876,7 +1001,6 @@ async def get_filled_pdf(
     )
     with urllib.request.urlopen(dl_req, timeout=30) as resp:
         pdf_bytes = resp.read()
-
     return FastAPIResponse(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -1053,3 +1177,218 @@ async def confirm_photo_uploads(
         mega_paths=[],
         errors=[],
     )
+
+
+# ─── Hub-only signing flow (TKT-0150) ────────────────────────────────────────
+# These endpoints replace prepare/fill-form. The Hub renders the contract
+# verbatim, captures a drawn signature, posts here. We persist to
+# compliance_signatures, render our own PDF, push it to MEGA (no Drive).
+
+
+_SIG_DATA_URL_RE = re.compile(r"^data:image/png;base64,(.+)$", re.IGNORECASE)
+
+
+def _decode_signature_png(payload: str) -> bytes:
+    """Accept either a data: URL or raw base64 PNG, return the PNG bytes."""
+    if not payload:
+        raise HTTPException(status_code=400, detail="signature_png required")
+    m = _SIG_DATA_URL_RE.match(payload)
+    raw_b64 = m.group(1) if m else payload
+    try:
+        b = base64.b64decode(raw_b64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="signature_png is not valid base64")
+    if not b.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise HTTPException(status_code=400, detail="signature_png must be a PNG")
+    return b
+
+
+def _signature_dir() -> Path:
+    """Local on-disk storage for raw signature PNGs (audit trail)."""
+    p = Path(get_settings().base_dir) / "compliance_signatures"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _legal_pdf_dir() -> Path:
+    """Local on-disk storage for generated agreement PDFs (pre-MEGA push)."""
+    p = Path(get_settings().base_dir) / "compliance_pdfs"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _push_to_mega(local: Path, remote: str) -> Optional[str]:
+    """copyto local → mega path; returns stderr on failure, None on success."""
+    try:
+        r = subprocess.run(
+            [_RCLONE, "--config", _RCLONE_CONF, "copyto", str(local), remote],
+            capture_output=True, text=True, timeout=120,
+        )
+        if r.returncode == 0:
+            return None
+        return (r.stderr or "rclone failed")[:300]
+    except Exception as exc:
+        return str(exc)
+
+
+@router.post("/shoots/{shoot_id}/sign", response_model=SignResult)
+async def sign_shoot(shoot_id: str, user: CurrentUser, request: Request, body: SignRequest):
+    """
+    End-to-end Hub signing flow:
+      1. Validate shoot + talent role
+      2. Save the drawn signature PNG to disk (audit trail)
+      3. Render our own agreement PDF embedding the signature
+      4. Persist every field + audit metadata to compliance_signatures
+      5. Push the PDF to MEGA Grail/{Studio}/{scene_id}/Legal/
+      6. Return paths so the UI can link to the saved PDF
+    """
+    from_d, to_d = _window()
+    shoots = _load_shoots_window(from_d, to_d, include_cancelled=False)
+    shoot = next((s for s in shoots if s.shoot_id == shoot_id), None)
+    if not shoot:
+        raise HTTPException(status_code=404, detail="Shoot not found")
+
+    # Pick the BG scene we'll attach this signature to
+    bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in ("BG", "BGCP")]
+    if not bg_scenes:
+        raise HTTPException(status_code=400, detail="Shoot has no BG/BGCP scene")
+    primary = bg_scenes[0]
+    scene_id = primary.scene_id or ""
+    studio   = primary.studio or ""
+
+    # Cross-check talent identity against the shoot record
+    if body.talent_role == "female":
+        expected = shoot.female_talent.replace(" ", "")
+    else:
+        expected = (shoot.male_talent or "").replace(" ", "")
+    if not expected:
+        raise HTTPException(status_code=400, detail=f"Shoot has no {body.talent_role} talent")
+    if body.talent_slug.replace(" ", "").lower() != expected.lower():
+        raise HTTPException(
+            status_code=400,
+            detail=f"talent_slug {body.talent_slug!r} does not match shoot's {body.talent_role}",
+        )
+
+    # 1. Save signature image to disk
+    png_bytes = _decode_signature_png(body.signature_png)
+    sig_path = _signature_dir() / f"{shoot.shoot_date}-{body.talent_slug}-{body.talent_role}.png"
+    sig_path.write_bytes(png_bytes)
+
+    # 2. Render PDF
+    shoot_date_obj = _parse_shoot_date(shoot.shoot_date)
+    if not shoot_date_obj:
+        raise HTTPException(status_code=400, detail="Invalid shoot date")
+    signed_at_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    pdf_name = f"{body.talent_slug}-{shoot_date_obj.strftime('%m%d%y')}.pdf"
+    pdf_path = _legal_pdf_dir() / shoot.shoot_date / pdf_name
+    render_agreement_pdf(
+        talent_display=body.talent_display,
+        talent_role=body.talent_role,
+        legal_name=body.legal_name,
+        business_name=body.business_name,
+        tax_classification=body.tax_classification,
+        llc_class=body.llc_class,
+        other_classification=body.other_classification,
+        exempt_payee_code=body.exempt_payee_code,
+        fatca_code=body.fatca_code,
+        tin_type=body.tin_type,
+        tin=body.tin,
+        dob=body.dob,
+        place_of_birth=body.place_of_birth,
+        street_address=body.street_address,
+        city_state_zip=body.city_state_zip,
+        phone=body.phone,
+        email=body.email,
+        id1_type=body.id1_type,
+        id1_number=body.id1_number,
+        id2_type=body.id2_type,
+        id2_number=body.id2_number,
+        stage_names=body.stage_names,
+        professional_names=body.professional_names,
+        nicknames_aliases=body.nicknames_aliases,
+        previous_legal_names=body.previous_legal_names,
+        signature_png_bytes=png_bytes,
+        shoot_date=shoot_date_obj,
+        signed_at_iso=signed_at_iso,
+        output_path=pdf_path,
+    )
+
+    # 3. Push to MEGA
+    mega_studio = STUDIO_TO_MEGA.get(studio, studio)
+    mega_remote = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/{pdf_name}"
+    mega_err: Optional[str] = None
+    if scene_id:
+        mega_err = _push_to_mega(pdf_path, mega_remote)
+        if mega_err:
+            _log.warning("MEGA push failed for %s: %s", pdf_name, mega_err)
+    else:
+        _log.warning("Skipping MEGA push: no scene_id for %s", shoot_id)
+        mega_remote = ""
+
+    # 4. Persist
+    upsert_signature(
+        shoot_id=shoot.shoot_id,
+        shoot_date=shoot.shoot_date,
+        scene_id=scene_id,
+        studio=studio,
+        talent_role=body.talent_role,
+        talent_slug=body.talent_slug,
+        talent_display=body.talent_display,
+        legal_name=body.legal_name,
+        business_name=body.business_name,
+        tax_classification=body.tax_classification,
+        llc_class=body.llc_class,
+        other_classification=body.other_classification,
+        exempt_payee_code=body.exempt_payee_code,
+        fatca_code=body.fatca_code,
+        tin_type=body.tin_type,
+        tin=body.tin,
+        dob=body.dob,
+        place_of_birth=body.place_of_birth,
+        street_address=body.street_address,
+        city_state_zip=body.city_state_zip,
+        phone=body.phone,
+        email=body.email,
+        id1_type=body.id1_type,
+        id1_number=body.id1_number,
+        id2_type=body.id2_type,
+        id2_number=body.id2_number,
+        stage_names=body.stage_names,
+        professional_names=body.professional_names,
+        nicknames_aliases=body.nicknames_aliases,
+        previous_legal_names=body.previous_legal_names,
+        signature_image_path=str(sig_path.relative_to(get_settings().base_dir)),
+        signed_ip=request.client.host if request.client else "",
+        signed_user_agent=request.headers.get("user-agent", "")[:300],
+        signed_by_user=getattr(user, "email", "") or "",
+        pdf_local_path=str(pdf_path),
+        pdf_mega_path=mega_remote if not mega_err else "",
+    )
+
+    return SignResult(
+        shoot_id=shoot.shoot_id,
+        talent_role=body.talent_role,
+        talent_slug=body.talent_slug,
+        signed_at=signed_at_iso,
+        pdf_local_path=str(pdf_path),
+        pdf_mega_path=mega_remote if not mega_err else "",
+        contract_version=contract_version(),
+    )
+
+
+@router.get("/shoots/{shoot_id}/signed", response_model=list[SignedSummary])
+async def get_signed_summary(shoot_id: str, user: CurrentUser):
+    """Return one row per talent who has completed the in-Hub agreement flow."""
+    by_shoot = list_signed_talents([shoot_id])
+    talents = by_shoot.get(shoot_id, [])
+    return [
+        SignedSummary(
+            talent_role=t.talent_role,
+            talent_slug=t.talent_slug,
+            talent_display=t.talent_display,
+            legal_name=t.legal_name,
+            signed_at=t.signed_at,
+            pdf_mega_path=t.pdf_mega_path,
+        )
+        for t in talents
+    ]

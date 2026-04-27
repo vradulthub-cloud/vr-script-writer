@@ -257,6 +257,68 @@ CREATE TABLE IF NOT EXISTS prompt_overrides (
     updated_by TEXT DEFAULT '',
     updated_at TEXT NOT NULL
 );
+
+-- Compliance signatures — one row per (shoot_id, talent_role, talent_slug).
+-- Replaces Drive-folder-presence as the source of truth for "did the talent
+-- complete paperwork in the Hub?". Existence of a row with signed_at != ''
+-- and signature_image_path != '' means the talent walked through the full
+-- in-Hub agreement flow on signed_at; the generated PDF lives at pdf_mega_path.
+CREATE TABLE IF NOT EXISTS compliance_signatures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shoot_id TEXT NOT NULL,             -- "{shoot_date}|{female}" (matches Shoot.shoot_id)
+    shoot_date TEXT NOT NULL,           -- YYYY-MM-DD
+    scene_id TEXT DEFAULT '',           -- Grail scene id, e.g. "VRH0758"
+    studio TEXT DEFAULT '',              -- UI name, e.g. "VRHush"
+    talent_role TEXT NOT NULL,          -- 'female' | 'male'
+    talent_slug TEXT NOT NULL,          -- "SofiaRed" / "MikeMancini"
+    talent_display TEXT NOT NULL,       -- "Sofia Red" / "Mike Mancini"
+
+    -- W-9 (page 1 of legacy template)
+    legal_name TEXT NOT NULL,
+    business_name TEXT DEFAULT '',
+    tax_classification TEXT NOT NULL,   -- 'individual' | 'c_corp' | 's_corp' | 'partnership' | 'trust_estate' | 'llc' | 'other'
+    llc_class TEXT DEFAULT '',          -- 'C'|'S'|'P' (only when tax_classification='llc')
+    other_classification TEXT DEFAULT '',
+    exempt_payee_code TEXT DEFAULT '',
+    fatca_code TEXT DEFAULT '',
+    tin_type TEXT NOT NULL,             -- 'ssn' | 'ein'
+    tin TEXT NOT NULL,                  -- raw digits; matches legacy Drive PDF storage
+
+    -- 2257 Performer Names Disclosure (page 6 of legacy template)
+    dob TEXT NOT NULL,                  -- YYYY-MM-DD
+    place_of_birth TEXT NOT NULL,
+    street_address TEXT NOT NULL,
+    city_state_zip TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    email TEXT NOT NULL,
+    id1_type TEXT NOT NULL,
+    id1_number TEXT NOT NULL,
+    id2_type TEXT DEFAULT '',
+    id2_number TEXT DEFAULT '',
+    stage_names TEXT DEFAULT '',
+    professional_names TEXT DEFAULT '',
+    nicknames_aliases TEXT DEFAULT '',
+    previous_legal_names TEXT DEFAULT '',
+
+    -- Signature + audit
+    signature_image_path TEXT NOT NULL,  -- relative path to PNG of drawn signature
+    signed_at TEXT NOT NULL,             -- ISO-8601 UTC, e.g. "2026-04-27T18:32:00Z"
+    signed_ip TEXT DEFAULT '',
+    signed_user_agent TEXT DEFAULT '',
+    signed_by_user TEXT DEFAULT '',      -- staff who set up the iPad (RBAC user email)
+    contract_version TEXT NOT NULL,      -- e.g. "2026-04-27.eclatech.v1" — sha256 of rendered contract text
+
+    -- Output artifact
+    pdf_local_path TEXT DEFAULT '',      -- local backup before MEGA push
+    pdf_mega_path TEXT DEFAULT '',       -- "mega:/Grail/{Studio}/{scene_id}/Legal/{Talent}-{date}.pdf"
+
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+
+    UNIQUE(shoot_id, talent_role, talent_slug)
+);
+CREATE INDEX IF NOT EXISTS idx_compliance_shoot     ON compliance_signatures(shoot_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_scene     ON compliance_signatures(scene_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_date      ON compliance_signatures(shoot_date);
 """
 
 
