@@ -31,10 +31,14 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
+    HRFlowable,
     Image,
+    KeepTogether,
     PageTemplate,
     PageBreak,
     Paragraph,
@@ -44,9 +48,101 @@ from reportlab.platypus import (
 )
 from reportlab.lib import colors
 
+
+def _HRule(color, thickness: float = 0.5, *,
+           width: Optional[float] = None,
+           space_before: float = 0, space_after: float = 0):
+    """Thin horizontal accent rule. `width` in points (None → full content width)."""
+    return HRFlowable(
+        width=width if width is not None else "100%",
+        thickness=thickness,
+        color=color,
+        spaceBefore=space_before,
+        spaceAfter=space_after,
+        hAlign="LEFT",
+    )
+
 from api import compliance_contract as cc
 
 W9_TEMPLATE = Path(__file__).parent / "templates" / "w9.pdf"
+
+# ─── Brand ───────────────────────────────────────────────────────────────────
+
+BRAND_LIME    = colors.HexColor("#BED62F")      # Eclatech primary action
+BRAND_INK     = colors.HexColor("#0A0A0A")      # near-black for body text
+BRAND_GRAPH   = colors.HexColor("#3F3F46")      # zinc-700 for secondary
+BRAND_MUTED   = colors.HexColor("#71717A")      # zinc-500 for captions
+BRAND_FAINT   = colors.HexColor("#A1A1AA")      # zinc-400 for hairlines
+BRAND_RULE    = colors.HexColor("#E4E4E7")      # zinc-200 for table rules
+BRAND_TINT    = colors.HexColor("#FAFAFA")      # zinc-50 background tint
+
+
+# ─── Font registration ───────────────────────────────────────────────────────
+
+_FONTS_REGISTERED = False
+
+
+def _register_fonts() -> None:
+    """Register Inter (bundled OTF) so all our styles resolve.
+    Falls back to Helvetica weights if a file is missing — keeps the
+    generator runnable even if the OTF assets get lost."""
+    global _FONTS_REGISTERED
+    if _FONTS_REGISTERED:
+        return
+    base = Path(__file__).parent / "fonts" / "Inter"
+    weights = [
+        ("Inter",          "Inter-Regular.ttf",  "Helvetica"),
+        ("Inter-Light",    "Inter-Light.ttf",    "Helvetica"),
+        ("Inter-Medium",   "Inter-Medium.ttf",   "Helvetica"),
+        ("Inter-SemiBold", "Inter-SemiBold.ttf", "Helvetica-Bold"),
+        ("Inter-Bold",     "Inter-Bold.ttf",     "Helvetica-Bold"),
+        ("Inter-Italic",   "Inter-Italic.ttf",   "Helvetica-Oblique"),
+    ]
+    loaded: dict[str, str] = {}
+    for name, fname, fallback in weights:
+        path = base / fname
+        if path.exists():
+            try:
+                pdfmetrics.registerFont(TTFont(name, str(path)))
+                loaded[name] = name
+                continue
+            except Exception:
+                pass
+        loaded[name] = fallback
+
+    # ReportLab's Paragraph parser uses ps2tt(fontName) to derive bold/italic
+    # variants — populate one family entry per face (each face is its own
+    # family so subsequent registrations don't clobber prior bold/italic
+    # mappings).
+    for face in ("Inter", "Inter-Light", "Inter-Medium", "Inter-SemiBold",
+                 "Inter-Bold", "Inter-Italic"):
+        pdfmetrics.registerFontFamily(
+            face,
+            normal=loaded[face], bold=loaded[face],
+            italic=loaded[face], boldItalic=loaded[face],
+        )
+    # Plus a sane "Inter" family so <b>…</b> in body paragraphs picks up Bold.
+    pdfmetrics.registerFontFamily(
+        "Inter",
+        normal=loaded["Inter"],
+        bold=loaded["Inter-Bold"],
+        italic=loaded["Inter-Italic"],
+        boldItalic=loaded["Inter-Bold"],
+    )
+
+    _FONTS_REGISTERED = True
+
+
+def _font(weight: str = "regular", italic: bool = False) -> str:
+    if italic and weight == "regular":
+        return "Inter-Italic"
+    return {
+        "light":    "Inter-Light",
+        "regular":  "Inter",
+        "medium":   "Inter-Medium",
+        "semibold": "Inter-SemiBold",
+        "bold":     "Inter-Bold",
+    }.get(weight, "Inter")
 
 
 # ─── Public API ──────────────────────────────────────────────────────────────
@@ -89,7 +185,7 @@ def render_agreement_pdf(
     2257 disclosure, all merged."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 1. Build the ReportLab-rendered portion (agreement + disclosure)
+    # 1. Build the ReportLab-rendered portion (cover + agreement + disclosure)
     agreement_buf = io.BytesIO()
     _build_agreement_doc(
         agreement_buf,
@@ -130,10 +226,15 @@ def render_agreement_pdf(
         shoot_date=shoot_date,
     )
 
-    # 3. Merge: W-9 (page 1) + agreement
+    # 3. Final layout: cover (page 1 of agreement_buf) + W-9 + rest of agreement
+    agreement_reader = pypdf.PdfReader(agreement_buf)
+    w9_reader = pypdf.PdfReader(io.BytesIO(w9_filled))
     writer = pypdf.PdfWriter()
-    writer.append(pypdf.PdfReader(io.BytesIO(w9_filled)))
-    writer.append(pypdf.PdfReader(agreement_buf))
+    writer.add_page(agreement_reader.pages[0])    # cover
+    for p in w9_reader.pages:
+        writer.add_page(p)                          # IRS W-9
+    for p in agreement_reader.pages[1:]:
+        writer.add_page(p)                          # agreement + disclosure
     with open(output_path, "wb") as f:
         writer.write(f)
 
@@ -161,37 +262,62 @@ def _build_agreement_doc(
     shoot_date: date,
     signed_at_iso: str,
 ) -> None:
-    """Render just the Model Services Agreement + 2257 Disclosure pages
-    (everything that's NOT the W-9)."""
+    """Render: cover + Model Services Agreement + 2257 Disclosure
+    (everything that's NOT the IRS W-9)."""
+    margin_x = 0.95 * inch
+    margin_top = 0.95 * inch
+    margin_bot = 0.95 * inch
+
     doc = BaseDocTemplate(
         out_buf,
         pagesize=letter,
-        leftMargin=0.75 * inch,
-        rightMargin=0.75 * inch,
-        topMargin=0.85 * inch,
-        bottomMargin=0.85 * inch,
-        title=f"{talent_display} — Eclatech Performer Agreement",
+        leftMargin=margin_x,
+        rightMargin=margin_x,
+        topMargin=margin_top,
+        bottomMargin=margin_bot,
+        title=f"{talent_display} — Performer Agreement",
         author=cc.PRODUCER_NAME,
     )
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main")
 
-    def _footer(canv, _doc):
+    def _chrome(canv, _doc):
         canv.saveState()
-        canv.setFont("Helvetica", 8)
-        canv.setFillGray(0.5)
+        # Top hairline
+        canv.setStrokeColor(BRAND_RULE)
+        canv.setLineWidth(0.5)
+        y_top = letter[1] - 0.55 * inch
+        canv.line(margin_x, y_top, letter[0] - margin_x, y_top)
+        # Header text — running head, all-caps tracked
+        canv.setFont(_font("semibold"), 7)
+        canv.setFillColor(BRAND_MUTED)
+        head = f"{cc.PRODUCER_NAME.upper()}  ·  PERFORMER AGREEMENT  ·  {talent_display.upper()}"
+        canv.drawString(margin_x, y_top + 7, head)
+
+        # Bottom hairline + footer
+        y_bot = 0.55 * inch
+        canv.setStrokeColor(BRAND_RULE)
+        canv.line(margin_x, y_bot + 14, letter[0] - margin_x, y_bot + 14)
+        canv.setFont(_font("medium"), 7)
+        canv.setFillColor(BRAND_MUTED)
         canv.drawString(
-            doc.leftMargin, 0.5 * inch,
-            f"{talent_display} — {cc.PRODUCER_NAME} performer agreement — {shoot_date.isoformat()}",
+            margin_x, y_bot,
+            f"{shoot_date.isoformat()}  ·  signed digitally on iPad  ·  retained per 18 U.S.C. § 2257",
         )
         canv.drawRightString(
-            letter[0] - doc.rightMargin, 0.5 * inch,
-            f"Page {canv.getPageNumber()}",
+            letter[0] - margin_x, y_bot,
+            f"PAGE {canv.getPageNumber()}",
         )
         canv.restoreState()
 
-    doc.addPageTemplates([PageTemplate(id="default", frames=[frame], onPage=_footer)])
+    doc.addPageTemplates([PageTemplate(id="default", frames=[frame], onPage=_chrome)])
 
-    story = []
+    story: list = []
+    story += _cover_page(
+        talent_display=talent_display,
+        legal_name=legal_name,
+        shoot_date=shoot_date,
+    )
+    story.append(PageBreak())
     story += _agreement_pages(
         talent_display=talent_display,
         legal_name=legal_name,
@@ -350,60 +476,99 @@ def _stamp_w9_signature(
 # ─── Styles ──────────────────────────────────────────────────────────────────
 
 
+_register_fonts()
 _BASE = getSampleStyleSheet()
 
-_H1 = ParagraphStyle(
-    "h1", parent=_BASE["Heading1"],
-    fontName="Helvetica-Bold", fontSize=14, leading=18,
-    spaceBefore=8, spaceAfter=8, alignment=TA_LEFT,
+# Display styles for the cover page
+_DISPLAY = ParagraphStyle(
+    "display", parent=_BASE["Heading1"],
+    fontName=_font("bold"), fontSize=34, leading=38,
+    textColor=BRAND_INK, spaceBefore=0, spaceAfter=4, alignment=TA_LEFT,
 )
-_H2 = ParagraphStyle(
-    "h2", parent=_BASE["Heading2"],
-    fontName="Helvetica-Bold", fontSize=11, leading=14,
-    spaceBefore=10, spaceAfter=4, alignment=TA_LEFT,
+_DISPLAY_SUB = ParagraphStyle(
+    "display_sub", parent=_BASE["BodyText"],
+    fontName=_font("light"), fontSize=14, leading=20,
+    textColor=BRAND_GRAPH, spaceBefore=0, spaceAfter=0, alignment=TA_LEFT,
 )
-_BODY = ParagraphStyle(
-    "body", parent=_BASE["BodyText"],
-    fontName="Helvetica", fontSize=9.5, leading=13,
-    spaceBefore=2, spaceAfter=4, alignment=TA_JUSTIFY,
+
+# Eyebrow — small caps marker above headings, brand lime
+_EYEBROW = ParagraphStyle(
+    "eyebrow", parent=_BASE["BodyText"],
+    fontName=_font("semibold"), fontSize=8, leading=12,
+    textColor=BRAND_INK, spaceBefore=0, spaceAfter=4,
+    alignment=TA_LEFT,
 )
-_LABEL = ParagraphStyle(
-    "label", parent=_BASE["BodyText"],
-    fontName="Helvetica-Bold", fontSize=8.5, leading=11,
-    textColor=colors.grey, spaceBefore=2, spaceAfter=0,
-)
-_VALUE = ParagraphStyle(
-    "value", parent=_BASE["BodyText"],
-    fontName="Helvetica", fontSize=10, leading=13,
-    spaceBefore=0, spaceAfter=4,
-)
-_SMALL_CENTER = ParagraphStyle(
-    "small_center", parent=_BASE["BodyText"],
-    fontName="Helvetica", fontSize=8, leading=10,
-    alignment=TA_CENTER, textColor=colors.grey,
-)
-_SECTION_SIG_HEADER = ParagraphStyle(
-    "section_sig_header", parent=_BASE["Heading2"],
-    fontName="Helvetica-Bold", fontSize=11, leading=14,
-    spaceBefore=14, spaceAfter=4, alignment=TA_LEFT,
-    textColor=colors.HexColor("#000000"),
-    backColor=colors.HexColor("#FEF3C7"),
-    borderPadding=6, borderColor=colors.HexColor("#92400E"),
-    borderWidth=0.5,
-)
-_SECTION_BANNER = ParagraphStyle(
-    "section_banner", parent=_BASE["Heading1"],
-    fontName="Helvetica-Bold", fontSize=14, leading=18,
-    spaceBefore=4, spaceAfter=8, alignment=TA_LEFT,
-    textColor=colors.HexColor("#FFFFFF"),
-    backColor=colors.HexColor("#1F2937"),
-    borderPadding=10,
+
+# Section header (replaces black banner) — large heading with a thin lime
+# rule above and a subtle preamble below.
+_SECTION_HEADING = ParagraphStyle(
+    "section_heading", parent=_BASE["Heading1"],
+    fontName=_font("bold"), fontSize=20, leading=24,
+    textColor=BRAND_INK, spaceBefore=0, spaceAfter=2,
+    alignment=TA_LEFT,
 )
 _SECTION_PREAMBLE = ParagraphStyle(
     "section_preamble", parent=_BASE["BodyText"],
-    fontName="Helvetica-Oblique", fontSize=9, leading=12,
-    spaceBefore=0, spaceAfter=8, alignment=TA_JUSTIFY,
-    textColor=colors.HexColor("#374151"),
+    fontName=_font("regular"), fontSize=10, leading=15,
+    textColor=BRAND_GRAPH, spaceBefore=4, spaceAfter=12,
+    alignment=TA_LEFT,
+)
+
+# In-section headings
+_H1 = ParagraphStyle(
+    "h1", parent=_BASE["Heading1"],
+    fontName=_font("semibold"), fontSize=14, leading=20,
+    textColor=BRAND_INK, spaceBefore=12, spaceAfter=6, alignment=TA_LEFT,
+)
+_H2 = ParagraphStyle(
+    "h2", parent=_BASE["Heading2"],
+    fontName=_font("semibold"), fontSize=10.5, leading=16,
+    textColor=BRAND_INK, spaceBefore=10, spaceAfter=2, alignment=TA_LEFT,
+)
+_BODY = ParagraphStyle(
+    "body", parent=_BASE["BodyText"],
+    fontName=_font("regular"), fontSize=9.5, leading=14,
+    textColor=BRAND_INK, spaceBefore=0, spaceAfter=8,
+    alignment=TA_JUSTIFY,
+)
+_BODY_SECONDARY = ParagraphStyle(
+    "body_secondary", parent=_BODY,
+    textColor=BRAND_GRAPH,
+)
+
+# Labels + values for performer-disclosure tables
+_LABEL = ParagraphStyle(
+    "label", parent=_BASE["BodyText"],
+    fontName=_font("semibold"), fontSize=7.5, leading=11,
+    textColor=BRAND_MUTED, spaceBefore=0, spaceAfter=0,
+)
+_VALUE = ParagraphStyle(
+    "value", parent=_BASE["BodyText"],
+    fontName=_font("medium"), fontSize=10.5, leading=14,
+    textColor=BRAND_INK, spaceBefore=2, spaceAfter=0,
+)
+
+# Section signature (acknowledgement card before each signature block)
+_SECTION_SIG_HEADER = ParagraphStyle(
+    "section_sig_header", parent=_BASE["BodyText"],
+    fontName=_font("semibold"), fontSize=8, leading=12,
+    textColor=BRAND_INK, spaceBefore=0, spaceAfter=6,
+    alignment=TA_LEFT,
+)
+_SECTION_SIG_BODY = ParagraphStyle(
+    "section_sig_body", parent=_BASE["BodyText"],
+    fontName=_font("regular"), fontSize=10, leading=15,
+    textColor=BRAND_INK, spaceBefore=0, spaceAfter=8,
+    alignment=TA_LEFT,
+)
+
+_FOOTER = ParagraphStyle(
+    "footer", parent=_BASE["BodyText"],
+    fontName=_font("medium"), fontSize=7, leading=9,
+    textColor=BRAND_MUTED, alignment=TA_LEFT,
+)
+_FOOTER_RIGHT = ParagraphStyle(
+    "footer_right", parent=_FOOTER, alignment=TA_LEFT,
 )
 
 
@@ -422,6 +587,114 @@ def _esc(s: str) -> str:
 # ─── Page builders ───────────────────────────────────────────────────────────
 
 
+def _section_marker(eyebrow: str, heading: str, preamble: str) -> list:
+    """Eyebrow (small caps + lime rule) → heading → preamble.
+    Replaces the old heavy black banner."""
+    out: list = []
+    # Lime accent rule on top
+    out.append(_HRule(BRAND_LIME, 1.5, width=1.0 * inch, space_before=0, space_after=8))
+    out.append(Paragraph(_esc(eyebrow.upper()), _EYEBROW))
+    out.append(Paragraph(_esc(heading), _SECTION_HEADING))
+    if preamble:
+        out.append(Paragraph(_esc(preamble), _SECTION_PREAMBLE))
+    return out
+
+
+def _cover_page(
+    *,
+    talent_display: str,
+    legal_name: str,
+    shoot_date: date,
+) -> list:
+    """Cover page — sets the tone before the W-9."""
+    out: list = []
+    out.append(Spacer(1, 0.6 * inch))
+    out.append(_HRule(BRAND_LIME, 2, width=0.8 * inch, space_before=0, space_after=20))
+    out.append(Paragraph("PERFORMER AGREEMENT", _EYEBROW))
+    out.append(Paragraph(_esc(talent_display), _DISPLAY))
+    out.append(Paragraph(
+        _esc(f"Performer agreement for the production dated {_long_date(shoot_date)}, "
+             f"between {cc.PRODUCER_NAME} (Producer) and {legal_name} (Model)."),
+        _DISPLAY_SUB,
+    ))
+    out.append(Spacer(1, 0.55 * inch))
+
+    # "What's in this document" — 3 sections at a glance
+    rows = [
+        ("01", "IRS FORM W-9",
+         "Taxpayer Identification Number and Certification. Required so the "
+         "Producer can issue a 1099 at year end."),
+        ("02", "MODEL SERVICES AGREEMENT",
+         "Eleven sections covering services, compensation, grants of rights, "
+         "confidentiality, testing, independent-contractor status, governing "
+         "law and arbitration."),
+        ("03", "18 U.S.C. § 2257 RECORDS",
+         "Federal Performer Identification record. Names, aliases, "
+         "government-issued ID details, and the perjury affirmation required "
+         "by law."),
+    ]
+    out.append(_section_index_table(rows))
+
+    # Footer block on cover — what to expect
+    out.append(Spacer(1, 0.55 * inch))
+    out.append(_HRule(BRAND_RULE, 0.5, width=None, space_before=0, space_after=10))
+    out.append(Paragraph(
+        _esc(
+            "Each section is signed independently. Your signature on a section "
+            "applies only to that section. Take your time, and ask the director "
+            "anything you don't understand before signing."
+        ),
+        _BODY_SECONDARY,
+    ))
+    return out
+
+
+def _section_index_table(rows: list[tuple[str, str, str]]) -> Table:
+    """Three-column index card on the cover. Number | Title | Description."""
+    style = TableStyle([
+        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 14),
+        ("TOPPADDING",    (0, 0), (-1, -1), 14),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
+        ("LINEBELOW",     (0, 0), (-1, -2), 0.5, BRAND_RULE),
+        ("LINEABOVE",     (0, 0), (-1,  0), 0.5, BRAND_RULE),
+    ])
+    num_style = ParagraphStyle(
+        "idx_num", parent=_BASE["BodyText"],
+        fontName=_font("light"), fontSize=22, leading=26,
+        textColor=BRAND_LIME,
+    )
+    title_style = ParagraphStyle(
+        "idx_title", parent=_BASE["BodyText"],
+        fontName=_font("semibold"), fontSize=11, leading=14,
+        textColor=BRAND_INK, spaceAfter=4,
+    )
+    desc_style = ParagraphStyle(
+        "idx_desc", parent=_BASE["BodyText"],
+        fontName=_font("regular"), fontSize=9, leading=13,
+        textColor=BRAND_GRAPH,
+    )
+    data = []
+    for num, title, desc in rows:
+        title_p = Paragraph(_esc(title), title_style)
+        desc_p  = Paragraph(_esc(desc), desc_style)
+        cell = Table(
+            [[title_p], [desc_p]],
+            colWidths=[None],
+            style=TableStyle([
+                ("LEFTPADDING",  (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING",   (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING",(0, 0), (-1, -1), 0),
+            ]),
+        )
+        data.append([Paragraph(num, num_style), cell])
+    t = Table(data, colWidths=[0.7 * inch, 5.8 * inch])
+    t.setStyle(style)
+    return t
+
+
 def _agreement_pages(
     *,
     talent_display: str,
@@ -431,55 +704,37 @@ def _agreement_pages(
     signed_at_iso: str,
 ) -> list:
     out: list = []
-    out.append(Paragraph(
-        _esc("SECTION 2 OF 3 — MODEL SERVICES AGREEMENT &amp; RELEASE"),
-        _SECTION_BANNER,
-    ))
-    out.append(Paragraph(
-        _esc(
-            "This is the contract between you (the Model) and Eclatech LLC (the "
-            "Producer) covering today's production. Sections 1–11 below set out "
-            "your services, compensation, the rights you grant, confidentiality, "
-            "testing, your status as an independent contractor, and the governing "
-            "law. Read it carefully — your signature at the bottom of this section "
-            "applies only to Sections 1–11."
+    out += _section_marker(
+        eyebrow="SECTION 02 OF 03",
+        heading="Model Services Agreement & Release",
+        preamble=(
+            "Sections 1–11 below set out your services, compensation, the rights "
+            "you grant the Producer, confidentiality, testing, your status as an "
+            "independent contractor, and governing law. Your signature at the end "
+            "of this section applies only to Sections 1–11."
         ),
-        _SECTION_PREAMBLE,
-    ))
-    out.append(Paragraph(
-        _esc(f"Dated: {_long_date(shoot_date)}"),
-        ParagraphStyle("dated", parent=_BODY, fontName="Helvetica-Bold", spaceAfter=10),
-    ))
-    out.append(Paragraph(_esc(cc.CONTRACT_TITLE.upper()), _H1))
+    )
     out.append(Paragraph(_esc(cc.CONTRACT_INTRO), _BODY))
-    out.append(Spacer(1, 6))
+    out.append(Spacer(1, 4))
 
     for sec in cc.AGREEMENT_SECTIONS:
         out.append(Paragraph(_esc(sec.heading), _H2))
         for para in sec.body.split("\n\n"):
             out.append(Paragraph(_esc(para), _BODY))
 
-    out.append(Spacer(1, 8))
+    out.append(Spacer(1, 6))
     out.append(Paragraph(_esc(cc.WITNESS_STATEMENT), _BODY))
-    out.append(Spacer(1, 8))
-    out.append(Paragraph(_esc(cc.EXECUTION_LINE), _BODY))
-    out.append(Spacer(1, 14))
-
-    # Explicit section signature: makes clear the talent's signature attaches
-    # to sections 1–11 (the Model Services Agreement) and nothing else.
-    out.append(Paragraph(
-        _esc("SIGNATURE — MODEL SERVICES AGREEMENT (Sections 1–11 above)"),
-        _SECTION_SIG_HEADER,
-    ))
-    out.append(Paragraph(
-        _esc(
+    out.append(Paragraph(_esc(cc.EXECUTION_LINE), _BODY_SECONDARY))
+    out.append(Spacer(1, 18))
+    out.append(_acknowledgement_card(
+        eyebrow="SIGNATURE OF MODEL  ·  SECTION 02 OF 03",
+        body=(
             f"By signing below, I, {legal_name}, agree to the Model Services "
             f"Agreement set out in Sections 1–11 above and acknowledge that I "
             f"have read, understood, and accept its terms."
         ),
-        _BODY,
     ))
-    out.append(Spacer(1, 6))
+    out.append(Spacer(1, 8))
     out.append(_two_col_signatures(
         producer_name=cc.PRODUCER_NAME,
         legal_name=legal_name,
@@ -514,35 +769,31 @@ def _disclosure_pages(
     signed_at_iso: str,
 ) -> list:
     out: list = []
-    out.append(Paragraph(
-        _esc("SECTION 3 OF 3 — 18 U.S.C. § 2257 RECORDS"),
-        _SECTION_BANNER,
-    ))
-    out.append(Paragraph(
-        _esc(
+    out += _section_marker(
+        eyebrow="SECTION 03 OF 03  ·  18 U.S.C. § 2257 RECORDS",
+        heading="Performer Names Disclosure",
+        preamble=(
             "This section is the federally-required Performer Identification "
-            "record under 18 U.S.C. § 2257 and 28 C.F.R. § 75. The producer is "
+            "record under 18 U.S.C. § 2257 and 28 C.F.R. § 75. The Producer is "
             "legally required to verify and retain identification information "
             "and a record of all names and aliases used by every performer in a "
-            "sexually-explicit production. By completing and signing this section, "
-            "you provide the producer with that record. Your signature at the "
-            "bottom of this section applies only to the 2257 disclosure, the "
-            "data-processing consent, and the perjury and indemnity statements "
-            "below."
+            "sexually-explicit production. By completing and signing this "
+            "section you provide the Producer with that record. Your signature "
+            "at the end of this section applies only to the 2257 disclosure, "
+            "the data-processing consent, and the perjury and indemnity "
+            "statements below."
         ),
-        _SECTION_PREAMBLE,
-    ))
-    out.append(Paragraph(_esc(cc.DISCLOSURE_HEADING), _H1))
+    )
     out.append(Paragraph(
-        f"<b>Production Name:</b> {_esc('Eclatech LLC studio production')} "
-        f"({_esc(_long_date(shoot_date))}). <b>Producer Name:</b> {_esc(cc.PRODUCER_NAME)}.",
-        _BODY,
+        f"<b>Production:</b> {_esc(cc.PRODUCER_NAME)} studio production · "
+        f"<b>Date:</b> {_esc(_long_date(shoot_date))}",
+        _BODY_SECONDARY,
     ))
     out.append(Paragraph(
         f"I, <b>{_esc(legal_name)}</b>, " + _esc(cc.DISCLOSURE_STATEMENT.lstrip("I ")),
         _BODY,
     ))
-    out.append(Spacer(1, 8))
+    out.append(Spacer(1, 6))
 
     rows = [
         ("FULL LEGAL NAME",                                         legal_name),
@@ -569,36 +820,28 @@ def _disclosure_pages(
     out.append(Paragraph(_esc(cc.DATA_CONSENT), _BODY))
     out.append(Spacer(1, 10))
     out.append(Paragraph(_esc(cc.PERJURY_STATEMENT), _BODY))
-    out.append(Spacer(1, 8))
-    out.append(Paragraph(_esc(cc.INDEMNITY_STATEMENT), _BODY))
-    out.append(Spacer(1, 14))
-
-    # Explicit section signature: makes clear the talent's signature attaches
-    # to the 18 U.S.C. § 2257 Performer Names Disclosure, the data-processing
-    # consent, and the perjury + indemnity statements above.
-    out.append(Paragraph(
-        _esc("SIGNATURE — PERFORMER NAMES DISCLOSURE & PERJURY STATEMENT"),
-        _SECTION_SIG_HEADER,
-    ))
-    out.append(Paragraph(
-        _esc(
-            f"By signing below, I, {legal_name}, swear under the pains and "
-            f"penalties of perjury that the information given on the "
-            f"Performer Names Disclosure above is true, correct, and complete; "
-            f"that I am over eighteen (18) years of age (or the age of majority "
-            f"in my legal jurisdiction); and I consent to the data processing "
-            f"described above."
-        ),
-        _BODY,
-    ))
     out.append(Spacer(1, 6))
+    out.append(Paragraph(_esc(cc.INDEMNITY_STATEMENT), _BODY))
+    out.append(Spacer(1, 18))
+    out.append(_acknowledgement_card(
+        eyebrow="SIGNATURE OF MODEL  ·  SECTION 03 OF 03",
+        body=(
+            f"By signing below, I, {legal_name}, swear under the pains and "
+            f"penalties of perjury that the information given on the Performer "
+            f"Names Disclosure above is true, correct, and complete; that I am "
+            f"over eighteen (18) years of age (or the age of majority in my "
+            f"legal jurisdiction); and I consent to the data processing described "
+            f"above."
+        ),
+    ))
+    out.append(Spacer(1, 8))
     out.append(_label_value_table([
         ("Dated",                   _long_date(shoot_date)),
         ("Signed at (UTC)",          _short_iso(signed_at_iso)),
         ("Printed Full Legal Name", legal_name),
         ("Date of Birth",           _format_dob(dob)),
     ]))
-    out.append(Spacer(1, 4))
+    out.append(Spacer(1, 6))
     out.append(_signature_only(signature_png_bytes))
     return out
 
@@ -607,17 +850,73 @@ def _disclosure_pages(
 
 
 def _label_value_table(rows: list[tuple[str, str]]) -> Table:
-    data = [[Paragraph(_esc(lbl), _LABEL), Paragraph(_esc(val) or "—", _VALUE)] for lbl, val in rows]
-    t = Table(data, colWidths=[2.2 * inch, 4.6 * inch])
-    t.setStyle(TableStyle([
-        ("VALIGN",       (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING",  (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING",   (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING",(0, 0), (-1, -1), 2),
-        ("LINEBELOW",    (0, 0), (-1, -1), 0.25, colors.lightgrey),
-    ]))
+    """Two-column data table — label stacked above value in each cell, in
+    pairs. Used for the 2257 disclosure data and the perjury sign-here block.
+    """
+    # Build a flat list of [label, value] pairs and arrange them into a
+    # 2-column grid. Each grid cell stacks LABEL (small caps) atop VALUE.
+    paired: list[list] = []
+    bag = list(rows)
+    while bag:
+        left = bag.pop(0)
+        right = bag.pop(0) if bag else ("", "")
+        l_lbl, l_val = left
+        r_lbl, r_val = right
+        paired.append([
+            Paragraph(_esc(l_lbl.upper()), _LABEL),
+            Paragraph(_esc(r_lbl.upper()), _LABEL),
+        ])
+        paired.append([
+            Paragraph(_esc(l_val) or "—", _VALUE),
+            Paragraph(_esc(r_val) or "—", _VALUE),
+        ])
+
+    t = Table(paired, colWidths=[3.3 * inch, 3.3 * inch])
+    style_cmds = [
+        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 16),
+        ("TOPPADDING",    (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+    ]
+    # Add hairline between every label/value group (every 2 rows)
+    for i in range(0, len(paired), 2):
+        # Top space before label row
+        style_cmds.append(("TOPPADDING",    (0, i),     (-1, i),     12))
+        style_cmds.append(("BOTTOMPADDING", (0, i),     (-1, i),     2))
+        # Value row spacing
+        style_cmds.append(("TOPPADDING",    (0, i + 1), (-1, i + 1), 0))
+        style_cmds.append(("BOTTOMPADDING", (0, i + 1), (-1, i + 1), 12))
+        # Hairline above each group except the first
+        if i > 0:
+            style_cmds.append(("LINEABOVE", (0, i), (-1, i), 0.5, BRAND_RULE))
+    # Top + bottom rules around the whole block
+    style_cmds.append(("LINEABOVE", (0, 0), (-1, 0), 0.75, BRAND_INK))
+    style_cmds.append(("LINEBELOW", (0, -1), (-1, -1), 0.75, BRAND_INK))
+
+    t.setStyle(TableStyle(style_cmds))
     return t
+
+
+def _acknowledgement_card(eyebrow: str, body: str) -> Table:
+    """Sign-here acknowledgement: thin lime rule on the left edge, eyebrow,
+    body. Replaces the old yellow-highlighted block."""
+    inner = Table(
+        [
+            [Paragraph(_esc(eyebrow), _SECTION_SIG_HEADER)],
+            [Paragraph(_esc(body), _SECTION_SIG_BODY)],
+        ],
+        colWidths=[None],
+        style=TableStyle([
+            ("LEFTPADDING",  (0, 0), (-1, -1), 14),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 14),
+            ("TOPPADDING",   (0, 0), (-1, -1), 12),
+            ("BOTTOMPADDING",(0, 0), (-1, -1), 12),
+            ("BACKGROUND",   (0, 0), (-1, -1), BRAND_TINT),
+            ("LINEBEFORE",   (0, 0), (0, -1),  3,   BRAND_LIME),
+        ]),
+    )
+    return inner
 
 
 def _two_col_signatures(
@@ -629,35 +928,77 @@ def _two_col_signatures(
     shoot_date: date,
     signed_at_iso: str,
 ) -> Table:
-    """Producer | Model two-column signature footer for the agreement."""
-    sig = _signature_image(signature_png_bytes, max_width=2.4 * inch, max_height=0.55 * inch)
-    data = [
-        [Paragraph("<b>PRODUCER:</b>", _LABEL), Paragraph("<b>MODEL:</b>", _LABEL)],
-        [Paragraph(f"Name: {_esc(producer_name)}", _VALUE),
-         Paragraph(f"Legal Name: <b>{_esc(legal_name)}</b>", _VALUE)],
-        [Paragraph("Title: Producer", _VALUE),
-         Paragraph(f"Stage Name: {_esc(talent_display)}", _VALUE)],
-        [Paragraph("By: ____________________", _VALUE), sig],
-        [Paragraph(f"Date: {_esc(_long_date(shoot_date))}", _VALUE),
-         Paragraph(f"Signed (UTC): {_esc(_short_iso(signed_at_iso))}", _VALUE)],
-    ]
-    t = Table(data, colWidths=[3.4 * inch, 3.4 * inch])
+    """Producer | Model two-column signature footer.
+    Each column is: eyebrow → fields stacked → signature line → caption."""
+    sig = _signature_image(signature_png_bytes, max_width=2.6 * inch, max_height=0.55 * inch)
+
+    producer_col = Table(
+        [
+            [Paragraph(_esc("PRODUCER"), _LABEL)],
+            [Paragraph(_esc(producer_name), _VALUE)],
+            [Paragraph(_esc("Title · Producer"), _BODY_SECONDARY)],
+            [Spacer(1, 0.55 * inch)],
+            [Paragraph(_esc("Authorized signatory on file"), _BODY_SECONDARY)],
+            [Paragraph(_esc(f"Date · {_long_date(shoot_date)}"), _BODY_SECONDARY)],
+        ],
+        colWidths=[None],
+        style=TableStyle([
+            ("LEFTPADDING",  (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING",   (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING",(0, 0), (-1, -1), 4),
+            ("LINEBELOW",    (0, 3), (0, 3), 0.75, BRAND_INK),
+        ]),
+    )
+
+    model_col = Table(
+        [
+            [Paragraph(_esc("MODEL"), _LABEL)],
+            [Paragraph(_esc(legal_name), _VALUE)],
+            [Paragraph(_esc(f"Stage name · {talent_display}"), _BODY_SECONDARY)],
+            [sig],
+            [Paragraph(_esc("Talent signature"), _BODY_SECONDARY)],
+            [Paragraph(_esc(f"Date · {_long_date(shoot_date)}  ·  {_short_iso(signed_at_iso)}"), _BODY_SECONDARY)],
+        ],
+        colWidths=[None],
+        style=TableStyle([
+            ("LEFTPADDING",  (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING",   (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING",(0, 0), (-1, -1), 4),
+            ("LINEBELOW",    (0, 3), (0, 3), 0.75, BRAND_INK),
+            ("ALIGN",        (0, 3), (0, 3), "LEFT"),
+        ]),
+    )
+
+    t = Table([[producer_col, model_col]], colWidths=[3.15 * inch, 3.45 * inch])
     t.setStyle(TableStyle([
         ("VALIGN",        (0, 0), (-1, -1), "TOP"),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("TOPPADDING",    (0, 0), (-1, -1), 2),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING",  (0, 0), (0, 0), 32),
+        ("RIGHTPADDING",  (1, 0), (1, 0), 0),
+        ("TOPPADDING",    (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
     return t
 
 
 def _signature_only(signature_png_bytes: bytes) -> Table:
-    """Just the signature row + label, used for the final perjury page."""
-    sig = _signature_image(signature_png_bytes, max_width=3.6 * inch, max_height=0.7 * inch)
-    data = [[Paragraph(_esc("Signature"), _LABEL)], [sig]]
-    t = Table(data, colWidths=[6.8 * inch])
+    """Single signature line, used for the final perjury page."""
+    sig = _signature_image(signature_png_bytes, max_width=3.8 * inch, max_height=0.65 * inch)
+    data = [
+        [Paragraph(_esc("MODEL SIGNATURE"), _LABEL)],
+        [sig],
+        [Paragraph(_esc("Drawn on iPad — captured digitally"), _BODY_SECONDARY)],
+    ]
+    t = Table(data, colWidths=[6.6 * inch])
     t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LINEBELOW", (0, 1), (0, 1), 0.5, colors.black),
+        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 0),
+        ("TOPPADDING",    (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LINEBELOW",     (0, 1), (0, 1), 0.75, BRAND_INK),
     ]))
     return t
 
