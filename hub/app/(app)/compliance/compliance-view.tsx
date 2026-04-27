@@ -15,7 +15,23 @@ import {
   Video,
   X,
 } from "lucide-react"
-import { api, type ComplianceShoot, type CompliancePrepareResult, type FillFormRequest } from "@/lib/api"
+import { api, type ComplianceShoot, type CompliancePrepareResult, type SignedSummary } from "@/lib/api"
+import {
+  AGREEMENT_SECTIONS,
+  CONTRACT_INTRO,
+  CONTRACT_TITLE,
+  DATA_CONSENT,
+  DISCLOSURE_HEADING,
+  DISCLOSURE_STATEMENT,
+  DOCUMENTS_PROVIDED_HEADING,
+  DOCUMENTS_PROVIDED_LIST,
+  EXECUTION_LINE,
+  INDEMNITY_STATEMENT,
+  PERJURY_STATEMENT,
+  PRODUCER_NAME,
+  WITNESS_STATEMENT,
+} from "@/lib/compliance-contract"
+import { SignaturePad } from "@/components/ui/signature-pad"
 
 // ─── Studio colors ────────────────────────────────────────────────────────────
 
@@ -41,10 +57,6 @@ function studioCode(studio: string) {
   return STUDIO_CODE[studio] ?? studio.slice(0, 4).toUpperCase()
 }
 
-// Known male talent whose full form data is pre-stored in Drive templates.
-// They only need dates auto-filled via the `prepare` endpoint.
-const KNOWN_MALES = new Set(["MikeMancini", "JaydenMarcos", "DannySteele"])
-
 // ─── Form data ────────────────────────────────────────────────────────────────
 
 interface TalentFormData {
@@ -60,7 +72,15 @@ interface TalentFormData {
   id1_number: string
   id2_type: string
   id2_number: string
-  signature: string
+  // W-9 fields (TKT-0150)
+  business_name: string
+  tax_classification: "individual" | "c_corp" | "s_corp" | "partnership" | "trust_estate" | "llc" | "other"
+  llc_class: string                  // 'C' | 'S' | 'P' (only when tax_classification='llc')
+  other_classification: string
+  exempt_payee_code: string
+  fatca_code: string
+  tin_type: "ssn" | "ein"
+  tin: string                        // raw digits, no formatting
 }
 
 function emptyForm(): TalentFormData {
@@ -68,7 +88,10 @@ function emptyForm(): TalentFormData {
     legal_name: "", stage_name: "", dob: "", place_of_birth: "",
     street_address: "", city_state_zip: "", phone: "", email: "",
     id1_type: "", id1_number: "", id2_type: "", id2_number: "",
-    signature: "",
+    business_name: "", tax_classification: "individual",
+    llc_class: "", other_classification: "",
+    exempt_payee_code: "", fatca_code: "",
+    tin_type: "ssn", tin: "",
   }
 }
 
@@ -82,6 +105,34 @@ const ID_TYPES = [
   "Permanent Resident Card",
   "Foreign Passport",
 ] as const
+
+// "123456789" → "123-45-6789" (SSN-style hyphenation for display).
+function formatSsn(raw: string): string {
+  const d = (raw || "").replace(/\D/g, "")
+  if (d.length <= 3) return d
+  if (d.length <= 5) return `${d.slice(0, 3)}-${d.slice(3)}`
+  return `${d.slice(0, 3)}-${d.slice(3, 5)}-${d.slice(5)}`
+}
+
+// "123456789" → "12-3456789" (EIN format).
+function formatEin(raw: string): string {
+  const d = (raw || "").replace(/\D/g, "")
+  if (d.length <= 2) return d
+  return `${d.slice(0, 2)}-${d.slice(2)}`
+}
+
+function taxClassLabel(form: TalentFormData): string {
+  switch (form.tax_classification) {
+    case "individual":   return "Individual / Sole proprietor"
+    case "c_corp":        return "C Corporation"
+    case "s_corp":        return "S Corporation"
+    case "partnership":   return "Partnership"
+    case "trust_estate":  return "Trust / Estate"
+    case "llc":           return `LLC (${form.llc_class || "?"})`
+    case "other":         return `Other — ${form.other_classification || "?"}`
+    default:              return form.tax_classification
+  }
+}
 
 // Returns the whole-years age at `asOf` (today by default). NaN if dob unparseable.
 function computeAge(dobIso: string, asOf = new Date()): number {
@@ -100,12 +151,14 @@ function TalentForm({
   submitting,
   error,
   onSubmit,
+  onBack,
 }: {
   talentLabel: string
   accent: string
   submitting: boolean
   error: string | null
   onSubmit: (data: TalentFormData) => void
+  onBack?: () => void
 }) {
   const [form, setForm] = useState<TalentFormData>(emptyForm)
   const [reviewing, setReviewing] = useState(false)
@@ -212,13 +265,19 @@ function TalentForm({
 
   const age = computeAge(form.dob)
   const underage = Number.isFinite(age) && age < 18
+  // Real signature is captured on the next screen — the form just needs the
+  // factual data filled in.
+  const tinDigits = form.tin.replace(/\D/g, "")
+  const tinExpectedLen = form.tin_type === "ssn" ? 9 : 9  // EIN is also 9
   const isValid =
     form.legal_name.trim() !== "" &&
-    form.signature.trim() !== "" &&
     !!form.dob &&
     !underage &&
     form.id1_type !== "" &&
-    form.id1_number.trim() !== ""
+    form.id1_number.trim() !== "" &&
+    tinDigits.length === tinExpectedLen &&
+    form.street_address.trim() !== "" &&
+    form.city_state_zip.trim() !== ""
 
   // ─── Confirm details preview ─────────────────────────────────────────
   if (reviewing) {
@@ -243,7 +302,13 @@ function TalentForm({
           <ReviewRow label="Phone · Email" value={[form.phone, form.email].filter(Boolean).join(" · ") || "—"} />
           <ReviewRow label="Primary ID" value={form.id1_type && form.id1_number ? `${form.id1_type} · ${form.id1_number}` : "—"} />
           <ReviewRow label="Secondary ID" value={form.id2_type && form.id2_number ? `${form.id2_type} · ${form.id2_number}` : "—"} />
-          <ReviewRow label="Signature" value={form.signature} italic last />
+          <ReviewRow label="Tax classification" value={taxClassLabel(form)} />
+          <ReviewRow label="Business name" value={form.business_name || "—"} />
+          <ReviewRow
+            label={form.tin_type === "ssn" ? "SSN" : "EIN"}
+            value={form.tin_type === "ssn" ? formatSsn(form.tin) : formatEin(form.tin)}
+            last
+          />
         </div>
 
         {error && (
@@ -286,8 +351,8 @@ function TalentForm({
             }}
           >
             {submitting
-              ? <><Loader2 size={16} className="animate-spin" /> Generating…</>
-              : <><FileText size={16} /> Generate PDF</>
+              ? <><Loader2 size={16} className="animate-spin" /> Loading…</>
+              : <><FileText size={16} /> Hand iPad to talent →</>
             }
           </button>
         </div>
@@ -297,6 +362,20 @@ function TalentForm({
 
   return (
     <div>
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6,
+            background: "transparent", border: "none",
+            color: "var(--color-text-muted)", fontSize: 12, fontWeight: 600,
+            padding: "0 0 8px", cursor: "pointer",
+          }}
+        >
+          ← Back
+        </button>
+      )}
       <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text)", marginBottom: 4 }}>
         {talentLabel}
       </div>
@@ -413,21 +492,95 @@ function TalentForm({
         </TwoCol>
       </Section>
 
-      <Section title="Electronic signature">
-        <div style={{ padding: "12px 14px" }}>
-          <p style={{ fontSize: 12.5, color: "var(--color-text-muted)", marginBottom: 10, lineHeight: 1.55 }}>
-            Type your full legal name to confirm the information above is accurate. You&apos;ll read the full agreement on the next screen before it&apos;s final.
-          </p>
+      <Section title="Tax info (W-9)">
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--color-border-subtle)" }}>
           <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
-            Full legal name (signature)<span style={{ color: accent, marginLeft: 3 }}>*</span>
+            Federal tax classification<span style={{ color: accent, marginLeft: 3 }}>*</span>
           </div>
-          <input
-            placeholder="Type your full legal name"
-            value={form.signature}
-            onChange={set("signature")}
-            style={{ ...inputStyle, fontStyle: "italic", fontSize: 18 }}
-          />
+          <select
+            value={form.tax_classification}
+            onChange={set("tax_classification")}
+            style={{
+              ...inputStyle,
+              appearance: "none", WebkitAppearance: "none",
+              backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>")`,
+              backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center", paddingRight: 34,
+            }}
+          >
+            <option value="individual">Individual / Sole proprietor / Single-member LLC</option>
+            <option value="c_corp">C Corporation</option>
+            <option value="s_corp">S Corporation</option>
+            <option value="partnership">Partnership</option>
+            <option value="trust_estate">Trust / Estate</option>
+            <option value="llc">Limited Liability Company</option>
+            <option value="other">Other</option>
+          </select>
         </div>
+        {form.tax_classification === "llc" && (
+          <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--color-border-subtle)" }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
+              LLC tax classification (C / S / P)<span style={{ color: accent, marginLeft: 3 }}>*</span>
+            </div>
+            <input
+              maxLength={1}
+              placeholder="C, S, or P"
+              value={form.llc_class}
+              onChange={e => setForm(prev => ({ ...prev, llc_class: e.target.value.toUpperCase().replace(/[^CSP]/g, "") }))}
+              style={{ ...inputStyle, textTransform: "uppercase" }}
+            />
+          </div>
+        )}
+        {form.tax_classification === "other" && (
+          <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--color-border-subtle)" }}>
+            <Field label="Other classification (describe)" fieldKey="other_classification" placeholder="e.g. 501(c)(3) nonprofit" />
+          </div>
+        )}
+        <Field label="Business name (if different from legal name)" fieldKey="business_name" placeholder="Optional — DBA / single-member LLC name" />
+        <TwoCol>
+          <div style={{ padding: "12px 14px", borderRight: "1px solid var(--color-border-subtle)" }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
+              TIN type<span style={{ color: accent, marginLeft: 3 }}>*</span>
+            </div>
+            <select
+              value={form.tin_type}
+              onChange={set("tin_type")}
+              style={{
+                ...inputStyle, appearance: "none", WebkitAppearance: "none",
+                backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>")`,
+                backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center", paddingRight: 34,
+              }}
+            >
+              <option value="ssn">SSN (Social Security Number)</option>
+              <option value="ein">EIN (Employer ID Number)</option>
+            </select>
+          </div>
+          <div style={{ padding: "12px 14px" }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
+              {form.tin_type === "ssn" ? "SSN" : "EIN"}<span style={{ color: accent, marginLeft: 3 }}>*</span>
+            </div>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder={form.tin_type === "ssn" ? "123-45-6789" : "12-3456789"}
+              value={form.tin_type === "ssn" ? formatSsn(form.tin) : formatEin(form.tin)}
+              onChange={e => setForm(prev => ({ ...prev, tin: e.target.value.replace(/\D/g, "").slice(0, 9) }))}
+              style={{ ...inputStyle, fontFamily: "var(--font-mono)", letterSpacing: "0.05em" }}
+            />
+            {tinDigits.length > 0 && tinDigits.length !== 9 && (
+              <div style={{ fontSize: 11, color: "#f87171", marginTop: 4 }}>Need 9 digits — got {tinDigits.length}</div>
+            )}
+          </div>
+        </TwoCol>
+        <TwoCol>
+          <Field label="Exempt payee code (if any)" fieldKey="exempt_payee_code" placeholder="Optional" />
+          <div style={{ padding: "12px 14px", borderTop: "1px solid var(--color-border-subtle)" }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
+              FATCA reporting code (if any)
+            </div>
+            <input placeholder="Optional" value={form.fatca_code} onChange={set("fatca_code")} style={inputStyle} />
+          </div>
+        </TwoCol>
       </Section>
 
       {error && (
@@ -516,83 +669,290 @@ async function compressImage(file: File, maxEdge: number, quality: number): Prom
   return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() })
 }
 
-// ─── ReviewCard component ─────────────────────────────────────────────────────
+// ─── SignAgreementStep — read the contract verbatim, draw a signature ─────────
+//
+// This replaces the old ReviewCard + iframe-PDF flow. Talent reads the full
+// agreement (cover + W-9 summary + Sections 1–11 + 2257 disclosure) inline,
+// scrolls to the bottom, draws a signature on a canvas, and submits. We POST
+// the form data + base64 signature PNG to /api/compliance/shoots/{id}/sign;
+// the server generates the merged IRS-W-9 + agreement PDF and pushes it to
+// the scene's MEGA legal folder.
 
-function ReviewCard({
-  display,
-  shootId,
-  talent,
-  studio,
+function SignAgreementStep({
+  talentDisplay,
+  talentRoleLabel,
   accent,
-  onSkip,
+  shootDate,
+  formData,
+  signaturePng,
+  onSignatureChange,
+  submitting,
+  error,
+  onBack,
+  onSubmit,
 }: {
-  display: string
-  shootId: string
-  talent: string
-  studio: string
+  talentDisplay: string
+  talentRoleLabel: string
   accent: string
-  onSkip: () => void
+  shootDate: string
+  formData: TalentFormData
+  signaturePng: string | null
+  onSignatureChange: (png: string | null) => void
+  submitting: boolean
+  error: string | null
+  onBack: () => void
+  onSubmit: () => void
 }) {
-  function openSignTab() {
-    const url = `/sign/${encodeURIComponent(shootId)}?talent=${encodeURIComponent(talent)}&display=${encodeURIComponent(display)}&studio=${encodeURIComponent(studio)}`
-    window.open(url, "_blank", "noopener")
-  }
+  const [acknowledged, setAcknowledged] = useState(false)
+  const [scrolled, setScrolled] = useState(false)
+  const scrollerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    const handler = () => {
+      // require talent to scroll to within 32px of the bottom at least once
+      const remaining = el.scrollHeight - el.scrollTop - el.clientHeight
+      if (remaining < 32) setScrolled(true)
+    }
+    el.addEventListener("scroll", handler, { passive: true })
+    return () => el.removeEventListener("scroll", handler)
+  }, [])
+
+  const canSubmit = scrolled && acknowledged && !!signaturePng && !submitting
+  const longDate = formatLongDate(shootDate)
+  const tinFmt = formData.tin_type === "ssn" ? formatSsn(formData.tin) : formatEin(formData.tin)
+  const fullAddress = [formData.street_address, formData.city_state_zip].filter(Boolean).join(", ")
 
   return (
     <div>
       <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)", marginBottom: 4 }}>
-        {display} — Read &amp; Sign
+        Read &amp; Sign — {talentDisplay} ({talentRoleLabel})
       </div>
       <p style={{ fontSize: 13, color: "var(--color-text-faint)", marginBottom: 12, lineHeight: 1.5 }}>
-        Your paperwork has been prepared. Tap the button below to read the full agreement — you must read it before signing.
+        Read the full agreement. Scroll to the bottom, check the acknowledgement, draw your signature, and tap submit.
       </p>
-      <div style={{
-        background: "rgba(255,255,255,0.04)", border: "1px solid var(--color-border)",
-        borderRadius: 8, padding: "10px 14px", marginBottom: 20,
-        fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.6,
-      }}>
-        The document contains your performer services agreement, 2257 records disclosure, and model release.
-        Read it carefully — your electronic signature confirms you understood and agreed to its terms.
+
+      {/* Scrollable contract */}
+      <div
+        ref={scrollerRef}
+        style={{
+          height: "55vh", minHeight: 360, overflow: "auto",
+          background: "var(--color-surface)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 12, padding: "20px 22px", marginBottom: 14,
+          fontSize: 13.5, lineHeight: 1.6, color: "var(--color-text)",
+        }}
+      >
+        {/* SECTION 01 — IRS W-9 summary */}
+        <SectionEyebrow accent={accent} text="Section 01 of 03 · IRS Form W-9" />
+        <h3 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 8px" }}>Taxpayer Identification &amp; Certification</h3>
+        <p style={{ color: "var(--color-text-muted)", fontSize: 12.5, marginBottom: 10 }}>
+          The values below appear on the official IRS Form W-9 included in your final PDF.
+        </p>
+        <FactGrid rows={[
+          ["Legal name", formData.legal_name],
+          ["Business name", formData.business_name || "—"],
+          ["Tax classification", taxClassLabel(formData)],
+          ["Address", fullAddress || "—"],
+          [formData.tin_type === "ssn" ? "SSN" : "EIN", tinFmt],
+        ]} />
+
+        {/* SECTION 02 — Model Services Agreement */}
+        <SectionEyebrow accent={accent} text="Section 02 of 03 · Model Services Agreement" />
+        <h3 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 8px" }}>{CONTRACT_TITLE}</h3>
+        <p style={{ marginBottom: 10 }}>{CONTRACT_INTRO}</p>
+        {AGREEMENT_SECTIONS.map(sec => (
+          <div key={sec.id} style={{ marginBottom: 14 }}>
+            <h4 style={{ fontSize: 13.5, fontWeight: 700, margin: "12px 0 4px" }}>{sec.heading}</h4>
+            {sec.body.split("\n\n").map((p, i) => (
+              <p key={i} style={{ marginBottom: 6 }}>{p}</p>
+            ))}
+          </div>
+        ))}
+        <p style={{ fontStyle: "italic", color: "var(--color-text-muted)", marginBottom: 6 }}>{WITNESS_STATEMENT}</p>
+        <p style={{ color: "var(--color-text-muted)", fontSize: 12.5, marginBottom: 16 }}>{EXECUTION_LINE}</p>
+
+        {/* SECTION 03 — 2257 Records */}
+        <SectionEyebrow accent={accent} text="Section 03 of 03 · 18 U.S.C. § 2257 Records" />
+        <h3 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 8px" }}>{DISCLOSURE_HEADING}</h3>
+        <p style={{ marginBottom: 6 }}>
+          <strong>Production:</strong> {PRODUCER_NAME} studio production · <strong>Date:</strong> {longDate}
+        </p>
+        <p style={{ marginBottom: 12 }}>
+          I, <strong>{formData.legal_name}</strong>, {DISCLOSURE_STATEMENT.replace(/^I\s+/, "").replace(/^I,\s+/, "")}
+        </p>
+        <FactGrid rows={[
+          ["Full legal name", formData.legal_name],
+          ["Date of birth", formatDob(formData.dob)],
+          ["Place of birth", formData.place_of_birth || "—"],
+          ["Residential address", fullAddress || "—"],
+          ["Primary ID", formData.id1_type ? `${formData.id1_type} · ${formData.id1_number}` : "—"],
+          ["Secondary ID", formData.id2_type ? `${formData.id2_type} · ${formData.id2_number}` : "—"],
+          ["Phone", formData.phone || "—"],
+          ["Email", formData.email || "—"],
+          ["Stage names", formData.stage_name || talentDisplay],
+        ]} />
+        <h4 style={{ fontSize: 13.5, fontWeight: 700, margin: "12px 0 4px" }}>{DOCUMENTS_PROVIDED_HEADING}</h4>
+        {DOCUMENTS_PROVIDED_LIST.map((item, i) => (
+          <p key={i} style={{ marginBottom: 4 }}>{item}</p>
+        ))}
+        <p style={{ marginTop: 14, marginBottom: 10 }}>{DATA_CONSENT}</p>
+        <p style={{ marginBottom: 10 }}>{PERJURY_STATEMENT}</p>
+        <p style={{ color: "var(--color-text-muted)", fontSize: 12.5 }}>{INDEMNITY_STATEMENT}</p>
+
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--color-border-subtle)", color: "var(--color-text-faint)", fontSize: 11.5 }}>
+          End of document — please scroll up to review any section before signing.
+        </div>
       </div>
 
-      <button
-        onClick={openSignTab}
-        style={{
-          width: "100%",
-          background: accent,
-          border: "none", borderRadius: 12, padding: "18px 20px",
-          fontSize: 16, fontWeight: 700, color: "#000",
-          cursor: "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-          marginBottom: 14,
-        }}
-      >
-        <FileText size={18} />
-        Read &amp; Sign Agreement — {display}
-      </button>
+      {/* Read-progress hint */}
+      {!scrolled && (
+        <div style={{
+          marginBottom: 12, padding: "9px 12px", borderRadius: 8,
+          background: "rgba(255,255,255,0.04)", border: "1px solid var(--color-border-subtle)",
+          fontSize: 12, color: "var(--color-text-muted)",
+        }}>
+          Scroll the document above to the end to enable signing.
+        </div>
+      )}
 
-      <p style={{ fontSize: 11, color: "var(--color-text-faint)", textAlign: "center", lineHeight: 1.5, marginBottom: 8 }}>
-        Opens in a new tab. This page will advance automatically when they confirm.
-      </p>
+      {/* Acknowledgement */}
+      <label style={{
+        display: "flex", alignItems: "flex-start", gap: 10,
+        padding: "10px 12px", marginBottom: 12,
+        background: acknowledged ? "rgba(190,214,47,0.06)" : "var(--color-elevated)",
+        border: `1px solid ${acknowledged ? "rgba(190,214,47,0.3)" : "var(--color-border)"}`,
+        borderRadius: 10,
+        cursor: scrolled ? "pointer" : "not-allowed",
+        opacity: scrolled ? 1 : 0.5,
+      }}>
+        <input
+          type="checkbox"
+          checked={acknowledged}
+          disabled={!scrolled}
+          onChange={e => setAcknowledged(e.target.checked)}
+          style={{ width: 18, height: 18, marginTop: 1, flexShrink: 0, accentColor: "var(--color-lime)" }}
+        />
+        <span style={{ fontSize: 13, color: "var(--color-text)", lineHeight: 1.45 }}>
+          I have read all three sections above and I confirm the information is accurate. I am signing
+          the W-9 certification, the Model Services Agreement, and the 18 U.S.C. § 2257 disclosure.
+        </span>
+      </label>
 
-      <button
-        onClick={() => {
-          if (window.confirm(
-            "Confirm: talent has already signed this agreement on paper.\n\n" +
-            "This will skip the digital signature step. Only use this when a physical signed copy has been collected."
-          )) onSkip()
-        }}
-        style={{
-          width: "100%", background: "transparent",
-          border: "1px solid var(--color-border-subtle)", cursor: "pointer",
-          color: "var(--color-text-faint)", fontSize: 12,
-          padding: "10px 12px", borderRadius: 8,
-        }}
-      >
-        Already signed on paper — skip digital signature
-      </button>
+      {/* Signature pad */}
+      <div style={{
+        background: "var(--color-elevated)", border: "1px solid var(--color-border)",
+        borderRadius: 12, padding: "14px 14px 12px", marginBottom: 14,
+      }}>
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          marginBottom: 8,
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.06em",
+                        textTransform: "uppercase", color: "var(--color-text-muted)" }}>
+            Talent signature — {talentDisplay}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-text-faint)" }}>{longDate}</div>
+        </div>
+        <SignaturePad onChange={onSignatureChange} accent={accent} disabled={!scrolled || !acknowledged} />
+      </div>
+
+      {error && (
+        <div style={{
+          background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+          borderRadius: 8, padding: "10px 14px", marginBottom: 14,
+          fontSize: 13, color: "#f87171",
+        }}>
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 32 }}>
+        <button
+          onClick={onBack}
+          disabled={submitting}
+          style={{
+            background: "transparent", border: "1px solid var(--color-border)",
+            borderRadius: 10, padding: "14px 18px",
+            fontSize: 14, fontWeight: 600,
+            color: "var(--color-text-muted)",
+            cursor: submitting ? "not-allowed" : "pointer",
+          }}
+        >
+          ← Edit details
+        </button>
+        <button
+          onClick={onSubmit}
+          disabled={!canSubmit}
+          style={{
+            flex: 1,
+            background: canSubmit ? "var(--color-lime)" : "var(--color-elevated)",
+            border: "none", borderRadius: 10, padding: "16px 20px",
+            fontSize: 15, fontWeight: 700,
+            color: canSubmit ? "#000" : "var(--color-text-faint)",
+            cursor: canSubmit ? "pointer" : "not-allowed",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          }}
+        >
+          {submitting
+            ? <><Loader2 size={16} className="animate-spin" /> Saving signature…</>
+            : !scrolled
+              ? <>Scroll to bottom to enable</>
+              : !acknowledged
+                ? <>Check the box above</>
+                : !signaturePng
+                  ? <>Draw signature above</>
+                  : <><CheckCircle2 size={16} /> Sign &amp; Submit Agreement</>
+          }
+        </button>
+      </div>
     </div>
   )
+}
+
+function SectionEyebrow({ accent, text }: { accent: string; text: string }) {
+  return (
+    <div style={{
+      marginTop: 4, marginBottom: 10,
+      paddingBottom: 8, borderBottom: `1px solid ${accent}33`,
+    }}>
+      <span style={{
+        display: "inline-block", padding: "2px 8px", borderRadius: 4,
+        background: `${accent}22`, color: accent, fontSize: 10, fontWeight: 700,
+        letterSpacing: "0.12em", textTransform: "uppercase",
+      }}>{text}</span>
+    </div>
+  )
+}
+
+function FactGrid({ rows }: { rows: [string, string][] }) {
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 18px",
+      background: "var(--color-elevated)", border: "1px solid var(--color-border-subtle)",
+      borderRadius: 8, padding: "12px 14px", marginBottom: 14,
+    }}>
+      {rows.map(([label, value], i) => (
+        <div key={i}>
+          <div style={{
+            fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em",
+            textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 2,
+          }}>{label}</div>
+          <div style={{ fontSize: 13, color: "var(--color-text)", wordBreak: "break-word" }}>
+            {value || "—"}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function formatLongDate(iso: string): string {
+  if (!iso) return ""
+  const d = new Date(iso + "T12:00:00")
+  if (!Number.isFinite(d.getTime())) return iso
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
 }
 
 // ─── Photo slot definition ────────────────────────────────────────────────────
@@ -893,6 +1253,224 @@ function CameraButton({
   )
 }
 
+// ─── TalentPicker ─────────────────────────────────────────────────────────────
+//
+// Entry phase for the docs step. Surfaces both talents on the shoot side-by-
+// side with their independent signing status. The staff picks which one to
+// handle right now; flows are entirely separate and can be done in any order
+// on different days. When both are signed, "Continue → Photos" advances the
+// outer wizard to the photos/MEGA step.
+
+function TalentPicker({
+  shoot,
+  accent,
+  signed,
+  onStartFemale,
+  onStartMale,
+  onContinueToPhotos,
+}: {
+  shoot: ComplianceShoot
+  accent: string
+  signed: SignedSummary[]
+  onStartFemale: () => void
+  onStartMale: () => void
+  onContinueToPhotos: () => void
+}) {
+  const femaleSigned = signed.find(s => s.talent_role === "female")
+  const maleSigned   = signed.find(s => s.talent_role === "male")
+  const needsMale    = !!shoot.male_talent
+  const allSigned    = !!femaleSigned && (!needsMale || !!maleSigned)
+  const longDate = formatLongDate(shoot.shoot_date)
+
+  return (
+    <div>
+      {/* Shoot summary header */}
+      <div style={{
+        background: "var(--color-surface)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 14, padding: "16px 18px", marginBottom: 14,
+      }}>
+        <div style={{
+          fontSize: 10.5, fontWeight: 700, letterSpacing: "0.14em",
+          textTransform: "uppercase", color: accent, marginBottom: 6,
+        }}>
+          {shoot.studio || "Shoot"}{shoot.scene_id ? ` · ${shoot.scene_id}` : ""}
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: "var(--color-text)", lineHeight: 1.25 }}>
+          {shoot.female_talent}
+          {shoot.male_talent && (
+            <>
+              {" "}
+              <span style={{ color: "var(--color-text-faint)", fontWeight: 500 }}>×</span>{" "}
+              {shoot.male_talent}
+            </>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--color-text-faint)", marginTop: 4 }}>
+          {longDate}
+        </div>
+      </div>
+
+      {/* Per-talent cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10, marginBottom: 14 }}>
+        <TalentSignCard
+          role="Female"
+          display={shoot.female_talent}
+          accent={accent}
+          signed={femaleSigned}
+          shootId={shoot.shoot_id}
+          slug={shoot.female_talent.replace(/ /g, "")}
+          onStart={onStartFemale}
+        />
+        {needsMale && (
+          <TalentSignCard
+            role="Male"
+            display={shoot.male_talent}
+            accent={accent}
+            signed={maleSigned}
+            shootId={shoot.shoot_id}
+            slug={shoot.male_talent.replace(/ /g, "")}
+            onStart={onStartMale}
+          />
+        )}
+      </div>
+
+      {/* Continue to photos */}
+      <button
+        onClick={onContinueToPhotos}
+        disabled={!allSigned}
+        style={{
+          width: "100%",
+          background: allSigned ? "var(--color-lime)" : "var(--color-elevated)",
+          border: "none", borderRadius: 10, padding: "14px 18px",
+          fontSize: 14, fontWeight: 700,
+          color: allSigned ? "#000" : "var(--color-text-faint)",
+          cursor: allSigned ? "pointer" : "not-allowed",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        }}
+      >
+        {allSigned
+          ? <>Continue → Photos &amp; ID Capture</>
+          : (() => {
+              const total = needsMale ? 2 : 1
+              const done = (femaleSigned ? 1 : 0) + (maleSigned ? 1 : 0)
+              return <>{done}/{total} signed — sign the rest to continue</>
+            })()
+        }
+      </button>
+    </div>
+  )
+}
+
+function TalentSignCard({
+  role,
+  display,
+  accent,
+  signed,
+  shootId,
+  slug,
+  onStart,
+}: {
+  role: "Female" | "Male"
+  display: string
+  accent: string
+  signed: SignedSummary | undefined
+  shootId: string
+  slug: string
+  onStart: () => void
+}) {
+  const isSigned = !!signed
+  const pdfHref = isSigned
+    ? `/api/compliance/${encodeURIComponent(shootId)}/pdf?talent=${encodeURIComponent(slug)}`
+    : null
+
+  return (
+    <div style={{
+      position: "relative",
+      background: "var(--color-surface)",
+      border: `1px solid ${isSigned ? "rgba(190,214,47,0.35)" : "var(--color-border)"}`,
+      borderRadius: 14,
+      padding: "16px 18px",
+      display: "flex", alignItems: "center", gap: 14,
+    }}>
+      {/* Status dot */}
+      <div style={{
+        width: 36, height: 36, borderRadius: "50%",
+        background: isSigned ? "rgba(190,214,47,0.12)" : "var(--color-elevated)",
+        border: `1px solid ${isSigned ? "rgba(190,214,47,0.4)" : "var(--color-border)"}`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        flexShrink: 0,
+      }}>
+        {isSigned ? <CheckCircle2 size={18} color="var(--color-lime)" /> : <FileText size={16} color="var(--color-text-muted)" />}
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 9.5, fontWeight: 700, letterSpacing: "0.16em",
+          textTransform: "uppercase", color: "var(--color-text-faint)",
+          marginBottom: 2,
+        }}>
+          {role}
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--color-text)" }}>
+          {display}
+        </div>
+        <div style={{ fontSize: 11.5, color: isSigned ? "var(--color-lime)" : "var(--color-text-muted)", marginTop: 2 }}>
+          {isSigned
+            ? <>Signed {formatRelativeTime(signed!.signed_at)} · {signed!.legal_name}</>
+            : <>Not signed yet</>
+          }
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+        {isSigned && pdfHref && (
+          <a
+            href={pdfHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              padding: "8px 12px", borderRadius: 8,
+              background: "transparent", border: "1px solid var(--color-border)",
+              fontSize: 12, fontWeight: 600,
+              color: "var(--color-text-muted)", textDecoration: "none",
+            }}
+          >
+            <ExternalLink size={11} /> View PDF
+          </a>
+        )}
+        <button
+          onClick={onStart}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            padding: "9px 14px", borderRadius: 8,
+            background: isSigned ? "transparent" : "var(--color-lime)",
+            border: isSigned ? "1px solid var(--color-border)" : "none",
+            color: isSigned ? "var(--color-text)" : "#000",
+            fontSize: 12, fontWeight: 700, cursor: "pointer",
+          }}
+        >
+          {isSigned ? "Re-sign" : "Sign →"}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function formatRelativeTime(iso: string): string {
+  if (!iso) return "—"
+  const then = new Date(iso).getTime()
+  if (!Number.isFinite(then)) return iso
+  const diff = (Date.now() - then) / 1000
+  if (diff < 60) return "just now"
+  if (diff < 3600) return `${Math.round(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.round(diff / 3600)}h ago`
+  if (diff < 604800) return `${Math.round(diff / 86400)}d ago`
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+}
+
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 interface Props {
@@ -903,7 +1481,7 @@ interface Props {
 }
 
 type WizardStep = "select" | "docs" | "photos" | "upload"
-type DocsPhase = "female" | "female-review" | "male-known" | "male-form" | "male-review" | "done"
+type DocsPhase = "picker" | "female-form" | "female-sign" | "male-form" | "male-sign" | "done"
 
 export function ComplianceView({ initialShoots, initialDate, idToken, loadError }: Props) {
   const client = api(idToken ?? null)
@@ -918,15 +1496,27 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   const [step, setStep] = useState<WizardStep>("select")
 
   // Docs step state
-  const [preparing, setPreparing] = useState(false)
+  // (legacy Drive-prepare flow — kept around because the photos/MEGA-sync
+  // step still surfaces the Drive folder URL when one exists)
   const [prepResult, setPrepResult] = useState<CompliancePrepareResult | null>(null)
-  const [prepError, setPrepError] = useState<string | null>(null)
-  // Which sub-step within docs: female form → male (known/unknown/none) → done
-  const [docsPhase, setDocsPhase] = useState<DocsPhase>("female")
+  // Per-talent flow: the wizard's "docs" step opens into a `picker` that
+  // surfaces each talent's signing status independently. From there you can
+  // start the female flow (form → sign → done) or the male flow, in any
+  // order, on different days. Signing one returns to the picker.
+  const [docsPhase, setDocsPhase] = useState<DocsPhase>("picker")
+  const [signedSummary, setSignedSummary] = useState<SignedSummary[]>([])
   const [femaleSubmitting, setFemaleSubmitting] = useState(false)
   const [femaleError, setFemaleError] = useState<string | null>(null)
   const [maleSubmitting, setMaleSubmitting] = useState(false)
   const [maleError, setMaleError] = useState<string | null>(null)
+  // Captured form data — held in memory so the signing step can pass it
+  // through to /api/compliance/shoots/{id}/sign without a server round-trip.
+  const [femaleFormData, setFemaleFormData] = useState<TalentFormData | null>(null)
+  const [maleFormData, setMaleFormData] = useState<TalentFormData | null>(null)
+  // Drawn signature (data: URL) and submit state for the sign step
+  const [signaturePng, setSignaturePng] = useState<string | null>(null)
+  const [signing, setSigning] = useState(false)
+  const [signError, setSignError] = useState<string | null>(null)
 
   // Photos step state
   const [photos, setPhotos] = useState<CapturedPhoto[]>([])
@@ -942,29 +1532,8 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
 
   const slots = selected ? buildSlots(selected.female_talent, selected.male_talent) : []
 
-  // ── Listen for sign-tab confirmations ─────────────────────────────────
-  // The /sign/[shootId] page posts "compliance:signed:{talentSlug}" when
-  // the talent taps "I Agree", allowing this tab to auto-advance.
-  useEffect(() => {
-    function onMessage(e: MessageEvent) {
-      if (e.origin !== window.location.origin) return
-      const data = String(e.data)
-      if (!data.startsWith("compliance:signed:")) return
-      const signedTalent = data.replace("compliance:signed:", "")
-      setDocsPhase(prev => {
-        if (prev === "female-review") {
-          if (!selected?.male_talent) return "done"
-          return KNOWN_MALES.has(selected.male_talent) ? "male-known" : "male-form"
-        }
-        if (prev === "male-review") return "done"
-        return prev
-      })
-      void loadDate(date)
-    }
-    window.addEventListener("message", onMessage)
-    return () => window.removeEventListener("message", onMessage)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, date])
+  // (postMessage cross-tab handoff used by the legacy /sign route is no
+  // longer needed — signing happens inline in the wizard.)
 
   // ── Date fetch ────────────────────────────────────────────────────────
 
@@ -991,18 +1560,24 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
     setSelected(shoot)
     setStep("docs")
     setPrepResult(null)
-    setPrepError(null)
-    // If both talent already have signed PDFs, skip the form flow and go
-    // straight to the "done" view so the user can view existing documents.
-    setDocsPhase(shoot.pdfs_ready ? "done" : "female")
+    setDocsPhase("picker")
     setFemaleSubmitting(false)
     setFemaleError(null)
     setMaleSubmitting(false)
     setMaleError(null)
+    setFemaleFormData(null)
+    setMaleFormData(null)
+    setSignaturePng(null)
+    setSigning(false)
+    setSignError(null)
+    setSignedSummary([])
     setPhotos([])
     setUploadResult(null)
     setSyncResult(null)
-    // If Drive folder already exists, pre-populate prep result state
+    // Hydrate per-talent signed status from the API
+    void client.compliance.signed(shoot.shoot_id).then(setSignedSummary).catch(() => setSignedSummary([]))
+    // If Drive folder already exists, pre-populate prep result state so the
+    // photos step can still surface the Drive folder URL during cutover.
     if (shoot.drive_folder_id) {
       setPrepResult({
         folder_id: shoot.drive_folder_id,
@@ -1012,7 +1587,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
         male_pdf_id: "",
         male_known: false,
         dates_filled: false,
-        message: shoot.pdfs_ready ? "Signed documents already on file" : "Folder already exists",
+        message: shoot.pdfs_ready ? "Signed documents on file" : "Folder already exists",
       })
     }
   }
@@ -1022,73 +1597,85 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
     setStep("select")
   }
 
-  // ── Prepare docs ──────────────────────────────────────────────────────
-
-  async function prepareDocs() {
-    if (!selected) return
-    setPreparing(true)
-    setPrepError(null)
-    try {
-      const r = await client.compliance.prepare(selected.shoot_id)
-      setPrepResult(r)
-      // Refresh shoot list to get updated pdfs_ready
-      void loadDate(date)
-    } catch (e) {
-      setPrepError(e instanceof Error ? e.message : "Prepare failed")
-    } finally {
-      setPreparing(false)
-    }
-  }
-
   // ── Form submit handlers ──────────────────────────────────────────────
+  // The form submits no longer go through fillForm/prepare — they just
+  // capture the data into wizard state and transition to the sign step.
+  // The actual server round-trip happens on signature submit (sign()).
 
   async function submitFemaleForm(data: TalentFormData) {
     if (!selected) return
-    setFemaleSubmitting(true)
     setFemaleError(null)
-    try {
-      const req: FillFormRequest = { talent: "female", ...data }
-      const r = await client.compliance.fillForm(selected.shoot_id, req)
-      setPrepResult(r)
-      void loadDate(date)
-      setDocsPhase("female-review")
-    } catch (e) {
-      setFemaleError(e instanceof Error ? e.message : "Failed to save form")
-    } finally {
-      setFemaleSubmitting(false)
-    }
-  }
-
-  async function submitMaleKnown() {
-    if (!selected) return
-    setMaleSubmitting(true)
-    setMaleError(null)
-    try {
-      const r = await client.compliance.prepare(selected.shoot_id)
-      setPrepResult(r)
-      void loadDate(date)
-      setDocsPhase("male-review")
-    } catch (e) {
-      setMaleError(e instanceof Error ? e.message : "Failed to generate male form")
-    } finally {
-      setMaleSubmitting(false)
-    }
+    setFemaleFormData(data)
+    setSignaturePng(null)
+    setSignError(null)
+    setDocsPhase("female-sign")
   }
 
   async function submitMaleForm(data: TalentFormData) {
     if (!selected) return
-    setMaleSubmitting(true)
     setMaleError(null)
+    setMaleFormData(data)
+    setSignaturePng(null)
+    setSignError(null)
+    setDocsPhase("male-sign")
+  }
+
+  // ── Sign handler — collects form + drawn PNG, POSTs to /sign ──────────
+
+  async function submitSignature(role: "female" | "male") {
+    if (!selected || !signaturePng) return
+    const formData = role === "female" ? femaleFormData : maleFormData
+    if (!formData) {
+      setSignError("Form data missing — go back and fill the form")
+      return
+    }
+    const slug = role === "female"
+      ? selected.female_talent.replace(/ /g, "")
+      : (selected.male_talent || "").replace(/ /g, "")
+    const display = role === "female" ? selected.female_talent : selected.male_talent
+
+    setSigning(true)
+    setSignError(null)
     try {
-      const req: FillFormRequest = { talent: selected.male_talent, ...data }
-      const r = await client.compliance.fillForm(selected.shoot_id, req)
-      setPrepResult(r)
+      await client.compliance.sign(selected.shoot_id, {
+        talent_role: role,
+        talent_slug: slug,
+        talent_display: display,
+        legal_name: formData.legal_name,
+        business_name: formData.business_name,
+        tax_classification: formData.tax_classification,
+        llc_class: formData.llc_class,
+        other_classification: formData.other_classification,
+        exempt_payee_code: formData.exempt_payee_code,
+        fatca_code: formData.fatca_code,
+        tin_type: formData.tin_type,
+        tin: formData.tin,
+        dob: formData.dob,
+        place_of_birth: formData.place_of_birth,
+        street_address: formData.street_address,
+        city_state_zip: formData.city_state_zip,
+        phone: formData.phone,
+        email: formData.email,
+        id1_type: formData.id1_type,
+        id1_number: formData.id1_number,
+        id2_type: formData.id2_type,
+        id2_number: formData.id2_number,
+        stage_names: formData.stage_name || display,
+        signature_png: signaturePng,
+      })
       void loadDate(date)
-      setDocsPhase("male-review")
+      // Refresh per-talent signed status, then return to the picker so the
+      // staff can either start the other talent's flow or move to photos.
+      const fresh = await client.compliance.signed(selected.shoot_id).catch(() => [])
+      setSignedSummary(fresh)
+      setSignaturePng(null)
+      if (role === "female") setFemaleFormData(null)
+      else setMaleFormData(null)
+      setDocsPhase("picker")
     } catch (e) {
-      setMaleError(e instanceof Error ? e.message : "Failed to save form")
+      setSignError(e instanceof Error ? e.message : "Failed to save signature")
     } finally {
-      setMaleSubmitting(false)
+      setSigning(false)
     }
   }
 
@@ -1436,122 +2023,70 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
       {step === "docs" && selected && (
         <div style={{ padding: 16 }}>
 
-          {/* Progress pills */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
-            {[
-              { phase: "female" as DocsPhase, label: selected.female_talent },
-              ...(selected.male_talent ? [{ phase: (KNOWN_MALES.has(selected.male_talent) ? "male-known" : "male-form") as DocsPhase, label: selected.male_talent }] : []),
-            ].map(({ phase, label }) => {
-              const phases: DocsPhase[] = ["female", "female-review", "male-known", "male-form", "male-review", "done"]
-              const currentIdx = phases.indexOf(docsPhase)
-              // Consider "female-review" as the female step being active/done
-              const relatedPhases: DocsPhase[] = phase === "female"
-                ? ["female", "female-review"]
-                : ["male-known", "male-form", "male-review"]
-              const thisIdx = phases.indexOf(relatedPhases[0])
-              const isDone = docsPhase === "done" || currentIdx > thisIdx + 1
-              const isActive = relatedPhases.includes(docsPhase)
-              return (
-                <div key={phase} style={{
-                  flex: 1, padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
-                  display: "flex", alignItems: "center", gap: 6,
-                  background: isDone ? "rgba(190,214,47,0.12)" : isActive ? "rgba(255,255,255,0.06)" : "transparent",
-                  border: `1px solid ${isDone ? "rgba(190,214,47,0.3)" : isActive ? "var(--color-border)" : "var(--color-border-subtle)"}`,
-                  color: isDone ? "var(--color-lime)" : isActive ? "var(--color-text)" : "var(--color-text-faint)",
-                }}>
-                  {isDone ? <CheckCircle2 size={12} /> : <span style={{ width: 12, height: 12, borderRadius: "50%", border: `2px solid ${isActive ? accent : "var(--color-border)"}`, display: "inline-block", flexShrink: 0 }} />}
-                  {label}
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Phase: female review — open signed PDF in new tab */}
-          {docsPhase === "female-review" && selected && (
-            <ReviewCard
-              display={selected.female_talent}
-              shootId={selected.shoot_id}
-              talent={selected.female_talent.replace(/ /g, "")}
-              studio={selected.studio}
+          {/* Phase: talent picker — entry point. Each talent's flow is fully
+              independent; the staff picks who to handle right now. */}
+          {docsPhase === "picker" && (
+            <TalentPicker
+              shoot={selected}
               accent={accent}
-              onSkip={() => {
-                if (!selected.male_talent) { setDocsPhase("done"); return }
-                setDocsPhase(KNOWN_MALES.has(selected.male_talent) ? "male-known" : "male-form")
-              }}
+              signed={signedSummary}
+              onStartFemale={() => { setSignError(null); setFemaleError(null); setDocsPhase("female-form") }}
+              onStartMale={() => { setSignError(null); setMaleError(null); setDocsPhase("male-form") }}
+              onContinueToPhotos={() => setStep("photos")}
             />
           )}
 
-          {/* Phase: female form */}
-          {docsPhase === "female" && (
+          {/* Female: form → sign */}
+          {docsPhase === "female-form" && (
             <TalentForm
-              talentLabel={`${selected.female_talent} — Female Talent Form`}
+              talentLabel={`${selected.female_talent} — Female Talent`}
               accent={accent}
               submitting={femaleSubmitting}
               error={femaleError}
               onSubmit={submitFemaleForm}
+              onBack={() => setDocsPhase("picker")}
+            />
+          )}
+          {docsPhase === "female-sign" && femaleFormData && (
+            <SignAgreementStep
+              talentDisplay={selected.female_talent}
+              talentRoleLabel="Female"
+              accent={accent}
+              shootDate={selected.shoot_date}
+              formData={femaleFormData}
+              signaturePng={signaturePng}
+              onSignatureChange={setSignaturePng}
+              submitting={signing}
+              error={signError}
+              onBack={() => { setDocsPhase("female-form"); setSignError(null) }}
+              onSubmit={() => submitSignature("female")}
             />
           )}
 
-          {/* Phase: known male — auto-generate with date */}
-          {docsPhase === "male-known" && selected.male_talent && (
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)", marginBottom: 4 }}>
-                {selected.male_talent} — On File
-              </div>
-              <p style={{ fontSize: 13, color: "var(--color-text-faint)", marginBottom: 20, lineHeight: 1.5 }}>
-                {selected.male_talent}&apos;s paperwork is pre-filled on file. Tap below to generate the form with today&apos;s shoot date.
-              </p>
-              {maleError && (
-                <div style={{
-                  background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
-                  borderRadius: 8, padding: "10px 14px", marginBottom: 14,
-                  fontSize: 13, color: "#f87171",
-                }}>
-                  {maleError}
-                </div>
-              )}
-              <button
-                onClick={submitMaleKnown}
-                disabled={maleSubmitting}
-                style={{
-                  width: "100%",
-                  background: maleSubmitting ? "var(--color-elevated)" : "var(--color-lime)",
-                  border: "none", borderRadius: 10, padding: "16px 20px",
-                  fontSize: 15, fontWeight: 700,
-                  color: maleSubmitting ? "var(--color-text-faint)" : "#000",
-                  cursor: maleSubmitting ? "not-allowed" : "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  marginBottom: 32,
-                }}
-              >
-                {maleSubmitting
-                  ? <><Loader2 size={16} className="animate-spin" /> Generating…</>
-                  : <><FileText size={16} /> Generate Form</>
-                }
-              </button>
-            </div>
-          )}
-
-          {/* Phase: unknown male form */}
+          {/* Male: form → sign */}
           {docsPhase === "male-form" && selected.male_talent && (
             <TalentForm
-              talentLabel={`${selected.male_talent} — Male Talent Form`}
+              talentLabel={`${selected.male_talent} — Male Talent`}
               accent={accent}
               submitting={maleSubmitting}
               error={maleError}
               onSubmit={submitMaleForm}
+              onBack={() => setDocsPhase("picker")}
             />
           )}
-
-          {/* Phase: male review */}
-          {docsPhase === "male-review" && selected?.male_talent && (
-            <ReviewCard
-              display={selected.male_talent}
-              shootId={selected.shoot_id}
-              talent={selected.male_talent.replace(/ /g, "")}
-              studio={selected.studio}
+          {docsPhase === "male-sign" && maleFormData && selected.male_talent && (
+            <SignAgreementStep
+              talentDisplay={selected.male_talent}
+              talentRoleLabel="Male"
               accent={accent}
-              onSkip={() => setDocsPhase("done")}
+              shootDate={selected.shoot_date}
+              formData={maleFormData}
+              signaturePng={signaturePng}
+              onSignatureChange={setSignaturePng}
+              submitting={signing}
+              error={signError}
+              onBack={() => { setDocsPhase("male-form"); setSignError(null) }}
+              onSubmit={() => submitSignature("male")}
             />
           )}
 
