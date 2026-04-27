@@ -582,15 +582,37 @@ async def list_compliance_shoots(
                 except Exception as exc:
                     _log.debug("compliance folder lookup: %s", exc)
 
-        # DB-backed completion — a shoot is complete only when every required
-        # talent has a row in compliance_signatures.
+        # Completion: prefer DB-backed signatures (new flow), fall back to the
+        # legacy Drive-folder check so shoots completed via the old prepare/
+        # fill-form path still show as complete during the cutover. Once the
+        # Hub UI is fully rewired, the Drive fallback can be removed.
         signed = signed_by_shoot.get(shoot.shoot_id, [])
         signed_roles = {t.talent_role for t in signed}
         needed_roles = {"female", "male"} if shoot.male_talent else {"female"}
-        is_complete = needed_roles.issubset(signed_roles)
-        # pdfs_ready now means "talent has signed" — keep the legacy field name
-        # so the existing UI keeps working until it's refactored.
-        pdfs_ready = bool(signed)
+        if signed:
+            is_complete = needed_roles.issubset(signed_roles)
+            pdfs_ready = True
+        else:
+            # Legacy fallback — mirror the pre-TKT-0150 logic
+            is_complete_legacy = False
+            for sc in bg_scenes:
+                for asset in sc.assets:
+                    if asset.asset_type == "legal_docs_uploaded" and asset.status == "validated":
+                        is_complete_legacy = True
+            is_complete = is_complete_legacy
+            # pdfs_ready ← legacy file-count check
+            need_pdfs = 2 if shoot.male_talent else 1
+            try:
+                if folder_id and token:
+                    files_for_pdf = _list_folder_files(folder_id, token)
+                    pdfs_ready = sum(
+                        1 for f in files_for_pdf
+                        if f.get("name", "").lower().endswith(".pdf")
+                    ) >= need_pdfs
+                else:
+                    pdfs_ready = False
+            except Exception:
+                pdfs_ready = False
 
         results.append(ComplianceShoot(
             shoot_id=shoot.shoot_id,
@@ -919,28 +941,70 @@ async def get_filled_pdf(
     user: CurrentUser,
     talent: str = Query(...),
 ):
-    """Serve the signed agreement PDF for a talent.
+    """Serve the agreement PDF for a talent.
 
-    Source of truth is `pdf_local_path` from `compliance_signatures` (written
-    by /sign). If the talent hasn't signed yet, returns 404."""
+    Preferred source: `pdf_local_path` from `compliance_signatures` (written
+    by the new /sign flow). Falls back to the legacy Drive folder so the
+    existing prepare/fill-form path keeps working until the Hub UI is
+    rewired to the new endpoints."""
     from fastapi.responses import Response as FastAPIResponse
 
     talent_slug = talent.replace(" ", "")
-    # Try both roles — the slug uniquely identifies which talent
+
+    # 1. New flow — DB-backed local PDF
     pdf_path = (
         get_signed_pdf_path(shoot_id, "female", talent_slug)
         or get_signed_pdf_path(shoot_id, "male", talent_slug)
     )
-    if not pdf_path:
-        raise HTTPException(status_code=404, detail="Talent has not signed yet")
-    p = Path(pdf_path)
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="Signed PDF missing on disk")
+    if pdf_path:
+        p = Path(pdf_path)
+        if p.exists():
+            return FastAPIResponse(
+                content=p.read_bytes(),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"inline; filename={p.name}"},
+            )
 
+    # 2. Legacy fallback — Drive folder (the old fill-form path writes here)
+    from_d, to_d = _window()
+    shoots = _load_shoots_window(from_d, to_d, include_cancelled=False)
+    shoot = next((s for s in shoots if s.shoot_id == shoot_id), None)
+    if not shoot:
+        raise HTTPException(status_code=404, detail="Shoot not found")
+
+    shoot_date = _parse_shoot_date(shoot.shoot_date)
+    if not shoot_date:
+        raise HTTPException(status_code=400, detail="Invalid shoot date")
+
+    token = _get_drive_token()
+    if not token:
+        raise HTTPException(status_code=404, detail="Talent has not signed yet")
+
+    folder_info = _get_shoot_folder(
+        shoot_date, shoot.female_talent, shoot.male_talent, token
+    )
+    if not folder_info:
+        raise HTTPException(status_code=404, detail="Talent has not signed yet")
+    folder_id, _ = folder_info
+    files = _list_folder_files(folder_id, token)
+    date_code = shoot_date.strftime("%m%d%y")
+    pdf_name = f"{talent_slug}-{date_code}.pdf"
+    pdf_file = next(
+        (f for f in files if f.get("name", "").lower() == pdf_name.lower()), None
+    )
+    if not pdf_file:
+        raise HTTPException(status_code=404, detail=f"PDF not found: {pdf_name}")
+
+    dl_req = urllib.request.Request(
+        f"https://www.googleapis.com/drive/v3/files/{pdf_file['id']}?alt=media",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(dl_req, timeout=30) as resp:
+        pdf_bytes = resp.read()
     return FastAPIResponse(
-        content=p.read_bytes(),
+        content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename={p.name}"},
+        headers={"Content-Disposition": f"inline; filename={pdf_name}"},
     )
 
 
