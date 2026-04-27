@@ -42,6 +42,22 @@ type MockSigned = {
 }
 const mockSignedByShoot = new Map<string, MockSigned[]>()
 
+// In-memory store for server-persisted compliance photos (TKT-0151).
+// Each entry mirrors a CompliancePhoto from the API. We keep the bytes as a
+// blob URL so the iPad UI can re-render thumbnails on reload — the URL field
+// the API would normally hold is replaced by the local blob URL in dev.
+type MockPhoto = {
+  slot_id: string
+  talent_role: string
+  label: string
+  mime_type: string
+  file_size: number
+  uploaded_at: string
+  mega_path: string
+  url: string
+}
+const mockPhotosByShoot = new Map<string, MockPhoto[]>()
+
 function wait<T>(value: T, ms = MOCK_DELAY): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(value), ms))
 }
@@ -597,6 +613,49 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
     if (signedMatch) {
       const list = mockSignedByShoot.get(signedMatch[1]) ?? []
       return wait(list as unknown as T)
+    }
+
+    // ── TKT-0151 server-persisted photos ─────────────────────────────────
+    // GET /compliance/shoots/{id}/photos-v2
+    const listPhotosMatch = base.match(/^\/compliance\/shoots\/([^/]+)\/photos-v2$/)
+    if (listPhotosMatch && (init?.method ?? "GET") === "GET") {
+      const list = mockPhotosByShoot.get(listPhotosMatch[1]) ?? []
+      return wait(list as unknown as T)
+    }
+    // POST /compliance/shoots/{id}/photos-v2 — multipart body, parse FormData
+    if (listPhotosMatch && init?.method === "POST") {
+      const fd = init.body as FormData
+      const file    = fd.get("file") as File | null
+      const slotId  = (fd.get("slot_id") as string) || "slot"
+      const label   = (fd.get("label") as string) || (file?.name ?? "photo.jpg")
+      const role    = (fd.get("talent_role") as string) || ""
+      const url     = file ? URL.createObjectURL(file) : ""
+      const photo: MockPhoto = {
+        slot_id: slotId,
+        talent_role: role,
+        label,
+        mime_type: file?.type || "image/jpeg",
+        file_size: file?.size || 0,
+        uploaded_at: new Date().toISOString(),
+        mega_path: `mega:/Grail/MOCK/MOCK0001/Legal/${label}`,
+        url,
+      }
+      const list = mockPhotosByShoot.get(listPhotosMatch[1]) ?? []
+      const filtered = list.filter(p => p.slot_id !== slotId)
+      filtered.push(photo)
+      mockPhotosByShoot.set(listPhotosMatch[1], filtered)
+      return wait(photo as unknown as T)
+    }
+    // DELETE /compliance/shoots/{id}/photos-v2/{slot_id}
+    const delPhotoMatch = base.match(/^\/compliance\/shoots\/([^/]+)\/photos-v2\/(.+)$/)
+    if (delPhotoMatch && init?.method === "DELETE") {
+      const list = mockPhotosByShoot.get(delPhotoMatch[1]) ?? []
+      mockPhotosByShoot.set(delPhotoMatch[1], list.filter(p => p.slot_id !== decodeURIComponent(delPhotoMatch[2])))
+      return wait({ ok: true } as unknown as T)
+    }
+    // GET (single photo bytes) — dev mock returns null; UI uses blob url instead
+    if (delPhotoMatch && (init?.method ?? "GET") === "GET") {
+      return wait(null as unknown as T, 30)
     }
   }
 

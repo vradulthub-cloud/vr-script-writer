@@ -46,6 +46,14 @@ from api.compliance_db import (
     list_signed_talents,
     upsert_signature,
 )
+from api.compliance_photos_db import (
+    StoredPhoto,
+    count_by_shoot as _count_photos_by_shoot,
+    delete_photo as _db_delete_photo,
+    get_photo as _db_get_photo,
+    list_photos as _db_list_photos,
+    upsert_photo as _db_upsert_photo,
+)
 from api.compliance_pdf import render_agreement_pdf
 from api.routers.shoots import (
     LEGAL_ROOT_FOLDER,
@@ -547,7 +555,9 @@ async def list_compliance_shoots(
     # Bulk-fetch DB-backed signatures so is_complete + pdfs_ready don't depend
     # on Drive folder presence (the Drive proxy false-positives the moment
     # prepare copies blank templates — see TKT-0150).
-    signed_by_shoot = list_signed_talents([s.shoot_id for s in shoots])
+    shoot_ids = [s.shoot_id for s in shoots]
+    signed_by_shoot = list_signed_talents(shoot_ids)
+    photo_counts_db = _count_photos_by_shoot(shoot_ids)
     results: list[ComplianceShoot] = []
 
     for shoot in shoots:
@@ -614,6 +624,11 @@ async def list_compliance_shoots(
             except Exception:
                 pdfs_ready = False
 
+        # Photo count: prefer DB-backed (server-side persisted) row count;
+        # fall back to whatever the Drive lookup found so existing-folder
+        # shoots from the legacy flow still display a non-zero count.
+        photos_total = max(photo_counts_db.get(shoot.shoot_id, 0), photos_count)
+
         results.append(ComplianceShoot(
             shoot_id=shoot.shoot_id,
             shoot_date=shoot.shoot_date,
@@ -623,7 +638,7 @@ async def list_compliance_shoots(
             drive_folder_id=folder_id,
             drive_folder_name=folder_name,
             pdfs_ready=pdfs_ready,
-            photos_uploaded=photos_count,
+            photos_uploaded=photos_total,
             is_complete=is_complete,
             scene_id=scene_id,
             studio=studio,
@@ -1392,3 +1407,187 @@ async def get_signed_summary(shoot_id: str, user: CurrentUser):
         )
         for t in talents
     ]
+
+
+# ─── Server-persisted photos (TKT-0151) ──────────────────────────────────────
+# Photos no longer require the Drive folder, talent signatures, or any other
+# precondition. They are saved to the local filesystem under
+# compliance_photos/{shoot_id}/, indexed in the compliance_photos table, and
+# (when scene_id is known) pushed to MEGA Grail/{Studio}/{scene_id}/Legal/.
+# The same shoot can have photos uploaded across multiple visits — each slot
+# is keyed by (shoot_id, slot_id) so re-uploading replaces the prior file.
+
+
+class PhotoSummary(BaseModel):
+    slot_id: str
+    talent_role: str
+    label: str
+    mime_type: str
+    file_size: int
+    uploaded_at: str
+    mega_path: str
+    url: str           # GET URL for the photo bytes (used as <img src>)
+
+
+def _photo_dir(shoot_id: str) -> Path:
+    """Local on-disk storage for a shoot's compliance photos."""
+    safe = re.sub(r"[^A-Za-z0-9._\-]", "_", shoot_id)
+    p = Path(get_settings().base_dir) / "compliance_photos" / safe
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _photo_url(shoot_id: str, slot_id: str) -> str:
+    return (
+        "/api/compliance/shoots/"
+        + urllib.parse.quote(shoot_id, safe="")
+        + "/photos-v2/"
+        + urllib.parse.quote(slot_id, safe="")
+    )
+
+
+def _ensure_extension(label: str, mime_type: str) -> str:
+    """Make sure label has a sensible extension — Hub sends labels with one
+    already, but we don't trust the client."""
+    if any(label.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".mp4", ".mov", ".webm")):
+        return label
+    if mime_type.startswith("video/"):
+        return label + ".mp4"
+    return label + ".jpg"
+
+
+@router.get("/shoots/{shoot_id}/photos-v2", response_model=list[PhotoSummary])
+async def list_compliance_photos(shoot_id: str, user: CurrentUser):
+    """Return every photo persisted server-side for a shoot."""
+    return [
+        PhotoSummary(
+            slot_id=p.slot_id,
+            talent_role=p.talent_role,
+            label=p.label,
+            mime_type=p.mime_type,
+            file_size=p.file_size,
+            uploaded_at=p.uploaded_at,
+            mega_path=p.mega_path,
+            url=_photo_url(shoot_id, p.slot_id),
+        )
+        for p in _db_list_photos(shoot_id)
+    ]
+
+
+@router.get("/shoots/{shoot_id}/photos-v2/{slot_id}")
+async def get_compliance_photo(shoot_id: str, slot_id: str, user: CurrentUser):
+    """Serve the bytes of a persisted photo (used as <img src>)."""
+    from fastapi.responses import Response as FastAPIResponse
+
+    p = _db_get_photo(shoot_id, slot_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    fp = Path(p.local_path)
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail="Photo file missing on disk")
+    return FastAPIResponse(
+        content=fp.read_bytes(),
+        media_type=p.mime_type,
+        headers={
+            "Content-Disposition": f"inline; filename={p.label}",
+            "Cache-Control": "private, max-age=300",
+        },
+    )
+
+
+@router.post("/shoots/{shoot_id}/photos-v2", response_model=PhotoSummary)
+async def upload_compliance_photo(
+    shoot_id: str,
+    user: CurrentUser,
+    slot_id: str = Form(...),
+    label: str = Form(...),
+    talent_role: str = Form(default=""),
+    file: UploadFile = File(...),
+):
+    """Persist a single photo for a shoot.
+
+    Saves to local disk + DB index + MEGA (when scene_id is known). Replaces
+    any prior upload for the same (shoot_id, slot_id). Photos work even when
+    talent has not signed yet — that's the whole point of this endpoint.
+    """
+    from_d, to_d = _window()
+    shoots = _load_shoots_window(from_d, to_d, include_cancelled=False)
+    shoot = next((s for s in shoots if s.shoot_id == shoot_id), None)
+    if not shoot:
+        raise HTTPException(status_code=404, detail="Shoot not found")
+
+    bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in ("BG", "BGCP")]
+    primary = bg_scenes[0] if bg_scenes else None
+    scene_id = (primary.scene_id if primary else "") or ""
+    studio   = (primary.studio   if primary else "") or ""
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty upload")
+
+    mime = file.content_type or ("video/mp4" if label.lower().endswith((".mp4", ".mov", ".webm")) else "image/jpeg")
+    safe_label = _ensure_extension(label, mime)
+    safe_slot = re.sub(r"[^A-Za-z0-9._\-]", "_", slot_id) or "slot"
+
+    # Replace any existing photo for this (shoot_id, slot_id) on disk before
+    # writing the new bytes — prevents stale extensions if mime changed.
+    existing = _db_get_photo(shoot_id, slot_id)
+    if existing:
+        try:
+            Path(existing.local_path).unlink(missing_ok=True)
+        except Exception as exc:
+            _log.debug("photo unlink old failed: %s", exc)
+
+    # Write the new file
+    dest = _photo_dir(shoot_id) / f"{safe_slot}__{safe_label}"
+    dest.write_bytes(content)
+
+    # Push to MEGA when we know the scene
+    mega_path = ""
+    if scene_id and studio:
+        mega_studio = STUDIO_TO_MEGA.get(studio, studio)
+        mega_remote = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/{safe_label}"
+        err = await asyncio.to_thread(_push_to_mega, dest, mega_remote)
+        if err:
+            _log.warning("MEGA push failed for photo %s: %s", safe_label, err)
+        else:
+            mega_path = mega_remote
+
+    _db_upsert_photo(
+        shoot_id=shoot_id,
+        shoot_date=shoot.shoot_date,
+        scene_id=scene_id,
+        studio=studio,
+        slot_id=slot_id,
+        talent_role=(talent_role or "").lower(),
+        label=safe_label,
+        mime_type=mime,
+        file_size=len(content),
+        local_path=str(dest),
+        mega_path=mega_path,
+        uploaded_by=getattr(user, "email", "") or "",
+    )
+
+    return PhotoSummary(
+        slot_id=slot_id,
+        talent_role=(talent_role or "").lower(),
+        label=safe_label,
+        mime_type=mime,
+        file_size=len(content),
+        uploaded_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        mega_path=mega_path,
+        url=_photo_url(shoot_id, slot_id),
+    )
+
+
+@router.delete("/shoots/{shoot_id}/photos-v2/{slot_id}")
+async def delete_compliance_photo(shoot_id: str, slot_id: str, user: CurrentUser):
+    """Drop a photo from disk + DB. MEGA copy is left in place — the user
+    can resync if they want it gone there."""
+    p = _db_delete_photo(shoot_id, slot_id)
+    if p:
+        try:
+            Path(p.local_path).unlink(missing_ok=True)
+        except Exception as exc:
+            _log.debug("photo unlink failed: %s", exc)
+    return {"ok": True}
