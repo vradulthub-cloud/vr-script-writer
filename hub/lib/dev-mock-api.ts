@@ -29,6 +29,19 @@ import {
 // Simulated network latency so loading states aren't instant
 const MOCK_DELAY = 120
 
+// In-memory store: which talents have signed which shoot in this dev session.
+// Survives navigation but resets on page reload. Just enough to demo the
+// per-talent flow without spinning up a real backend.
+type MockSigned = {
+  talent_role: string
+  talent_slug: string
+  talent_display: string
+  legal_name: string
+  signed_at: string
+  pdf_mega_path: string
+}
+const mockSignedByShoot = new Map<string, MockSigned[]>()
+
 function wait<T>(value: T, ms = MOCK_DELAY): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(value), ms))
 }
@@ -95,7 +108,7 @@ function parseQuery(path: string): { base: string; params: URLSearchParams } {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function mockApi<T>(path: string, _options: RequestInit): Promise<T> {
+export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
   const { base, params } = parseQuery(path)
 
   // ── Health ─────────────────────────────────────────────────────────────
@@ -104,10 +117,10 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
   // ── Users ─────────────────────────────────────────────────────────────
   if (base === "/users/me") return wait(MOCK_USER as unknown as T)
   if (base === "/users/") {
-    const method = (_options.method || "GET").toUpperCase()
+    const method = (init.method || "GET").toUpperCase()
     if (method === "GET") return wait(MOCK_ALL_USERS as unknown as T)
     if (method === "POST") {
-      const body = _options.body ? JSON.parse(_options.body as string) : {}
+      const body = init.body ? JSON.parse(init.body as string) : {}
       const u = {
         email: (body.email ?? "").toLowerCase(),
         name: body.name ?? "",
@@ -119,7 +132,7 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
     }
   }
   // /users/{email} — DELETE removes from the mock array
-  if (base.startsWith("/users/") && (_options.method || "").toUpperCase() === "DELETE") {
+  if (base.startsWith("/users/") && (init.method || "").toUpperCase() === "DELETE") {
     const email = decodeURIComponent(base.slice("/users/".length)).toLowerCase()
     const arr = MOCK_ALL_USERS as Array<{ email: string }>
     const idx = arr.findIndex(u => u.email.toLowerCase() === email)
@@ -187,7 +200,7 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
   if (base === "/scripts/validate") {
     // Parity mock: flag the same classic "slop" phrases the real validator
     // catches so the UI rule-panel has something to render.
-    const input = (_options?.body ?? "") as string
+    const input = (init?.body ?? "") as string
     const text = typeof input === "string" ? input : ""
     const violations: string[] = []
     if (/\bimpossibly\b/i.test(text)) violations.push("Drop vague intensifier: 'impossibly'")
@@ -219,7 +232,7 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
     return wait(MOCK_PROMPTS as unknown as T)
   }
   if (base.startsWith("/prompts/")) {
-    const method = (_options.method || "GET").toUpperCase()
+    const method = (init.method || "GET").toUpperCase()
     const key = decodeURIComponent(base.slice("/prompts/".length))
     if (method === "GET") {
       const p = MOCK_PROMPTS.find(x => x.key === key)
@@ -227,7 +240,7 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
       return wait(p as unknown as T)
     }
     if (method === "PUT") {
-      const body = _options.body ? JSON.parse(_options.body as string) : {}
+      const body = init.body ? JSON.parse(init.body as string) : {}
       const idx = MOCK_PROMPTS.findIndex(x => x.key === key)
       if (idx >= 0) {
         MOCK_PROMPTS[idx] = {
@@ -279,7 +292,7 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
 
   // ── Calendar events ───────────────────────────────────────────────────
   if (base === "/calendar-events/") {
-    const method = (_options.method || "GET").toUpperCase()
+    const method = (init.method || "GET").toUpperCase()
     if (method === "GET") {
       const from = params.get("from")
       const to = params.get("to")
@@ -289,7 +302,7 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
       return wait(filtered as unknown as T)
     }
     if (method === "POST") {
-      const body = _options.body ? JSON.parse(_options.body as string) : {}
+      const body = init.body ? JSON.parse(init.body as string) : {}
       const ev: MockCalEvent = {
         event_id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         date: body.date ?? "",
@@ -304,7 +317,7 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
       return wait(ev as unknown as T)
     }
   }
-  if (base.startsWith("/calendar-events/") && (_options.method || "").toUpperCase() === "DELETE") {
+  if (base.startsWith("/calendar-events/") && (init.method || "").toUpperCase() === "DELETE") {
     const id = decodeURIComponent(base.slice("/calendar-events/".length))
     const idx = MOCK_CAL_EVENTS.findIndex(e => e.event_id === id)
     if (idx >= 0) MOCK_CAL_EVENTS.splice(idx, 1)
@@ -410,9 +423,9 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
   // request includes an `if_match` whose title is the magic string
   // "__force_conflict__", simulate a 409 so the conflict UI is testable.
   const compPatch = base.match(/^\/compilations\/([A-Z]+-C\d{4})$/)
-  if (compPatch && (_options.method || "").toUpperCase() === "PATCH") {
+  if (compPatch && (init.method || "").toUpperCase() === "PATCH") {
     const comp_id = compPatch[1]
-    const body = _options.body ? JSON.parse(_options.body as string) : {}
+    const body = init.body ? JSON.parse(init.body as string) : {}
     if (body.if_match?.title === "__force_conflict__") {
       const { ApiError } = await import("./api")
       throw new ApiError(409, JSON.stringify({
@@ -545,6 +558,45 @@ export async function mockApi<T>(path: string, _options: RequestInit): Promise<T
         dates_filled: true,
         message: "PDF saved to Drive",
       } as unknown as T)
+    }
+    // New TKT-0150 sign endpoint
+    const signMatch = base.match(/^\/compliance\/shoots\/([^/]+)\/sign$/)
+    if (signMatch) {
+      const shoot = MOCK_COMPLIANCE_SHOOTS.find(s => s.shoot_id === signMatch[1]) ?? MOCK_COMPLIANCE_SHOOTS[0]
+      const body = (init?.body ? JSON.parse(init.body as string) : {}) as Record<string, unknown>
+      const role = (body.talent_role as string) || "female"
+      const slug = (body.talent_slug as string) || "MockTalent"
+      const display = (body.talent_display as string) || (role === "female" ? shoot.female_talent : shoot.male_talent)
+      const legalName = (body.legal_name as string) || display
+      const signedAt = new Date().toISOString()
+      const pdfMega = `mega:/Grail/${shoot.studio || "VRH"}/${shoot.scene_id || "MOCK"}/Legal/${slug}-${shoot.shoot_date}.pdf`
+      // Store this signature on the shoot so /signed reflects it on next call
+      const list = mockSignedByShoot.get(shoot.shoot_id) ?? []
+      const filtered = list.filter(s => s.talent_role !== role)
+      filtered.push({
+        talent_role: role,
+        talent_slug: slug,
+        talent_display: display,
+        legal_name: legalName,
+        signed_at: signedAt,
+        pdf_mega_path: pdfMega,
+      })
+      mockSignedByShoot.set(shoot.shoot_id, filtered)
+      return wait({
+        shoot_id: shoot.shoot_id,
+        talent_role: role,
+        talent_slug: slug,
+        signed_at: signedAt,
+        pdf_local_path: `/tmp/mock/${shoot.shoot_date}-${slug}.pdf`,
+        pdf_mega_path: pdfMega,
+        contract_version: "eclatech.v1.dev-mock",
+      } as unknown as T)
+    }
+    // New TKT-0150 signed-summary endpoint
+    const signedMatch = base.match(/^\/compliance\/shoots\/([^/]+)\/signed$/)
+    if (signedMatch) {
+      const list = mockSignedByShoot.get(signedMatch[1]) ?? []
+      return wait(list as unknown as T)
     }
   }
 

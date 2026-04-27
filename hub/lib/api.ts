@@ -478,6 +478,67 @@ export interface FillFormRequest {
   company_name?: string
 }
 
+// ── New in-Hub signing flow (TKT-0150) ─────────────────────────────────────
+
+export type TaxClassification =
+  | "individual" | "c_corp" | "s_corp" | "partnership"
+  | "trust_estate" | "llc" | "other"
+
+export interface SignRequest {
+  talent_role: "female" | "male"
+  talent_slug: string
+  talent_display: string
+
+  // W-9 (page 1 of legacy template)
+  legal_name: string
+  business_name?: string
+  tax_classification: TaxClassification
+  llc_class?: string                     // 'C' | 'S' | 'P' (when tax_classification='llc')
+  other_classification?: string
+  exempt_payee_code?: string
+  fatca_code?: string
+  tin_type: "ssn" | "ein"
+  tin: string                            // raw digits
+
+  // 2257 Performer Names Disclosure
+  dob: string                            // YYYY-MM-DD
+  place_of_birth: string
+  street_address: string
+  city_state_zip: string
+  phone: string
+  email: string
+  id1_type: string
+  id1_number: string
+  id2_type?: string
+  id2_number?: string
+  stage_names?: string
+  professional_names?: string
+  nicknames_aliases?: string
+  previous_legal_names?: string
+
+  // Signature image, base64 PNG
+  signature_png: string                  // "data:image/png;base64,..."
+}
+
+export interface SignResult {
+  shoot_id: string
+  talent_role: string
+  talent_slug: string
+  signed_at: string
+  pdf_local_path: string
+  pdf_mega_path: string
+  contract_version: string
+}
+
+export interface SignedSummary {
+  talent_role: string
+  talent_slug: string
+  talent_display: string
+  legal_name: string
+  signed_at: string
+  pdf_mega_path: string
+}
+
 export const SHOOT_ASSET_ORDER: readonly AssetType[] = [
   "script_done",
   "call_sheet_sent",
@@ -989,6 +1050,12 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
           fd,
         )
       },
+
+      sign: (shootId: string, req: SignRequest) =>
+        post<SignResult>(`/compliance/shoots/${encodeURIComponent(shootId)}/sign`, req),
+
+      signed: (shootId: string) =>
+        get<SignedSummary[]>(`/compliance/shoots/${encodeURIComponent(shootId)}/signed`),
     },
   }
 }
