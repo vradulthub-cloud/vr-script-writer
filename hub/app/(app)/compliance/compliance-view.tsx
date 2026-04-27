@@ -1393,15 +1393,20 @@ function TalentSignCard({
       padding: "16px 18px",
       display: "flex", alignItems: "center", gap: 14,
     }}>
-      {/* Status dot */}
+      {/* Status dot — lime when signed, studio accent when waiting */}
       <div style={{
-        width: 36, height: 36, borderRadius: "50%",
-        background: isSigned ? "rgba(190,214,47,0.12)" : "var(--color-elevated)",
-        border: `1px solid ${isSigned ? "rgba(190,214,47,0.4)" : "var(--color-border)"}`,
+        width: 38, height: 38, borderRadius: "50%",
+        background: isSigned
+          ? "rgba(190,214,47,0.12)"
+          : `color-mix(in oklab, ${accent} 14%, transparent)`,
+        border: `1px solid ${isSigned ? "rgba(190,214,47,0.4)" : `color-mix(in oklab, ${accent} 35%, transparent)`}`,
         display: "flex", alignItems: "center", justifyContent: "center",
         flexShrink: 0,
       }}>
-        {isSigned ? <CheckCircle2 size={18} color="var(--color-lime)" /> : <FileText size={16} color="var(--color-text-muted)" />}
+        {isSigned
+          ? <CheckCircle2 size={18} color="var(--color-lime)" />
+          : <FileText size={16} color={accent} />
+        }
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
