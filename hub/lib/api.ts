@@ -539,6 +539,22 @@ export interface SignedSummary {
   pdf_mega_path: string
 }
 
+/**
+ * Server-persisted photo (TKT-0151). Photos saved here survive across visits
+ * and don't depend on talent having signed paperwork yet — they live in the
+ * compliance_photos table and on local disk, with an optional MEGA copy.
+ */
+export interface CompliancePhoto {
+  slot_id: string
+  talent_role: string
+  label: string
+  mime_type: string
+  file_size: number
+  uploaded_at: string
+  mega_path: string
+  url: string                 // GET endpoint that serves the bytes
+}
+
 export const SHOOT_ASSET_ORDER: readonly AssetType[] = [
   "script_done",
   "call_sheet_sent",
@@ -697,7 +713,10 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
     apiFetch<T>(path, token, { method: "PATCH", body: JSON.stringify(body) })
   // For multipart/form-data (file uploads) — do NOT set Content-Type, let the browser set boundary
   const postForm = <T>(path: string, formData: FormData, signal?: AbortSignal) => {
-    if (DEV_MOCK) return apiFetch<T>(path, token, { method: "POST" })
+    // Pass the FormData through in dev mock so route handlers can inspect
+    // form fields (slot_id, label, etc.) — apiFetch ignores the body for
+    // dev mock JSON shaping anyway, but our mock route reads it.
+    if (DEV_MOCK) return apiFetch<T>(path, token, { method: "POST", body: formData as unknown as BodyInit })
     const url = `${API_BASE}/api${path}`
     const headers: Record<string, string> = {}
     if (token) headers["Authorization"] = `Bearer ${token}`
@@ -1056,6 +1075,38 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
 
       signed: (shootId: string) =>
         get<SignedSummary[]>(`/compliance/shoots/${encodeURIComponent(shootId)}/signed`),
+
+      // ─── Server-persisted photos (TKT-0151) ──────────────────────────────
+      // Photos saved here are independent of signing and the legacy Drive
+      // folder. They reappear on the next visit and push to MEGA when the
+      // shoot has a scene_id.
+      listPhotos: (shootId: string) =>
+        get<CompliancePhoto[]>(`/compliance/shoots/${encodeURIComponent(shootId)}/photos-v2`),
+
+      uploadPhotoV2: (
+        shootId: string,
+        file: File,
+        slotId: string,
+        label: string,
+        talentRole: string,
+        signal?: AbortSignal,
+      ) => {
+        const fd = new FormData()
+        fd.append("file", file, label)
+        fd.append("slot_id", slotId)
+        fd.append("label", label)
+        fd.append("talent_role", talentRole)
+        return postForm<CompliancePhoto>(
+          `/compliance/shoots/${encodeURIComponent(shootId)}/photos-v2`,
+          fd,
+          signal,
+        )
+      },
+
+      deletePhotoV2: (shootId: string, slotId: string) =>
+        del<{ ok: boolean }>(
+          `/compliance/shoots/${encodeURIComponent(shootId)}/photos-v2/${encodeURIComponent(slotId)}`,
+        ),
     },
   }
 }

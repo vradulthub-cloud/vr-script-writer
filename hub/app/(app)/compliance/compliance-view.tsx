@@ -15,7 +15,7 @@ import {
   Video,
   X,
 } from "lucide-react"
-import { api, type ComplianceShoot, type CompliancePrepareResult, type SignedSummary } from "@/lib/api"
+import { api, type CompliancePhoto, type ComplianceShoot, type CompliancePrepareResult, type SignedSummary } from "@/lib/api"
 import {
   AGREEMENT_SECTIONS,
   CONTRACT_INTRO,
@@ -162,6 +162,7 @@ function TalentForm({
 }) {
   const [form, setForm] = useState<TalentFormData>(emptyForm)
   const [reviewing, setReviewing] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const set = (k: keyof TalentFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }))
 
@@ -386,8 +387,29 @@ function TalentForm({
         border: "1px solid var(--color-border)",
         borderRadius: 10, padding: "14px 16px", marginBottom: 18,
       }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)", marginBottom: 8 }}>
-          What you&apos;re agreeing to
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 10, marginBottom: 8,
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
+            What you&apos;re agreeing to
+          </div>
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(true)}
+            style={{
+              background: "transparent",
+              border: `1px solid ${accent}`,
+              borderRadius: 6,
+              padding: "5px 10px",
+              fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
+              color: accent,
+              cursor: "pointer",
+              display: "inline-flex", alignItems: "center", gap: 4,
+            }}
+          >
+            <FileText size={11} /> Preview
+          </button>
         </div>
         <ul style={{ margin: 0, padding: "0 0 0 16px", display: "flex", flexDirection: "column", gap: 4 }}>
           {[
@@ -400,9 +422,16 @@ function TalentForm({
           ))}
         </ul>
         <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginTop: 10, marginBottom: 0, lineHeight: 1.5 }}>
-          After submitting this form you&apos;ll review the full agreement before signing.
+          Tap <strong>Preview</strong> above to read the full document now, or review on the next screen before signing.
         </p>
       </div>
+
+      {previewOpen && (
+        <PaperworkPreviewModal
+          accent={accent}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
 
       <Section title="Identity">
         <Field label="Legal name (as shown on ID)" fieldKey="legal_name" placeholder="Full legal name" required />
@@ -911,6 +940,171 @@ function SignAgreementStep({
   )
 }
 
+// ─── PaperworkPreviewModal — read the contract before filling out the form ───
+//
+// Surfaces the same verbatim contract content used on the Sign step, but
+// without any form-data fields (no SSN, no DOB, no addresses) — talent can
+// preview what they're signing while the form is still being filled. Live
+// data appears on the Sign step where it's interleaved with the agreement.
+
+function PaperworkPreviewModal({
+  accent,
+  onClose,
+}: {
+  accent: string
+  onClose: () => void
+}) {
+  // Lock body scroll while the modal is open and close on ESC
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    window.addEventListener("keydown", onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener("keydown", onKey)
+    }
+  }, [onClose])
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Paperwork preview"
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 100,
+        background: "rgba(0,0,0,0.65)",
+        backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "var(--color-bg)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 14,
+          width: "min(720px, 100%)",
+          maxHeight: "min(86vh, 920px)",
+          display: "flex", flexDirection: "column", overflow: "hidden",
+          boxShadow: "0 24px 60px rgba(0,0,0,0.55)",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "14px 18px",
+          borderBottom: "1px solid var(--color-border)",
+          background: "var(--color-surface)",
+        }}>
+          <FileText size={16} color={accent} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)" }}>
+              Paperwork preview
+            </div>
+            <div style={{ fontSize: 11, color: "var(--color-text-faint)", marginTop: 1 }}>
+              W-9 · Model Services Agreement · 18 U.S.C. § 2257 disclosure
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close preview"
+            style={{
+              background: "transparent",
+              border: "1px solid var(--color-border)",
+              borderRadius: 8,
+              padding: "6px 8px",
+              cursor: "pointer",
+              color: "var(--color-text-muted)",
+              display: "inline-flex", alignItems: "center",
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Scrollable contract body */}
+        <div style={{
+          flex: 1, overflow: "auto",
+          padding: "20px 22px",
+          fontSize: 13.5, lineHeight: 1.6, color: "var(--color-text)",
+        }}>
+          <SectionEyebrow accent={accent} text="Section 01 of 03 · IRS Form W-9" />
+          <h3 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 8px" }}>Taxpayer Identification &amp; Certification</h3>
+          <p style={{ color: "var(--color-text-muted)", fontSize: 12.5, marginBottom: 10 }}>
+            Your final signed packet includes the official IRS Form W-9 with the legal name,
+            address, federal tax classification, and SSN/EIN you enter on this form.
+          </p>
+          <ul style={{ margin: "4px 0 14px", paddingLeft: 18, color: "var(--color-text-muted)", fontSize: 12.5 }}>
+            <li>Used by Eclatech&apos;s payment processor to issue 1099-NEC if applicable.</li>
+            <li>Backup-withholding certification &amp; FATCA reporting code (most performers leave this blank).</li>
+          </ul>
+
+          <SectionEyebrow accent={accent} text="Section 02 of 03 · Model Services Agreement" />
+          <h3 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 8px" }}>{CONTRACT_TITLE}</h3>
+          <p style={{ marginBottom: 10 }}>{CONTRACT_INTRO}</p>
+          {AGREEMENT_SECTIONS.map(sec => (
+            <div key={sec.id} style={{ marginBottom: 14 }}>
+              <h4 style={{ fontSize: 13.5, fontWeight: 700, margin: "12px 0 4px" }}>{sec.heading}</h4>
+              {sec.body.split("\n\n").map((p, i) => (
+                <p key={i} style={{ marginBottom: 6 }}>{p}</p>
+              ))}
+            </div>
+          ))}
+          <p style={{ fontStyle: "italic", color: "var(--color-text-muted)", marginBottom: 6 }}>{WITNESS_STATEMENT}</p>
+          <p style={{ color: "var(--color-text-muted)", fontSize: 12.5, marginBottom: 16 }}>{EXECUTION_LINE}</p>
+
+          <SectionEyebrow accent={accent} text="Section 03 of 03 · 18 U.S.C. § 2257 Records" />
+          <h3 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 8px" }}>{DISCLOSURE_HEADING}</h3>
+          <p style={{ marginBottom: 12 }}>{DISCLOSURE_STATEMENT}</p>
+          <h4 style={{ fontSize: 13.5, fontWeight: 700, margin: "12px 0 4px" }}>{DOCUMENTS_PROVIDED_HEADING}</h4>
+          {DOCUMENTS_PROVIDED_LIST.map((item, i) => (
+            <p key={i} style={{ marginBottom: 4 }}>{item}</p>
+          ))}
+          <p style={{ marginTop: 14, marginBottom: 10 }}>{DATA_CONSENT}</p>
+          <p style={{ marginBottom: 10 }}>{PERJURY_STATEMENT}</p>
+          <p style={{ color: "var(--color-text-muted)", fontSize: 12.5 }}>{INDEMNITY_STATEMENT}</p>
+
+          <div style={{
+            marginTop: 18, paddingTop: 14,
+            borderTop: "1px solid var(--color-border-subtle)",
+            color: "var(--color-text-faint)", fontSize: 11.5,
+          }}>
+            Producer of record: {PRODUCER_NAME}. The agreement on the Sign step shows your details
+            interleaved with this text — you&apos;ll have one more chance to review before signing.
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: "12px 16px",
+          borderTop: "1px solid var(--color-border)",
+          background: "var(--color-surface)",
+          display: "flex", justifyContent: "flex-end",
+        }}>
+          <button
+            onClick={onClose}
+            style={{
+              background: accent,
+              border: "none",
+              borderRadius: 8,
+              padding: "10px 18px",
+              cursor: "pointer",
+              color: "#000",
+              fontSize: 13, fontWeight: 700,
+              display: "inline-flex", alignItems: "center", gap: 6,
+            }}
+          >
+            Got it — back to form
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function SectionEyebrow({ accent, text }: { accent: string; text: string }) {
   return (
     <div style={{
@@ -1335,17 +1529,19 @@ function TalentPicker({
         )}
       </div>
 
-      {/* Continue to photos */}
+      {/* Continue to photos — never blocked. Photos can be captured before
+          talent signs paperwork (they sometimes finish paperwork later in
+          the day), and they persist server-side regardless. */}
       <button
         onClick={onContinueToPhotos}
-        disabled={!allSigned}
         style={{
           width: "100%",
-          background: allSigned ? "var(--color-lime)" : "var(--color-elevated)",
-          border: "none", borderRadius: 10, padding: "14px 18px",
+          background: allSigned ? "var(--color-lime)" : "transparent",
+          border: allSigned ? "none" : "1px solid var(--color-border)",
+          borderRadius: 10, padding: "14px 18px",
           fontSize: 14, fontWeight: 700,
-          color: allSigned ? "#000" : "var(--color-text-faint)",
-          cursor: allSigned ? "pointer" : "not-allowed",
+          color: allSigned ? "#000" : "var(--color-text)",
+          cursor: "pointer",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
         }}
       >
@@ -1354,10 +1550,18 @@ function TalentPicker({
           : (() => {
               const total = needsMale ? 2 : 1
               const done = (femaleSigned ? 1 : 0) + (maleSigned ? 1 : 0)
-              return <>{done}/{total} signed — sign the rest to continue</>
+              return <>{done}/{total} signed · Continue to Photos →</>
             })()
         }
       </button>
+      {!allSigned && (
+        <p style={{
+          fontSize: 11.5, color: "var(--color-text-faint)",
+          textAlign: "center", marginTop: 8, lineHeight: 1.5,
+        }}>
+          Paperwork can be completed later — capturing photos now is fine.
+        </p>
+      )}
     </div>
   )
 }
@@ -1523,8 +1727,15 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   const [signing, setSigning] = useState(false)
   const [signError, setSignError] = useState<string | null>(null)
 
-  // Photos step state
+  // Photos step state — locally captured (this session, not yet uploaded)
   const [photos, setPhotos] = useState<CapturedPhoto[]>([])
+  // Server-persisted photos for the selected shoot. Loaded on entry so the
+  // iPad sees thumbnails of anything uploaded on a previous visit. Photos
+  // can be captured before talent has signed paperwork — they auto-upload
+  // on capture so they're safe across reloads.
+  const [savedPhotos, setSavedPhotos] = useState<CompliancePhoto[]>([])
+  const [perSlotUploading, setPerSlotUploading] = useState<Record<string, boolean>>({})
+  const [perSlotError, setPerSlotError] = useState<Record<string, string>>({})
 
   // Upload step state
   const [uploading, setUploading] = useState(false)
@@ -1577,10 +1788,17 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
     setSignError(null)
     setSignedSummary([])
     setPhotos([])
+    setSavedPhotos([])
+    setPerSlotUploading({})
+    setPerSlotError({})
     setUploadResult(null)
     setSyncResult(null)
     // Hydrate per-talent signed status from the API
     void client.compliance.signed(shoot.shoot_id).then(setSignedSummary).catch(() => setSignedSummary([]))
+    // Load any photos uploaded for this shoot on a prior visit. Talent can
+    // capture photos before signing — these persist server-side so they
+    // re-appear here on next load.
+    void client.compliance.listPhotos(shoot.shoot_id).then(setSavedPhotos).catch(() => setSavedPhotos([]))
     // If Drive folder already exists, pre-populate prep result state so the
     // photos step can still surface the Drive folder URL during cutover.
     if (shoot.drive_folder_id) {
@@ -1685,16 +1903,50 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   }
 
   // ── Photo capture ─────────────────────────────────────────────────────
+  // Photos are uploaded server-side IMMEDIATELY on capture so they survive
+  // reloads — and so they can be captured before talent has signed any
+  // paperwork. The legacy in-memory `photos` array is also kept around for
+  // the upload step's progress-list rendering during this transition; the
+  // saved-photo card is the source of truth once the round-trip succeeds.
 
   function capturePhoto(slot: PhotoSlot, file: File, preview: string) {
     setPhotos(prev => {
       const without = prev.filter(p => p.slotId !== slot.id)
       return [...without, { slotId: slot.id, label: slot.label, file, preview, fileType: slot.fileType }]
     })
+    if (!selected) return
+    setPerSlotUploading(prev => ({ ...prev, [slot.id]: true }))
+    setPerSlotError(prev => { const next = { ...prev }; delete next[slot.id]; return next })
+    void client.compliance.uploadPhotoV2(
+      selected.shoot_id,
+      file,
+      slot.id,
+      slot.label,
+      slot.talent,
+    ).then(saved => {
+      setSavedPhotos(prev => {
+        const without = prev.filter(p => p.slot_id !== slot.id)
+        return [...without, saved]
+      })
+      void loadDate(date)
+    }).catch((e: unknown) => {
+      setPerSlotError(prev => ({ ...prev, [slot.id]: e instanceof Error ? e.message : "Upload failed" }))
+    }).finally(() => {
+      setPerSlotUploading(prev => { const next = { ...prev }; delete next[slot.id]; return next })
+    })
   }
 
   function removePhoto(slotId: string) {
     setPhotos(prev => prev.filter(p => p.slotId !== slotId))
+    if (!selected) return
+    if (savedPhotos.some(p => p.slot_id === slotId)) {
+      void client.compliance.deletePhotoV2(selected.shoot_id, slotId)
+        .then(() => {
+          setSavedPhotos(prev => prev.filter(p => p.slot_id !== slotId))
+          void loadDate(date)
+        })
+        .catch(() => {/* leave row in place; show error inline next time */})
+    }
   }
 
   // ── Upload ────────────────────────────────────────────────────────────
@@ -2187,13 +2439,33 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
       )}
 
       {/* ── Step: Photos ── */}
-      {step === "photos" && selected && (
+      {step === "photos" && selected && (() => {
+        // Resolve a slot's captured/saved state in one place. In-memory
+        // captures (this session) win over server-saved photos so retakes
+        // show the new image immediately even before upload completes.
+        const capturedFor = (slotId: string): CapturedPhoto | undefined => {
+          const inMem = photos.find(p => p.slotId === slotId)
+          if (inMem) return inMem
+          const saved = savedPhotos.find(p => p.slot_id === slotId)
+          if (!saved) return undefined
+          return {
+            slotId: saved.slot_id,
+            label: saved.label,
+            // Re-render only — the bytes already live on the server, so we
+            // just need a placeholder File for the in-memory shape.
+            file: new File([], saved.label, { type: saved.mime_type }),
+            preview: saved.url,
+            fileType: saved.mime_type.startsWith("video/") ? "video" : "image",
+          }
+        }
+        const slotIsDone = (slotId: string) => !!capturedFor(slotId)
+        return (
         <div style={{ padding: 16 }}>
           <h2 style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 4 }}>
             Step 2 — ID &amp; Verification Photos
           </h2>
           <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginBottom: 16, lineHeight: 1.4 }}>
-            Capture both IDs side by side (front face, then back), then bunny ear shots for each talent.
+            Capture IDs and bunny-ear shots for each talent. Photos save automatically and reappear on the next visit.
           </p>
 
           {/* Female section */}
@@ -2203,14 +2475,25 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               {slots.filter(s => s.talent === "female").map(slot => {
-                const captured = photos.find(p => p.slotId === slot.id)
+                const captured = capturedFor(slot.id)
+                const uploading = perSlotUploading[slot.id]
+                const error = perSlotError[slot.id]
                 return (
-                  <CameraButton
-                    key={slot.id}
-                    slot={slot}
-                    captured={captured}
-                    onCapture={(file, preview) => capturePhoto(slot, file, preview)}
-                  />
+                  <div key={slot.id}>
+                    <CameraButton
+                      slot={slot}
+                      captured={captured}
+                      onCapture={(file, preview) => capturePhoto(slot, file, preview)}
+                    />
+                    {uploading && (
+                      <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                        <Loader2 size={10} className="animate-spin" /> Saving…
+                      </div>
+                    )}
+                    {error && (
+                      <div style={{ fontSize: 10, color: "#f87171", marginTop: 4 }}>{error}</div>
+                    )}
+                  </div>
                 )
               })}
             </div>
@@ -2224,14 +2507,25 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {slots.filter(s => s.talent === "male").map(slot => {
-                  const captured = photos.find(p => p.slotId === slot.id)
+                  const captured = capturedFor(slot.id)
+                  const uploading = perSlotUploading[slot.id]
+                  const error = perSlotError[slot.id]
                   return (
-                    <CameraButton
-                      key={slot.id}
-                      slot={slot}
-                      captured={captured}
-                      onCapture={(file, preview) => capturePhoto(slot, file, preview)}
-                    />
+                    <div key={slot.id}>
+                      <CameraButton
+                        slot={slot}
+                        captured={captured}
+                        onCapture={(file, preview) => capturePhoto(slot, file, preview)}
+                      />
+                      {uploading && (
+                        <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                          <Loader2 size={10} className="animate-spin" /> Saving…
+                        </div>
+                      )}
+                      {error && (
+                        <div style={{ fontSize: 10, color: "#f87171", marginTop: 4 }}>{error}</div>
+                      )}
+                    </div>
                   )
                 })}
               </div>
@@ -2242,7 +2536,9 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
           {(() => {
             const videoSlot = slots.find(s => s.category === "signout")
             if (!videoSlot) return null
-            const captured = photos.find(p => p.slotId === videoSlot.id)
+            const captured = capturedFor(videoSlot.id)
+            const uploading = perSlotUploading[videoSlot.id]
+            const error = perSlotError[videoSlot.id]
             return (
               <div style={{ marginBottom: 20 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 6 }}>
@@ -2256,6 +2552,14 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
                   captured={captured}
                   onCapture={(file, preview) => capturePhoto(videoSlot, file, preview)}
                 />
+                {uploading && (
+                  <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                    <Loader2 size={10} className="animate-spin" /> Saving…
+                  </div>
+                )}
+                {error && (
+                  <div style={{ fontSize: 10, color: "#f87171", marginTop: 4 }}>{error}</div>
+                )}
               </div>
             )
           })()}
@@ -2263,7 +2567,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
           {/* Required check */}
           {(() => {
             const required = slots.filter(s => s.required)
-            const done = required.filter(s => photos.some(p => p.slotId === s.id))
+            const done = required.filter(s => slotIsDone(s.id))
             const allDone = done.length === required.length
             return (
               <div style={{
@@ -2287,7 +2591,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
                   </div>
                   {!allDone && (
                     <div style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-                      {required.filter(s => !photos.some(p => p.slotId === s.id)).map(s => s.display).join(", ")} still needed
+                      {required.filter(s => !slotIsDone(s.id)).map(s => s.display).join(", ")} still needed
                     </div>
                   )}
                 </div>
@@ -2310,14 +2614,14 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
             </button>
             <button
               onClick={() => setStep("upload")}
-              disabled={photos.length === 0}
+              disabled={photos.length === 0 && savedPhotos.length === 0}
               style={{
                 flex: 1,
-                background: photos.length > 0 ? accent : "var(--color-elevated)",
+                background: (photos.length + savedPhotos.length) > 0 ? accent : "var(--color-elevated)",
                 border: "none", borderRadius: 10, padding: "16px 20px",
                 fontSize: 15, fontWeight: 700,
-                color: photos.length > 0 ? "#000" : "var(--color-text-faint)",
-                cursor: photos.length > 0 ? "pointer" : "not-allowed",
+                color: (photos.length + savedPhotos.length) > 0 ? "#000" : "var(--color-text-faint)",
+                cursor: (photos.length + savedPhotos.length) > 0 ? "pointer" : "not-allowed",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
               }}
             >
@@ -2325,7 +2629,8 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
             </button>
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {/* ── Step: Upload ── */}
       {step === "upload" && selected && (

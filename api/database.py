@@ -319,6 +319,32 @@ CREATE TABLE IF NOT EXISTS compliance_signatures (
 CREATE INDEX IF NOT EXISTS idx_compliance_shoot     ON compliance_signatures(shoot_id);
 CREATE INDEX IF NOT EXISTS idx_compliance_scene     ON compliance_signatures(scene_id);
 CREATE INDEX IF NOT EXISTS idx_compliance_date      ON compliance_signatures(shoot_date);
+
+-- Compliance photos — independent of Drive and signatures. Photos can be
+-- captured for a shoot at any time (e.g. before talent has signed paperwork)
+-- and persist server-side so they reappear on next visit. Each row is one
+-- captured slot (e.g. "SofiaRed-id-front"); re-uploading the same slot_id
+-- replaces the file.
+CREATE TABLE IF NOT EXISTS compliance_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shoot_id TEXT NOT NULL,
+    shoot_date TEXT NOT NULL,
+    scene_id TEXT DEFAULT '',
+    studio TEXT DEFAULT '',
+    slot_id TEXT NOT NULL,             -- "SofiaRed-id-front" / "signout-video"
+    talent_role TEXT DEFAULT '',       -- 'female' | 'male' | '' (joint, e.g. signout video)
+    label TEXT NOT NULL,                -- filename used on disk + MEGA
+    mime_type TEXT NOT NULL DEFAULT 'image/jpeg',
+    file_size INTEGER DEFAULT 0,
+    local_path TEXT NOT NULL,           -- absolute path on the server
+    mega_path TEXT DEFAULT '',          -- "mega:/Grail/{Studio}/{scene_id}/Legal/{filename}"
+    uploaded_by TEXT DEFAULT '',        -- staff email (RBAC)
+    uploaded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(shoot_id, slot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_photos_shoot ON compliance_photos(shoot_id);
+CREATE INDEX IF NOT EXISTS idx_photos_scene ON compliance_photos(scene_id);
+CREATE INDEX IF NOT EXISTS idx_photos_date  ON compliance_photos(shoot_date);
 """
 
 
