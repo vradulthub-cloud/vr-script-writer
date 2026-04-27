@@ -319,19 +319,21 @@ def _stamp_w9_signature(
     from reportlab.pdfgen import canvas
     overlay_buf = io.BytesIO()
     c = canvas.Canvas(overlay_buf, pagesize=letter)
-    # IRS W-9 (Rev. 10-2018) signature line sits in the lower-right of
-    # page 1 in the "Sign Here" block. Coordinates are PDF points (1/72")
-    # measured from bottom-left.
+    # IRS W-9 (Rev. 10-2018) Sign Here block: the form's "Signature 1"
+    # AcroForm field is at rect (121.9, 231.6) → (373.3, 253.7) in PDF
+    # points — i.e. (1.69, 3.22) → (5.18, 3.52) in inches. The Date line
+    # to its right has no form field; we draw the date manually next to
+    # the signature line. PDF origin is bottom-left.
     sig_io = io.BytesIO(signature_png_bytes)
     c.drawImage(
         ImageReader(sig_io),
-        x=2.85 * inch, y=2.50 * inch,
-        width=2.5 * inch, height=0.45 * inch,
+        x=1.75 * inch, y=3.18 * inch,
+        width=3.40 * inch, height=0.40 * inch,
         mask="auto",
         preserveAspectRatio=True,
     )
-    c.setFont("Helvetica", 10)
-    c.drawString(5.7 * inch, 2.55 * inch, _long_date(shoot_date))
+    c.setFont("Helvetica", 11)
+    c.drawString(5.55 * inch, 3.32 * inch, _long_date(shoot_date))
     c.save()
     overlay_buf.seek(0)
 
@@ -389,6 +391,20 @@ _SECTION_SIG_HEADER = ParagraphStyle(
     borderPadding=6, borderColor=colors.HexColor("#92400E"),
     borderWidth=0.5,
 )
+_SECTION_BANNER = ParagraphStyle(
+    "section_banner", parent=_BASE["Heading1"],
+    fontName="Helvetica-Bold", fontSize=14, leading=18,
+    spaceBefore=4, spaceAfter=8, alignment=TA_LEFT,
+    textColor=colors.HexColor("#FFFFFF"),
+    backColor=colors.HexColor("#1F2937"),
+    borderPadding=10,
+)
+_SECTION_PREAMBLE = ParagraphStyle(
+    "section_preamble", parent=_BASE["BodyText"],
+    fontName="Helvetica-Oblique", fontSize=9, leading=12,
+    spaceBefore=0, spaceAfter=8, alignment=TA_JUSTIFY,
+    textColor=colors.HexColor("#374151"),
+)
 
 
 def _esc(s: str) -> str:
@@ -415,6 +431,21 @@ def _agreement_pages(
     signed_at_iso: str,
 ) -> list:
     out: list = []
+    out.append(Paragraph(
+        _esc("SECTION 2 OF 3 — MODEL SERVICES AGREEMENT &amp; RELEASE"),
+        _SECTION_BANNER,
+    ))
+    out.append(Paragraph(
+        _esc(
+            "This is the contract between you (the Model) and Eclatech LLC (the "
+            "Producer) covering today's production. Sections 1–11 below set out "
+            "your services, compensation, the rights you grant, confidentiality, "
+            "testing, your status as an independent contractor, and the governing "
+            "law. Read it carefully — your signature at the bottom of this section "
+            "applies only to Sections 1–11."
+        ),
+        _SECTION_PREAMBLE,
+    ))
     out.append(Paragraph(
         _esc(f"Dated: {_long_date(shoot_date)}"),
         ParagraphStyle("dated", parent=_BODY, fontName="Helvetica-Bold", spaceAfter=10),
@@ -483,6 +514,24 @@ def _disclosure_pages(
     signed_at_iso: str,
 ) -> list:
     out: list = []
+    out.append(Paragraph(
+        _esc("SECTION 3 OF 3 — 18 U.S.C. § 2257 RECORDS"),
+        _SECTION_BANNER,
+    ))
+    out.append(Paragraph(
+        _esc(
+            "This section is the federally-required Performer Identification "
+            "record under 18 U.S.C. § 2257 and 28 C.F.R. § 75. The producer is "
+            "legally required to verify and retain identification information "
+            "and a record of all names and aliases used by every performer in a "
+            "sexually-explicit production. By completing and signing this section, "
+            "you provide the producer with that record. Your signature at the "
+            "bottom of this section applies only to the 2257 disclosure, the "
+            "data-processing consent, and the perjury and indemnity statements "
+            "below."
+        ),
+        _SECTION_PREAMBLE,
+    ))
     out.append(Paragraph(_esc(cc.DISCLOSURE_HEADING), _H1))
     out.append(Paragraph(
         f"<b>Production Name:</b> {_esc('Eclatech LLC studio production')} "
