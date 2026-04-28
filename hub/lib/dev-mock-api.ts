@@ -371,6 +371,27 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
   }
 
   // ── Call sheets ───────────────────────────────────────────────────────
+  // ── Titles — Treatments list (PIL local) ──────────────────────────
+  if (base === "/titles/treatments") {
+    return wait([
+      { name: "cinematic-noir", featured: true },
+      { name: "bold-editorial", featured: true },
+      { name: "minimal-serif",  featured: false },
+      { name: "vapor-grit",     featured: false },
+    ] as unknown as T)
+  }
+  // ── Titles — Local PIL render (random/auto/pick) ──────────────────
+  if (base === "/titles/local") {
+    const body = init.body ? JSON.parse(init.body as string) : {}
+    const n = body.n ?? 6
+    const pixel =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+    return wait(Array.from({ length: n }, (_, i) => ({
+      treatment_name: `treatment-${i + 1}`,
+      data_url: `data:image/png;base64,${pixel}`,
+      error: null,
+    })) as unknown as T)
+  }
   // ── Titles — Model Name PNG ───────────────────────────────────────
   if (base === "/titles/model-name") {
     // 1x1 transparent PNG — enough for the UI to render without the
