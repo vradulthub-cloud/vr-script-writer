@@ -557,9 +557,22 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
 
   // ── Compliance ────────────────────────────────────────────────────────
   if (base.startsWith("/compliance/shoots")) {
-    // List shoots for a date
+    // List shoots for a date, optionally filtered by name search.
+    // Mirrors the real backend so the UI's empty-state and search affordances
+    // can be exercised end-to-end against fixtures.
     if (base === "/compliance/shoots" || base === "/compliance/shoots/") {
-      return wait(MOCK_COMPLIANCE_SHOOTS as unknown as T)
+      const dateParam = params.get("date")
+      const q = (params.get("q") ?? "").trim().toLowerCase()
+      let list = MOCK_COMPLIANCE_SHOOTS
+      if (q) {
+        list = list.filter(s =>
+          s.female_talent.toLowerCase().includes(q) ||
+          s.male_talent.toLowerCase().includes(q),
+        )
+      } else if (dateParam) {
+        list = list.filter(s => s.shoot_date === dateParam)
+      }
+      return wait(list as unknown as T)
     }
     // Prepare
     const prepareMatch = base.match(/^\/compliance\/shoots\/([^/]+)\/prepare$/)
