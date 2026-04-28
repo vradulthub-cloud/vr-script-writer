@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:mock": "DEV_AUTH_MOCK=1 NEXT_PUBLIC_DEV_AUTH_MOCK=1 next dev",
+    "dev:staging": "NEXT_PUBLIC_API_URL=https://desktop-9d407v9.tail3f755a.ts.net:10000 next dev",
     "build": "next build",
     "start": "next start"
   },
