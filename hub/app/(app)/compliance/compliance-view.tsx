@@ -15,7 +15,7 @@ import {
   Video,
   X,
 } from "lucide-react"
-import { api, type CompliancePhoto, type ComplianceShoot, type CompliancePrepareResult, type DriveImportResult, type SignedSummary } from "@/lib/api"
+import { api, ApiError, type CompliancePhoto, type ComplianceShoot, type CompliancePrepareResult, type DriveImportResult, type SignedSummary } from "@/lib/api"
 import {
   AGREEMENT_SECTIONS,
   CONTRACT_INTRO,
@@ -269,6 +269,7 @@ function TalentForm({
   error,
   onSubmit,
   onBack,
+  draftKey,
 }: {
   talentLabel: string
   accent: string
@@ -276,12 +277,41 @@ function TalentForm({
   error: string | null
   onSubmit: (data: TalentFormData) => void
   onBack?: () => void
+  /**
+   * Stable per-form key (e.g. `compliance-draft-${shoot_id}-female`). When set,
+   * the form auto-saves to localStorage on every change and restores on mount.
+   * Prevents the "API error nuked everything she just typed" failure mode.
+   * Parent should clear localStorage[draftKey] after a successful sign.
+   */
+  draftKey?: string
 }) {
-  const [form, setForm] = useState<TalentFormData>(emptyForm)
+  // Lazy init reads localStorage once on first render to seed form state.
+  // SSR-safe: window check, JSON.parse guarded, falls back to empty form.
+  const [form, setForm] = useState<TalentFormData>(() => {
+    if (typeof window === "undefined" || !draftKey) return emptyForm()
+    try {
+      const raw = window.localStorage.getItem(draftKey)
+      if (!raw) return emptyForm()
+      const parsed = JSON.parse(raw) as Partial<TalentFormData>
+      return { ...emptyForm(), ...parsed }
+    } catch {
+      return emptyForm()
+    }
+  })
   const [reviewing, setReviewing] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const set = (k: keyof TalentFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }))
+
+  // Persist form state on every change. Cheap (<5KB) so we don't debounce.
+  useEffect(() => {
+    if (typeof window === "undefined" || !draftKey) return
+    try {
+      window.localStorage.setItem(draftKey, JSON.stringify(form))
+    } catch {
+      // Quota exceeded or storage disabled (private mode) — drop silently.
+    }
+  }, [draftKey, form])
 
   const formCtx = useMemo<FormCtxValue>(() => ({ form, set, accent }), [form, accent])
 
@@ -2114,6 +2144,15 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
         signature_png: signaturePng,
       })
       void loadDate(date)
+      // Clear the localStorage draft now that the data is durably saved on
+      // the server. Form will start empty next time this shoot+role is opened.
+      try {
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem(`compliance-draft-${selected.shoot_id}-${role}`)
+        }
+      } catch {
+        // Storage disabled — no harm leaving the draft around.
+      }
       // Refresh per-talent signed status, then return to the picker so the
       // staff can either start the other talent's flow or move to photos.
       const fresh = await client.compliance.signed(selected.shoot_id).catch(() => [])
@@ -2123,7 +2162,19 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
       else setMaleFormData(null)
       setDocsPhase("picker")
     } catch (e) {
-      setSignError(e instanceof Error ? e.message : "Failed to save signature")
+      // Surface the HTTP status + body so we can actually debug. The default
+      // Error.message often hides the real cause behind a generic string.
+      let msg: string
+      if (e instanceof ApiError) {
+        const trimmed = (e.body || "").slice(0, 400)
+        msg = `Server returned ${e.status}${trimmed ? ` — ${trimmed}` : ""}`
+      } else {
+        msg = e instanceof Error ? e.message : "Failed to save signature"
+      }
+      setSignError(msg)
+      // Best-effort console trail for the on-call. Tap-to-copy from Safari dev
+      // tools if the iPad is mirrored to a laptop.
+      console.error("[compliance.sign]", { shoot_id: selected.shoot_id, role, error: e })
     } finally {
       setSigning(false)
     }
@@ -2623,6 +2674,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               error={femaleError}
               onSubmit={submitFemaleForm}
               onBack={() => setDocsPhase("picker")}
+              draftKey={`compliance-draft-${selected.shoot_id}-female`}
             />
           )}
           {docsPhase === "female-sign" && femaleFormData && (
@@ -2650,6 +2702,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               error={maleError}
               onSubmit={submitMaleForm}
               onBack={() => setDocsPhase("picker")}
+              draftKey={`compliance-draft-${selected.shoot_id}-male`}
             />
           )}
           {docsPhase === "male-sign" && maleFormData && selected.male_talent && (
