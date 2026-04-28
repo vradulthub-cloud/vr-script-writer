@@ -555,6 +555,26 @@ export interface CompliancePhoto {
   url: string                 // GET endpoint that serves the bytes
 }
 
+/**
+ * Result of importing legacy Drive paperwork (TKT-0152). The server pulls
+ * PDFs from a Drive folder, copies bytes to MEGA, and inserts thin
+ * compliance_signatures rows pointing at the original artifacts.
+ */
+export interface DriveImportTalentResult {
+  talent_role: string
+  talent_slug: string
+  pdf_local_path: string
+  pdf_mega_path: string
+  bytes_copied: number
+}
+
+export interface DriveImportResult {
+  shoot_id: string
+  imported: DriveImportTalentResult[]
+  skipped: string[]
+  errors: string[]
+}
+
 export const SHOOT_ASSET_ORDER: readonly AssetType[] = [
   "script_done",
   "call_sheet_sent",
@@ -1106,6 +1126,15 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       deletePhotoV2: (shootId: string, slotId: string) =>
         del<{ ok: boolean }>(
           `/compliance/shoots/${encodeURIComponent(shootId)}/photos-v2/${encodeURIComponent(slotId)}`,
+        ),
+
+      // Pull existing Drive paperwork into compliance_signatures (TKT-0152).
+      // Server walks the folder, matches by talent slug, copies bytes to MEGA,
+      // and inserts thin DB rows. PII never touches the Hub.
+      importFromDrive: (shootId: string, folderUrl: string, importedFromDate?: string) =>
+        post<DriveImportResult>(
+          `/compliance/shoots/${encodeURIComponent(shootId)}/import-from-drive`,
+          { folder_url: folderUrl, imported_from_date: importedFromDate ?? "" },
         ),
     },
   }

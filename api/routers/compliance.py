@@ -1409,6 +1409,263 @@ async def get_signed_summary(shoot_id: str, user: CurrentUser):
     ]
 
 
+# ─── Legacy Drive paperwork import (TKT-0152) ────────────────────────────────
+# Wires already-signed Drive PDFs into compliance_signatures so a shoot whose
+# talent finished paperwork in the legacy Drive flow shows complete in the Hub
+# without forcing them to re-sign on the iPad. The original Drive PDF — with
+# its real drawn signatures — is the legal artifact: we copy it byte-for-byte
+# to MEGA Grail/{Studio}/{scene_id}/Legal/ and link to it from the Hub. We do
+# NOT regenerate the agreement, do NOT fabricate a signature, and do NOT pull
+# PII into the Hub UI. The compliance_signatures row is a thin index pointing
+# at the Drive original; W-9/2257 fields stay empty and are sourced from the
+# linked PDF when needed.
+
+
+_DRIVE_FOLDER_ID_RE = re.compile(r"/folders/([A-Za-z0-9_\-]+)")
+
+
+def _parse_drive_folder_id(url_or_id: str) -> str:
+    """Accept a Drive folder URL or a bare folder id."""
+    s = (url_or_id or "").strip()
+    if not s:
+        raise HTTPException(status_code=400, detail="folder_url required")
+    m = _DRIVE_FOLDER_ID_RE.search(s)
+    if m:
+        return m.group(1)
+    # Looks like a bare ID already
+    if re.fullmatch(r"[A-Za-z0-9_\-]{20,}", s):
+        return s
+    raise HTTPException(status_code=400, detail=f"Cannot parse Drive folder from {s!r}")
+
+
+def _drive_download_bytes(file_id: str, token: str) -> bytes:
+    req = urllib.request.Request(
+        f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return r.read()
+
+
+def _import_placeholder_signature_png() -> bytes:
+    """Tiny labeled PNG used as the signature_image_path for imports.
+
+    The DB schema requires a non-null path, but we don't want to fabricate a
+    cursive-looking signature. This image plainly says the signature lives
+    in the linked PDF, so anyone inspecting the audit folder is immediately
+    pointed at the real artifact.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont  # type: ignore
+    except Exception:
+        # Fallback: smallest valid PNG (1×1 transparent)
+        import base64
+        return base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+        )
+    img = Image.new("RGB", (520, 110), "white")
+    d = ImageDraw.Draw(img)
+    try:
+        font_path = next(
+            (p for p in [
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "C:/Windows/Fonts/segoeui.ttf",
+                "C:/Windows/Fonts/arial.ttf",
+                "/Library/Fonts/Arial.ttf",
+            ] if Path(p).exists()),
+            None,
+        )
+        head = ImageFont.truetype(font_path, 18) if font_path else ImageFont.load_default()
+        body = ImageFont.truetype(font_path, 13) if font_path else ImageFont.load_default()
+    except Exception:
+        head = body = ImageFont.load_default()
+    d.text((22, 22), "Signature on file in linked PDF", fill=(40, 40, 40), font=head)
+    d.text((22, 56), "Imported from Drive — see attached agreement.", fill=(120, 120, 120), font=body)
+    d.text((22, 78), "(no in-Hub signature was captured for this record)", fill=(160, 160, 160), font=body)
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
+
+
+class DriveImportRequest(BaseModel):
+    """Pull every PDF in a Drive folder into the Hub for the shoot it
+    targets. Filenames matching the talent slug prefix are matched to roles."""
+    folder_url: str
+    imported_from_date: str = ""   # original sign date for audit trail
+
+
+class DriveImportTalentResult(BaseModel):
+    talent_role: str
+    talent_slug: str
+    pdf_local_path: str
+    pdf_mega_path: str
+    bytes_copied: int
+
+
+class DriveImportResult(BaseModel):
+    shoot_id: str
+    imported: list[DriveImportTalentResult] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+
+@router.post("/shoots/{shoot_id}/import-from-drive", response_model=DriveImportResult)
+async def import_from_drive(
+    shoot_id: str,
+    user: CurrentUser,
+    request: Request,
+    body: DriveImportRequest,
+):
+    """Import already-signed Drive PDFs into compliance_signatures.
+
+    Server-side flow (no PII passes through the Hub UI):
+      1. List PDFs in the Drive folder
+      2. Match each to female/male by filename prefix
+      3. Copy bytes to compliance_pdfs/{shoot_date}/{Slug}-{date}.pdf
+      4. Push the same bytes to MEGA Grail/{Studio}/{scene_id}/Legal/
+      5. Insert a compliance_signatures row pointing at the saved PDF; W-9
+         and 2257 fields are left empty (the linked PDF is the legal record).
+    """
+    from_d, to_d = _window()
+    shoots = _load_shoots_window(from_d, to_d, include_cancelled=False)
+    shoot = next((s for s in shoots if s.shoot_id == shoot_id), None)
+    if not shoot:
+        raise HTTPException(status_code=404, detail="Shoot not found")
+
+    bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in ("BG", "BGCP")]
+    if not bg_scenes:
+        raise HTTPException(status_code=400, detail="Shoot has no BG/BGCP scene")
+    primary = bg_scenes[0]
+    scene_id = primary.scene_id or ""
+    studio = primary.studio or ""
+    mega_studio = STUDIO_TO_MEGA.get(studio, studio)
+
+    shoot_date_obj = _parse_shoot_date(shoot.shoot_date)
+    if not shoot_date_obj:
+        raise HTTPException(status_code=400, detail="Invalid shoot date")
+
+    folder_id = _parse_drive_folder_id(body.folder_url)
+    token = _get_drive_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="Drive credentials unavailable")
+
+    files = await asyncio.to_thread(_list_folder_files, folder_id, token)
+    pdfs = [f for f in files if (f.get("name") or "").lower().endswith(".pdf")]
+    if not pdfs:
+        raise HTTPException(status_code=404, detail="No PDFs found in folder")
+
+    # Match each PDF to either talent by slug prefix in filename
+    female_slug = shoot.female_talent.replace(" ", "")
+    male_slug = (shoot.male_talent or "").replace(" ", "")
+    matches: dict[str, dict] = {}
+    for f in pdfs:
+        name = (f.get("name") or "").replace(" ", "")
+        low = name.lower()
+        if female_slug and low.startswith(female_slug.lower()):
+            matches.setdefault("female", f)
+        elif male_slug and low.startswith(male_slug.lower()):
+            matches.setdefault("male", f)
+
+    result = DriveImportResult(shoot_id=shoot.shoot_id)
+    if not matches:
+        result.errors.append(
+            f"No PDFs matched talent slugs ({female_slug!r}, {male_slug or '—'!r})"
+        )
+        return result
+
+    audit_user = (
+        f"legacy_import:drive"
+        + (f":{body.imported_from_date}" if body.imported_from_date else "")
+    )
+    placeholder_png = _import_placeholder_signature_png()
+    signed_at_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    date_code = shoot_date_obj.strftime("%m%d%y")
+
+    for role, drive_file in matches.items():
+        slug = female_slug if role == "female" else male_slug
+        display = shoot.female_talent if role == "female" else shoot.male_talent
+        try:
+            pdf_bytes = await asyncio.to_thread(_drive_download_bytes, drive_file["id"], token)
+        except Exception as exc:
+            result.errors.append(f"{slug}: download failed — {exc}")
+            continue
+
+        # Save locally
+        pdf_name = f"{slug}-{date_code}.pdf"
+        pdf_path = _legal_pdf_dir() / shoot.shoot_date / pdf_name
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_bytes(pdf_bytes)
+
+        # Save the signature placeholder
+        sig_path = _signature_dir() / f"{shoot.shoot_date}-{slug}-{role}.png"
+        sig_path.write_bytes(placeholder_png)
+
+        # Push to MEGA
+        mega_remote = ""
+        mega_err: Optional[str] = None
+        if scene_id:
+            mega_remote = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/{pdf_name}"
+            mega_err = await asyncio.to_thread(_push_to_mega, pdf_path, mega_remote)
+            if mega_err:
+                _log.warning("MEGA push failed for %s: %s", pdf_name, mega_err)
+
+        # Insert compliance_signatures row — W-9/2257 fields stay empty, the
+        # linked PDF is the legal record. legal_name defaults to the talent
+        # display so the picker shows something readable.
+        upsert_signature(
+            shoot_id=shoot.shoot_id,
+            shoot_date=shoot.shoot_date,
+            scene_id=scene_id,
+            studio=studio,
+            talent_role=role,
+            talent_slug=slug,
+            talent_display=display,
+            legal_name=display,           # placeholder; real name lives in PDF
+            business_name="",
+            tax_classification="individual",
+            llc_class="",
+            other_classification="",
+            exempt_payee_code="",
+            fatca_code="",
+            tin_type="ssn",
+            tin="",
+            dob="",
+            place_of_birth="",
+            street_address="",
+            city_state_zip="",
+            phone="",
+            email="",
+            id1_type="",
+            id1_number="",
+            id2_type="",
+            id2_number="",
+            stage_names=display,
+            professional_names="",
+            nicknames_aliases="",
+            previous_legal_names="",
+            signature_image_path=str(sig_path.relative_to(get_settings().base_dir)),
+            signed_ip=request.client.host if request.client else "",
+            signed_user_agent="legacy-import",
+            signed_by_user=audit_user,
+            pdf_local_path=str(pdf_path),
+            pdf_mega_path=mega_remote if (mega_remote and not mega_err) else "",
+        )
+
+        result.imported.append(DriveImportTalentResult(
+            talent_role=role,
+            talent_slug=slug,
+            pdf_local_path=str(pdf_path),
+            pdf_mega_path=mega_remote if (mega_remote and not mega_err) else "",
+            bytes_copied=len(pdf_bytes),
+        ))
+
+    if female_slug and "female" not in matches:
+        result.skipped.append(f"female ({female_slug})")
+    if male_slug and "male" not in matches:
+        result.skipped.append(f"male ({male_slug})")
+    return result
+
+
 # ─── Server-persisted photos (TKT-0151) ──────────────────────────────────────
 # Photos no longer require the Drive folder, talent signatures, or any other
 # precondition. They are saved to the local filesystem under

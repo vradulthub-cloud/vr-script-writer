@@ -657,6 +657,40 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
     if (delPhotoMatch && (init?.method ?? "GET") === "GET") {
       return wait(null as unknown as T, 30)
     }
+
+    // ── TKT-0152 import-from-drive ───────────────────────────────────────
+    const importMatch = base.match(/^\/compliance\/shoots\/([^/]+)\/import-from-drive$/)
+    if (importMatch && init?.method === "POST") {
+      const sid = importMatch[1]
+      const shoot = MOCK_COMPLIANCE_SHOOTS.find(s => s.shoot_id === sid) ?? MOCK_COMPLIANCE_SHOOTS[0]
+      const list = mockSignedByShoot.get(shoot.shoot_id) ?? []
+      const now = new Date().toISOString()
+      const slugs = [
+        ["female", shoot.female_talent.replace(/ /g, ""), shoot.female_talent],
+        ...(shoot.male_talent ? [["male", shoot.male_talent.replace(/ /g, ""), shoot.male_talent] as const] : []),
+      ] as const
+      const imported = slugs.map(([role, slug, display]) => {
+        const filtered = list.filter(s => s.talent_role !== role)
+        filtered.push({
+          talent_role: role,
+          talent_slug: slug,
+          talent_display: display,
+          legal_name: display,
+          signed_at: now,
+          pdf_mega_path: `mega:/Grail/${shoot.studio || "MOCK"}/${shoot.scene_id || "MOCK"}/Legal/${slug}-mock.pdf`,
+        })
+        list.length = 0
+        list.push(...filtered)
+        return { talent_role: role, talent_slug: slug, pdf_local_path: `/mock/${slug}.pdf`, pdf_mega_path: `mega:/Grail/MOCK/MOCK0001/Legal/${slug}.pdf`, bytes_copied: 123456 }
+      })
+      mockSignedByShoot.set(shoot.shoot_id, list)
+      return wait({
+        shoot_id: shoot.shoot_id,
+        imported,
+        skipped: [],
+        errors: [],
+      } as unknown as T)
+    }
   }
 
   // eslint-disable-next-line no-console

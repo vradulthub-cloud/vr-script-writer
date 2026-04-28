@@ -15,7 +15,7 @@ import {
   Video,
   X,
 } from "lucide-react"
-import { api, type CompliancePhoto, type ComplianceShoot, type CompliancePrepareResult, type SignedSummary } from "@/lib/api"
+import { api, type CompliancePhoto, type ComplianceShoot, type CompliancePrepareResult, type DriveImportResult, type SignedSummary } from "@/lib/api"
 import {
   AGREEMENT_SECTIONS,
   CONTRACT_INTRO,
@@ -1105,6 +1105,186 @@ function PaperworkPreviewModal({
   )
 }
 
+// ─── DriveImportModal — wire existing Drive paperwork into the shoot ────────
+//
+// One field: paste the Drive folder URL. The server walks the folder, matches
+// PDFs to female/male by filename slug, copies bytes to MEGA, and inserts thin
+// compliance_signatures rows. PII never touches the Hub UI — this modal only
+// holds a folder URL and a status string.
+
+function DriveImportModal({
+  accent,
+  url,
+  onUrlChange,
+  submitting,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  accent: string
+  url: string
+  onUrlChange: (v: string) => void
+  submitting: boolean
+  error: string | null
+  onClose: () => void
+  onSubmit: () => void
+}) {
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !submitting) onClose() }
+    window.addEventListener("keydown", onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener("keydown", onKey)
+    }
+  }, [onClose, submitting])
+
+  const canSubmit = url.trim().length > 0 && !submitting
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Import from Drive folder"
+      onClick={() => { if (!submitting) onClose() }}
+      style={{
+        position: "fixed", inset: 0, zIndex: 100,
+        background: "rgba(0,0,0,0.65)",
+        backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "var(--color-bg)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 14,
+          width: "min(560px, 100%)",
+          display: "flex", flexDirection: "column", overflow: "hidden",
+          boxShadow: "0 24px 60px rgba(0,0,0,0.55)",
+        }}
+      >
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "14px 18px",
+          borderBottom: "1px solid var(--color-border)",
+          background: "var(--color-surface)",
+        }}>
+          <FolderOpen size={16} color={accent} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)" }}>
+              Import from Drive folder
+            </div>
+            <div style={{ fontSize: 11, color: "var(--color-text-faint)", marginTop: 1 }}>
+              Pulls the signed PDFs into MEGA and marks talent as Signed.
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            aria-label="Close"
+            style={{
+              background: "transparent",
+              border: "1px solid var(--color-border)",
+              borderRadius: 8, padding: "6px 8px",
+              cursor: submitting ? "not-allowed" : "pointer",
+              color: "var(--color-text-muted)",
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <p style={{ fontSize: 12.5, color: "var(--color-text-muted)", margin: 0, lineHeight: 1.55 }}>
+            Paste the Drive folder URL containing the signed PDFs. The server will match each
+            PDF to female / male talent by filename and copy the original byte-for-byte to MEGA.
+            No new contract is generated.
+          </p>
+
+          <div>
+            <div style={{
+              fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+              textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 6,
+            }}>
+              Drive folder URL
+            </div>
+            <input
+              autoFocus
+              value={url}
+              onChange={e => onUrlChange(e.target.value)}
+              placeholder="https://drive.google.com/drive/folders/…"
+              style={{
+                width: "100%",
+                background: "var(--color-elevated)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 8,
+                padding: "11px 14px",
+                fontSize: 13, color: "var(--color-text)",
+                outline: "none", boxSizing: "border-box",
+                fontFamily: "var(--font-mono)",
+              }}
+            />
+          </div>
+
+          {error && (
+            <div style={{
+              background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+              borderRadius: 8, padding: "10px 12px",
+              fontSize: 12.5, color: "#f87171",
+            }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div style={{
+          padding: "12px 16px",
+          borderTop: "1px solid var(--color-border)",
+          background: "var(--color-surface)",
+          display: "flex", justifyContent: "flex-end", gap: 8,
+        }}>
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            style={{
+              background: "transparent",
+              border: "1px solid var(--color-border)",
+              borderRadius: 8, padding: "10px 14px",
+              fontSize: 12.5, fontWeight: 600,
+              color: "var(--color-text-muted)",
+              cursor: submitting ? "not-allowed" : "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={!canSubmit}
+            style={{
+              background: canSubmit ? accent : "var(--color-elevated)",
+              border: "none",
+              borderRadius: 8, padding: "10px 18px",
+              fontSize: 13, fontWeight: 700,
+              color: canSubmit ? "#000" : "var(--color-text-faint)",
+              cursor: canSubmit ? "pointer" : "not-allowed",
+              display: "inline-flex", alignItems: "center", gap: 6,
+            }}
+          >
+            {submitting
+              ? <><Loader2 size={13} className="animate-spin" /> Importing…</>
+              : <>Import paperwork</>
+            }
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function SectionEyebrow({ accent, text }: { accent: string; text: string }) {
   return (
     <div style={{
@@ -1462,6 +1642,7 @@ function TalentPicker({
   onStartFemale,
   onStartMale,
   onContinueToPhotos,
+  onImportFromDrive,
 }: {
   shoot: ComplianceShoot
   accent: string
@@ -1469,6 +1650,7 @@ function TalentPicker({
   onStartFemale: () => void
   onStartMale: () => void
   onContinueToPhotos: () => void
+  onImportFromDrive: () => void
 }) {
   const femaleSigned = signed.find(s => s.talent_role === "female")
   const maleSigned   = signed.find(s => s.talent_role === "male")
@@ -1561,6 +1743,29 @@ function TalentPicker({
         }}>
           Paperwork can be completed later — capturing photos now is fine.
         </p>
+      )}
+
+      {/* Import existing Drive paperwork — for talent who already signed in
+          the legacy flow and shouldn't have to re-sign on the iPad. */}
+      {!allSigned && (
+        <div style={{ marginTop: 12, textAlign: "center" }}>
+          <button
+            type="button"
+            onClick={onImportFromDrive}
+            style={{
+              background: "transparent",
+              border: "1px dashed var(--color-border)",
+              borderRadius: 8,
+              padding: "9px 14px",
+              fontSize: 12, fontWeight: 600,
+              color: "var(--color-text-muted)",
+              cursor: "pointer",
+              display: "inline-flex", alignItems: "center", gap: 6,
+            }}
+          >
+            <FolderOpen size={12} /> Import from Drive folder
+          </button>
+        </div>
       )}
     </div>
   )
@@ -1726,6 +1931,12 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   const [signaturePng, setSignaturePng] = useState<string | null>(null)
   const [signing, setSigning] = useState(false)
   const [signError, setSignError] = useState<string | null>(null)
+
+  // Drive-import modal state (TKT-0152)
+  const [driveImportOpen, setDriveImportOpen] = useState(false)
+  const [driveImportUrl, setDriveImportUrl] = useState("")
+  const [driveImportSubmitting, setDriveImportSubmitting] = useState(false)
+  const [driveImportError, setDriveImportError] = useState<string | null>(null)
 
   // Photos step state — locally captured (this session, not yet uploaded)
   const [photos, setPhotos] = useState<CapturedPhoto[]>([])
@@ -2290,6 +2501,46 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               onStartFemale={() => { setSignError(null); setFemaleError(null); setDocsPhase("female-form") }}
               onStartMale={() => { setSignError(null); setMaleError(null); setDocsPhase("male-form") }}
               onContinueToPhotos={() => setStep("photos")}
+              onImportFromDrive={() => {
+                setDriveImportError(null)
+                setDriveImportUrl("")
+                setDriveImportOpen(true)
+              }}
+            />
+          )}
+
+          {driveImportOpen && (
+            <DriveImportModal
+              accent={accent}
+              url={driveImportUrl}
+              onUrlChange={setDriveImportUrl}
+              submitting={driveImportSubmitting}
+              error={driveImportError}
+              onClose={() => { if (!driveImportSubmitting) setDriveImportOpen(false) }}
+              onSubmit={async () => {
+                if (!selected) return
+                setDriveImportSubmitting(true)
+                setDriveImportError(null)
+                try {
+                  const result: DriveImportResult = await client.compliance.importFromDrive(
+                    selected.shoot_id,
+                    driveImportUrl.trim(),
+                  )
+                  if (result.errors.length > 0 && result.imported.length === 0) {
+                    setDriveImportError(result.errors.join("; "))
+                    return
+                  }
+                  // Refresh signed summary + the global shoot list
+                  const fresh = await client.compliance.signed(selected.shoot_id).catch(() => [])
+                  setSignedSummary(fresh)
+                  void loadDate(date)
+                  setDriveImportOpen(false)
+                } catch (e) {
+                  setDriveImportError(e instanceof Error ? e.message : "Import failed")
+                } finally {
+                  setDriveImportSubmitting(false)
+                }
+              }}
             />
           )}
 
