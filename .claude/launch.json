@@ -18,6 +18,14 @@
       "cwd": "hub"
     },
     {
+      "name": "hub-dev-staging",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:staging"],
+      "port": 3002,
+      "autoPort": false,
+      "cwd": "hub"
+    },
+    {
       "name": "hub-existing",
       "runtimeExecutable": "echo",
       "runtimeArgs": ["already-running"],

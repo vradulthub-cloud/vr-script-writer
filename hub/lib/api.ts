@@ -834,6 +834,18 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         const qs = params.toString()
         return get<Scene[]>(`/scenes/${qs ? `?${qs}` : ""}`)
       },
+      /**
+       * Bulk recent-scenes endpoint — collapses the dashboard's 3 per-studio
+       * fan-out fetches into a single backend call. Server-side enforces the
+       * per-studio cap so one busy studio can't crowd the others out.
+       */
+      recent: (filters: { studios: string[]; per_studio?: number; missing_only?: boolean }) => {
+        const params = new URLSearchParams()
+        params.set("studios", filters.studios.join(","))
+        if (filters.per_studio) params.set("per_studio", String(filters.per_studio))
+        if (filters.missing_only !== undefined) params.set("missing_only", String(filters.missing_only))
+        return get<Scene[]>(`/scenes/recent?${params.toString()}`)
+      },
       stats: () => get<SceneStats>("/scenes/stats"),
       get: (id: string) => get<Scene>(`/scenes/${id}`),
       updateTitle: (id: string, value: string) =>

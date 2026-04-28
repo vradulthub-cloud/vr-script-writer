@@ -103,6 +103,11 @@ async def update_user(
             vals,
         )
 
+    # Drop any cached token entries for this user so the role/allowed_tabs
+    # change takes effect on their very next request, not after the 60s TTL.
+    from api.auth import _cache_invalidate_user
+    _cache_invalidate_user(email)
+
     # Fire-and-forget write to Google Sheets "Users" tab
     target = dict(row)
     target.update(updates)
@@ -159,6 +164,11 @@ async def delete_user(email: str, manager: dict = Depends(require_user_manager))
         )
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail=f"User {email} not found")
+
+    # Revoke cached access immediately — without this the deleted user keeps
+    # working for up to the token-cache TTL (60s) after their row is gone.
+    from api.auth import _cache_invalidate_user
+    _cache_invalidate_user(target_email)
 
     threading.Thread(target=_remove_user_from_sheet, args=(target_email,), daemon=True).start()
     _log.info("User %s deleted by %s", target_email, manager["email"])

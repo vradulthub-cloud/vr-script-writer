@@ -78,17 +78,44 @@ class SceneStats(BaseModel):
 
 @router.get("/stats", response_model=SceneStats)
 async def scene_stats(user: CurrentUser):
-    """Get scene counts by studio and overall completion percentage."""
+    """Get scene counts by studio and overall completion percentage.
+
+    Reads the pre-aggregated scene_stats_cache table. The cache is refreshed
+    once per sync (≤300s old) by sync_engine._refresh_scene_stats_cache, so
+    this endpoint runs O(studios) rows instead of three full table scans on
+    every dashboard load. Falls back to live aggregation if the cache table
+    is empty (first boot before the first sync completes).
+    """
     with get_db() as conn:
+        rows = conn.execute(
+            "SELECT studio, scene_count, complete_count FROM scene_stats_cache"
+        ).fetchall()
+
+        if rows:
+            by_studio: dict[str, int] = {}
+            total = 0
+            complete = 0
+            for r in rows:
+                d = dict(r)
+                if d["studio"] == "TOTAL":
+                    total = d["scene_count"]
+                    complete = d["complete_count"]
+                else:
+                    by_studio[d["studio"]] = d["scene_count"]
+            return SceneStats(
+                total=total,
+                by_studio=by_studio,
+                complete=complete,
+                missing_any=total - complete,
+            )
+
+        # Cold path — first run before sync_scenes has populated the cache.
         total_row = conn.execute("SELECT COUNT(*) as cnt FROM scenes").fetchone()
         total = dict(total_row)["cnt"]
-
         studio_rows = conn.execute(
             "SELECT studio, COUNT(*) as cnt FROM scenes GROUP BY studio"
         ).fetchall()
         by_studio = {dict(r)["studio"]: dict(r)["cnt"] for r in studio_rows}
-
-        # "Complete" = has description, videos, thumbnail, photos, and storyboard
         complete_row = conn.execute(
             """SELECT COUNT(*) as cnt FROM scenes
                WHERE has_description=1 AND has_videos=1
@@ -102,6 +129,48 @@ async def scene_stats(user: CurrentUser):
         complete=complete,
         missing_any=total - complete,
     )
+
+
+@router.get("/recent", response_model=list[SceneResponse])
+async def list_recent_scenes(
+    user: CurrentUser,
+    studios: str = Query(default="FuckPassVR,VRHush,VRAllure"),
+    per_studio: int = Query(default=5, ge=1, le=50),
+    missing_only: bool = True,
+):
+    """
+    Return the N most recent scenes for each requested studio in one call.
+
+    Replaces the dashboard's three-fetch fan-out (one round-trip per studio)
+    with a single backend call. The same per-studio cap is enforced server-side
+    via UNION ALL of LIMITed sub-selects so a studio with heavier recent
+    activity can't crowd others out.
+    """
+    studio_list = [s.strip() for s in studios.split(",") if s.strip()]
+    if not studio_list:
+        return []
+
+    missing_clause = (
+        " AND (has_description=0 OR has_videos=0"
+        " OR has_thumbnail=0 OR has_photos=0 OR has_storyboard=0)"
+        if missing_only else ""
+    )
+
+    sub_selects: list[str] = []
+    params: list = []
+    for studio in studio_list:
+        sub_selects.append(
+            f"SELECT * FROM scenes WHERE studio = ?{missing_clause}"
+            f" ORDER BY id DESC LIMIT ?"
+        )
+        params.extend([studio, per_studio])
+
+    query = " UNION ALL ".join(sub_selects)
+
+    with get_db() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    return [_row_to_scene(dict(r)) for r in rows]
 
 
 @router.get("/{scene_id}/thumbnail")

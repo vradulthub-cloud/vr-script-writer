@@ -163,6 +163,15 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
 
   // ── Scenes ────────────────────────────────────────────────────────────
   if (base === "/scenes/stats") return wait(MOCK_SCENE_STATS as unknown as T)
+  if (base === "/scenes/recent") {
+    const studios = (params.get("studios") ?? "").split(",").map(s => s.trim()).filter(Boolean)
+    const perStudio = params.get("per_studio") ? parseInt(params.get("per_studio")!) : 5
+    const missingOnly = params.get("missing_only") !== "false"
+    const flat = studios.flatMap(studio =>
+      filterScenes({ studio, missing_only: missingOnly, limit: perStudio }),
+    )
+    return wait(flat as unknown as T)
+  }
   if (base === "/scenes/") {
     const filters = {
       studio: params.get("studio") ?? undefined,
