@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
 import {
   Camera,
   CheckCircle2,
@@ -145,6 +145,123 @@ function computeAge(dobIso: string, asOf = new Date()): number {
   return age
 }
 
+// ─── Form helper components (hoisted) ────────────────────────────────────
+// These MUST live at module scope. Defining them inside TalentForm makes their
+// function identity change on every render, which causes React to unmount and
+// remount the inputs on every keystroke — losing focus after one character.
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  background: "var(--color-elevated)",
+  border: "1px solid var(--color-border)",
+  borderRadius: 8,
+  padding: "13px 14px",
+  fontSize: 16,
+  color: "var(--color-text)",
+  outline: "none",
+  boxSizing: "border-box",
+}
+
+type FormCtxValue = {
+  form: TalentFormData
+  set: (k: keyof TalentFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void
+  accent: string
+}
+const FormCtx = createContext<FormCtxValue | null>(null)
+function useFormCtx(): FormCtxValue {
+  const v = useContext(FormCtx)
+  if (!v) throw new Error("FormCtx is missing — Field/SelectField must be inside <FormCtx.Provider>")
+  return v
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{
+        fontSize: 13, fontWeight: 600, color: "var(--color-text-muted)", marginBottom: 8,
+      }}>
+        {title}
+      </div>
+      <div style={{
+        background: "var(--color-surface)", border: "1px solid var(--color-border)",
+        borderRadius: 12, overflow: "hidden",
+      }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function TwoCol({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+      {children}
+    </div>
+  )
+}
+
+function Field({
+  label, fieldKey, type = "text", inputMode, placeholder, required,
+}: {
+  label: string
+  fieldKey: keyof TalentFormData
+  type?: string
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"]
+  placeholder?: string
+  required?: boolean
+}) {
+  const { form, set, accent } = useFormCtx()
+  return (
+    <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--color-border-subtle)" }}>
+      <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
+        {label}{required && <span style={{ color: accent, marginLeft: 3 }}>*</span>}
+      </div>
+      <input
+        type={type}
+        inputMode={inputMode}
+        placeholder={placeholder}
+        value={form[fieldKey]}
+        onChange={set(fieldKey)}
+        required={required}
+        style={inputStyle}
+      />
+    </div>
+  )
+}
+
+function SelectField({
+  label, fieldKey, options, required,
+}: {
+  label: string
+  fieldKey: keyof TalentFormData
+  options: readonly string[]
+  required?: boolean
+}) {
+  const { form, set, accent } = useFormCtx()
+  return (
+    <div style={{ padding: "12px 14px", borderRight: "1px solid var(--color-border-subtle)", borderTop: "1px solid var(--color-border-subtle)" }}>
+      <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
+        {label}{required && <span style={{ color: accent, marginLeft: 3 }}>*</span>}
+      </div>
+      <select
+        value={form[fieldKey]}
+        onChange={set(fieldKey)}
+        style={{
+          ...inputStyle,
+          appearance: "none", WebkitAppearance: "none",
+          backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>")`,
+          backgroundRepeat: "no-repeat",
+          backgroundPosition: "right 12px center",
+          paddingRight: 34,
+        }}
+      >
+        <option value="">Select…</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  )
+}
+
 function TalentForm({
   talentLabel,
   accent,
@@ -166,103 +283,7 @@ function TalentForm({
   const set = (k: keyof TalentFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }))
 
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    background: "var(--color-elevated)",
-    border: "1px solid var(--color-border)",
-    borderRadius: 8,
-    padding: "13px 14px",
-    fontSize: 16,
-    color: "var(--color-text)",
-    outline: "none",
-    boxSizing: "border-box",
-  }
-
-  function Section({ title, children }: { title: string; children: React.ReactNode }) {
-    return (
-      <div style={{ marginBottom: 18 }}>
-        <div style={{
-          fontSize: 13, fontWeight: 600, color: "var(--color-text-muted)", marginBottom: 8,
-        }}>
-          {title}
-        </div>
-        <div style={{
-          background: "var(--color-surface)", border: "1px solid var(--color-border)",
-          borderRadius: 12, overflow: "hidden",
-        }}>
-          {children}
-        </div>
-      </div>
-    )
-  }
-
-  function Field({
-    label, fieldKey, type = "text", inputMode, placeholder, required,
-  }: {
-    label: string
-    fieldKey: keyof TalentFormData
-    type?: string
-    inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"]
-    placeholder?: string
-    required?: boolean
-  }) {
-    return (
-      <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--color-border-subtle)" }}>
-        <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
-          {label}{required && <span style={{ color: accent, marginLeft: 3 }}>*</span>}
-        </div>
-        <input
-          type={type}
-          inputMode={inputMode}
-          placeholder={placeholder}
-          value={form[fieldKey]}
-          onChange={set(fieldKey)}
-          required={required}
-          style={inputStyle}
-        />
-      </div>
-    )
-  }
-
-  function SelectField({
-    label, fieldKey, options, required,
-  }: {
-    label: string
-    fieldKey: keyof TalentFormData
-    options: readonly string[]
-    required?: boolean
-  }) {
-    return (
-      <div style={{ padding: "12px 14px", borderRight: "1px solid var(--color-border-subtle)", borderTop: "1px solid var(--color-border-subtle)" }}>
-        <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-muted)", marginBottom: 5 }}>
-          {label}{required && <span style={{ color: accent, marginLeft: 3 }}>*</span>}
-        </div>
-        <select
-          value={form[fieldKey]}
-          onChange={set(fieldKey)}
-          style={{
-            ...inputStyle,
-            appearance: "none", WebkitAppearance: "none",
-            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>")`,
-            backgroundRepeat: "no-repeat",
-            backgroundPosition: "right 12px center",
-            paddingRight: 34,
-          }}
-        >
-          <option value="">Select…</option>
-          {options.map(o => <option key={o} value={o}>{o}</option>)}
-        </select>
-      </div>
-    )
-  }
-
-  function TwoCol({ children }: { children: React.ReactNode }) {
-    return (
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
-        {children}
-      </div>
-    )
-  }
+  const formCtx = useMemo<FormCtxValue>(() => ({ form, set, accent }), [form, accent])
 
   const age = computeAge(form.dob)
   const underage = Number.isFinite(age) && age < 18
@@ -362,6 +383,7 @@ function TalentForm({
   }
 
   return (
+    <FormCtx.Provider value={formCtx}>
     <div>
       {onBack && (
         <button
@@ -639,6 +661,7 @@ function TalentForm({
         <FileText size={16} /> Review details
       </button>
     </div>
+    </FormCtx.Provider>
   )
 }
 
