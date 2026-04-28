@@ -535,6 +535,13 @@ export interface SignedSummary {
   talent_slug: string
   talent_display: string
   legal_name: string
+  /**
+   * W-9 line 2 — DBA / disregarded entity name. Optional because the backend
+   * only echoes it for talent who filed under an LLC or other business
+   * classification. Use `business_name?.trim() || legal_name` to compute the
+   * effective Pay-to name per IRS Form W-9 conventions.
+   */
+  business_name?: string
   signed_at: string
   pdf_mega_path: string
 }
