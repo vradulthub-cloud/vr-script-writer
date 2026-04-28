@@ -143,10 +143,10 @@ async def trigger_sync(_admin: dict = Depends(_require_admin_dep)):
 @app.post("/api/sync/trigger/{source}")
 async def trigger_sync_one(source: str, _admin: dict = Depends(_require_admin_dep)):
     """Manually trigger a sync for a single source. Admin only.
-    Sources: users, tickets, notifications, approvals, scenes, scripts, bookings."""
+    Sources: users, tickets, notifications, approvals, scenes, scripts, bookings, budgets."""
     from api.sync_engine import (
         sync_users, sync_tickets, sync_notifications, sync_approvals,
-        sync_scenes, sync_scripts, sync_bookings,
+        sync_scenes, sync_scripts, sync_bookings, sync_budgets,
     )
     from api.database import update_sync_meta
     from fastapi import HTTPException
@@ -159,6 +159,7 @@ async def trigger_sync_one(source: str, _admin: dict = Depends(_require_admin_de
         "scenes": sync_scenes,
         "scripts": sync_scripts,
         "bookings": sync_bookings,
+        "budgets": sync_budgets,
     }
     fn = funcs.get(source)
     if not fn:

@@ -32,6 +32,7 @@ from api.sheets_client import (
     open_grail,
     open_scripts,
     open_booking,
+    open_budgets,
     get_or_create_worksheet,
     with_retry,
     fetch_all_rows,
@@ -566,9 +567,54 @@ def sync_scenes() -> int:
             )
 
     count = len(grail_scenes)
+    # Pre-aggregate scene stats so /api/scenes/stats doesn't re-scan the table
+    # on every dashboard render. Recomputed here means it always tracks the
+    # current sync's snapshot — no chance of drift.
+    _refresh_scene_stats_cache()
+
     update_sync_meta("scenes", row_count=count)
     _log.info("Synced %d scenes (Grail + MEGA)", count)
     return count
+
+
+def _refresh_scene_stats_cache() -> None:
+    """Recompute the scene_stats_cache table from the current scenes table.
+
+    Called from the tail of sync_scenes. Cheap (3 aggregates over ~1000 rows),
+    runs once per sync instead of three table scans on every API call.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as conn:
+        total_row = conn.execute("SELECT COUNT(*) AS cnt FROM scenes").fetchone()
+        total = dict(total_row)["cnt"]
+
+        complete_total_row = conn.execute(
+            """SELECT COUNT(*) AS cnt FROM scenes
+                WHERE has_description=1 AND has_videos=1
+                  AND has_thumbnail=1 AND has_photos=1 AND has_storyboard=1"""
+        ).fetchone()
+        complete_total = dict(complete_total_row)["cnt"]
+
+        per_studio = conn.execute(
+            """SELECT studio,
+                      COUNT(*) AS cnt,
+                      SUM(CASE WHEN has_description=1 AND has_videos=1
+                               AND has_thumbnail=1 AND has_photos=1
+                               AND has_storyboard=1 THEN 1 ELSE 0 END) AS complete_cnt
+                 FROM scenes GROUP BY studio"""
+        ).fetchall()
+
+        conn.execute("DELETE FROM scene_stats_cache")
+        conn.execute(
+            "INSERT INTO scene_stats_cache (studio, scene_count, complete_count, updated_at) VALUES (?, ?, ?, ?)",
+            ("TOTAL", total, complete_total, now),
+        )
+        for r in per_studio:
+            d = dict(r)
+            conn.execute(
+                "INSERT INTO scene_stats_cache (studio, scene_count, complete_count, updated_at) VALUES (?, ?, ?, ?)",
+                (d["studio"], d["cnt"], d["complete_cnt"] or 0, now),
+            )
 
 
 def sync_scripts() -> int:
@@ -780,6 +826,96 @@ def sync_bookings() -> int:
     return total_count
 
 
+def sync_budgets() -> int:
+    """Sync Budgets sheet → budgets table.
+
+    The Budgets sheet has one tab per month; each row holds a shoot date,
+    female talent, female rate, and male rate. Mirrored locally so the shoots
+    endpoint doesn't need to touch the Sheets API on every request.
+
+    Column layout (0-indexed):
+      0  Date           — first token = the date itself
+      4  Female talent
+      6  Female rate    — raw number; formatted "$X,XXX" on read
+      10 Male rate      — raw number; formatted "$X,XXX" on read
+
+    Dates are normalized to YYYY-MM-DD and (date, female.lower()) is the
+    primary key — same shape as the legacy in-router cache so callers can
+    swap the data source without changing their lookup logic.
+    """
+    months = ("january", "february", "march", "april", "may", "june",
+              "july", "august", "september", "october", "november", "december")
+
+    try:
+        wb = open_budgets()
+    except Exception as exc:
+        _log.warning("sync_budgets: failed to open Budgets sheet: %s", exc)
+        update_sync_meta("budgets", status="error", error=str(exc))
+        return 0
+
+    rows_to_insert: list[tuple[str, str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for ws in wb.worksheets():
+        if not any(m in ws.title.lower() for m in months):
+            continue
+        try:
+            rows = with_retry(ws.get_all_values)
+        except Exception as exc:
+            _log.warning("sync_budgets: read failed for tab %s: %s", ws.title, exc)
+            continue
+        if not rows:
+            continue
+
+        for row in rows[1:]:
+            if len(row) < 5 or not row[0].strip() or not row[4].strip():
+                continue
+            raw_date = row[0].strip().split(" ")[0].split("T")[0]
+            parts = raw_date.replace("/", "-").split("-")
+            if len(parts) != 3:
+                continue
+            if len(parts[0]) == 4:
+                date_str = raw_date.replace("/", "-")
+            else:
+                m_p, d_p, y_p = parts
+                y_full = "20" + y_p if len(y_p) == 2 else y_p
+                date_str = "{}-{}-{}".format(y_full, m_p.zfill(2), d_p.zfill(2))
+
+            f_talent = row[4].strip()
+            f_rate_raw = row[6].strip() if len(row) > 6 else ""
+            m_rate_raw = row[10].strip() if len(row) > 10 else ""
+
+            def _fmt(v: str) -> str:
+                if not v:
+                    return ""
+                try:
+                    return "${:,}".format(int(float(v)))
+                except (ValueError, TypeError):
+                    return v
+
+            key = (date_str, f_talent.lower())
+            if key in seen:
+                # Mirror the legacy "first occurrence wins" behaviour so we
+                # don't flap between tabs that duplicate the same shoot.
+                continue
+            seen.add(key)
+            rows_to_insert.append((date_str, f_talent.lower(), _fmt(f_rate_raw), _fmt(m_rate_raw)))
+
+    with get_db() as conn:
+        conn.execute("DELETE FROM budgets")
+        for date_str, female_lower, f_rate, m_rate in rows_to_insert:
+            conn.execute(
+                """INSERT OR REPLACE INTO budgets
+                   (shoot_date, female_lower, female_rate, male_rate)
+                   VALUES (?, ?, ?, ?)""",
+                (date_str, female_lower, f_rate, m_rate),
+            )
+
+    update_sync_meta("budgets", row_count=len(rows_to_insert))
+    _log.info("Synced %d budget rows", len(rows_to_insert))
+    return len(rows_to_insert)
+
+
 # ---------------------------------------------------------------------------
 # Full sync — runs all individual syncs
 # ---------------------------------------------------------------------------
@@ -801,6 +937,7 @@ def run_full_sync() -> dict[str, int | str]:
         ("scenes", sync_scenes),
         ("scripts", sync_scripts),
         ("bookings", sync_bookings),
+        ("budgets", sync_budgets),
     ]
 
     for name, func in syncs:

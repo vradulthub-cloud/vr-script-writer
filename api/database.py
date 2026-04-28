@@ -215,6 +215,28 @@ CREATE INDEX IF NOT EXISTS idx_scripts_studio ON scripts(studio);
 CREATE INDEX IF NOT EXISTS idx_scripts_tab ON scripts(tab_name);
 CREATE INDEX IF NOT EXISTS idx_scripts_female ON scripts(female COLLATE NOCASE);
 
+-- Budget rates per (shoot_date, female_talent). Source: Budgets sheet.
+-- Mirrored here so /api/shoots/ doesn't pay a Sheets read on every request.
+-- Keys are lowercase to match the in-router cache contract.
+CREATE TABLE IF NOT EXISTS budgets (
+    shoot_date TEXT NOT NULL,
+    female_lower TEXT NOT NULL,
+    female_rate TEXT DEFAULT '',
+    male_rate TEXT DEFAULT '',
+    PRIMARY KEY (shoot_date, female_lower)
+);
+CREATE INDEX IF NOT EXISTS idx_budgets_date ON budgets(shoot_date);
+
+-- Pre-aggregated scene stats (computed during sync_scenes). One row per
+-- studio plus a synthetic 'TOTAL' row. /api/scenes/stats reads this table
+-- instead of running three full table scans on every dashboard load.
+CREATE TABLE IF NOT EXISTS scene_stats_cache (
+    studio TEXT PRIMARY KEY,        -- studio UI name, or 'TOTAL'
+    scene_count INTEGER DEFAULT 0,
+    complete_count INTEGER DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
 -- Sync metadata (tracks last sync time per data source)
 CREATE TABLE IF NOT EXISTS sync_meta (
     source TEXT PRIMARY KEY,       -- "grail", "scripts", "tickets", etc.

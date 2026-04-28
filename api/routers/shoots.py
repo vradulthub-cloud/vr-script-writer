@@ -162,69 +162,28 @@ def _aging_hours(shoot_date: date) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Budget sheet rate lookup — cached 5 min
+# Budget rates — served from SQLite, populated by sync_engine.sync_budgets.
 # ---------------------------------------------------------------------------
-import threading as _threading_bgt
-_BUDGET_CACHE: dict = {}
-_BUDGET_LOCK = _threading_bgt.Lock()
-
 
 def _load_budget_rates() -> dict:
-    """Return {(date_str, female_lower): {female_rate, male_rate}} from budget sheet.
-    Cached 5 minutes."""
-    import time as _time
-    now = _time.monotonic()
-    with _BUDGET_LOCK:
-        cached = _BUDGET_CACHE.get("data")
-        if cached is not None and now - _BUDGET_CACHE.get("ts", 0) < 300:
-            return cached
+    """Return {(date_str, female_lower): {female_rate, male_rate}} from the
+    locally synced budgets table. The sync engine refreshes this every
+    sync cycle, so a request never pays a Sheets read here.
+    """
+    rates: dict = {}
     try:
-        from api.sheets_client import open_budgets, with_retry
-        wb = with_retry(open_budgets)
-        rates: dict = {}
-        _months = ("january","february","march","april","may","june",
-                   "july","august","september","october","november","december")
-        for ws in wb.worksheets():
-            if not any(m in ws.title.lower() for m in _months):
-                continue
-            rows = with_retry(ws.get_all_values)
-            if not rows:
-                continue
-            for row in rows[1:]:
-                if len(row) < 5 or not row[0].strip() or not row[4].strip():
-                    continue
-                raw_date = row[0].strip().split(" ")[0].split("T")[0]
-                parts = raw_date.replace("/", "-").split("-")
-                if len(parts) == 3:
-                    if len(parts[0]) == 4:
-                        date_str = raw_date.replace("/", "-")
-                    else:
-                        m_p, d_p, y_p = parts
-                        y_full = "20" + y_p if len(y_p) == 2 else y_p
-                        date_str = "{}-{}-{}".format(y_full, m_p.zfill(2), d_p.zfill(2))
-                else:
-                    continue
-                f_talent = row[4].strip()
-                f_rate_raw = row[6].strip() if len(row) > 6 else ""
-                m_rate_raw = row[10].strip() if len(row) > 10 else ""
-                def _fmt(v):
-                    if not v:
-                        return None
-                    try:
-                        return "${:,}".format(int(float(v)))
-                    except (ValueError, TypeError):
-                        return v or None
-                key = (date_str, f_talent.lower())
-                if key not in rates:
-                    rates[key] = {"female_rate": _fmt(f_rate_raw), "male_rate": _fmt(m_rate_raw)}
-        with _BUDGET_LOCK:
-            _BUDGET_CACHE["data"] = rates
-            _BUDGET_CACHE["ts"] = now
-        return rates
+        with get_db() as conn:
+            for row in conn.execute(
+                "SELECT shoot_date, female_lower, female_rate, male_rate FROM budgets"
+            ).fetchall():
+                d = dict(row)
+                rates[(d["shoot_date"], d["female_lower"])] = {
+                    "female_rate": d["female_rate"] or None,
+                    "male_rate":   d["male_rate"]   or None,
+                }
     except Exception as exc:
-        _log.warning("budget rate lookup failed: %s", exc)
-        with _BUDGET_LOCK:
-            return _BUDGET_CACHE.get("data") or {}
+        _log.warning("budget rate lookup failed (DB read): %s", exc)
+    return rates
 
 
 def _shoot_id(shoot_date: str, female: str) -> str:

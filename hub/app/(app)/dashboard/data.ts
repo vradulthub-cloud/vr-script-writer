@@ -97,20 +97,27 @@ export const getShoots = cache(
   ),
 )
 
-// Fetch per-studio so a studio with heavier recent activity (e.g. VRH) can't
-// crowd FPVR / VRA out of a global limit. Triage feed shows top 5 per studio.
+// Triage feed shows top 5 per studio. The backend's /scenes/recent endpoint
+// applies the per-studio cap server-side via UNION ALL, so one busy studio
+// can't crowd the others out. Single round-trip instead of three.
 const RECENT_SCENE_STUDIOS = ["FuckPassVR", "VRHush", "VRAllure"] as const
 
 export const getRecentScenes = cache(
   unstable_cache(
     async (idToken: string | undefined): Promise<Scene[]> => {
-      const client = api(idToken ?? null)
-      const results = await Promise.all(
-        RECENT_SCENE_STUDIOS.map(studio =>
-          client.scenes.list({ studio, limit: 5, missing_only: true }).catch(() => [] as Scene[])
-        )
-      )
-      return results.flat()
+      try {
+        const result = await api(idToken ?? null).scenes.recent({
+          studios: [...RECENT_SCENE_STUDIOS],
+          per_studio: 5,
+          missing_only: true,
+        })
+        // Defensive — the mock fallback returns null for unmapped paths, and
+        // a partially-deployed backend without /scenes/recent would do the
+        // same. Always hand the consumer an array so .filter() never crashes.
+        return Array.isArray(result) ? result : []
+      } catch {
+        return []
+      }
     },
     ["dashboard:recent-scenes"],
     { tags: [TAG_SCENES], revalidate: REV_MED },
