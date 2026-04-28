@@ -2780,7 +2780,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
         return (
         <div style={{ padding: 16 }}>
           <h2 style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 4 }}>
-            Step 2 — ID &amp; Verification Photos
+            ID &amp; Verification Photos
           </h2>
           <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginBottom: 16, lineHeight: 1.4 }}>
             Capture IDs and bunny-ear shots for each talent. Photos save automatically and reappear on the next visit.
@@ -2954,7 +2954,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
       {step === "upload" && selected && (
         <div style={{ padding: 16 }}>
           <h2 style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 4 }}>
-            Step 3 — Upload &amp; File
+            Upload &amp; File
           </h2>
           <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginBottom: 16, lineHeight: 1.4 }}>
             Upload all photos to the Drive legal folder, then copy the complete package to MEGA.
