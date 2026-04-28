@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo } from "react"
 import { createPortal } from "react-dom"
 import Link from "next/link"
 import { X, ChevronDown, ChevronUp, FileText, ClipboardCheck } from "lucide-react"
-import { api, type Shoot, type Script, type LegalDocFile, type LegalDocsResult, type ComplianceShoot, SHOOT_ASSET_ORDER, SHOOT_ASSET_LABELS } from "@/lib/api"
+import { api, type Shoot, type Script, type LegalDocFile, type LegalDocsResult, type ComplianceShoot, type SignedSummary, SHOOT_ASSET_ORDER, SHOOT_ASSET_LABELS } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { studioAbbr, studioColor } from "@/lib/studio-colors"
 
@@ -45,6 +45,9 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
   const [legalDocs, setLegalDocs] = useState<LegalDocsResult | null>(null)
   // Compliance status for this shoot
   const [complianceShoot, setComplianceShoot] = useState<ComplianceShoot | null | undefined>(undefined)
+  // Per-role W-9 records from the new Hub compliance flow. Populates the
+  // Pay-to name straight from the signed paperwork — no Drive-folder hop.
+  const [signedRoles, setSignedRoles] = useState<SignedSummary[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -98,6 +101,21 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
       })
       .catch(() => setComplianceShoot(null))
   }, [idToken, shoot.shoot_id, shoot.shoot_date, shoot.female_talent])
+
+  // Once we know the matched compliance shoot, pull the per-role signed
+  // records to surface the Pay-to name (legal_name, or business_name when
+  // the talent filed under an LLC/DBA) without waiting for the legacy Drive
+  // sheet column to backfill.
+  useEffect(() => {
+    if (!idToken || !complianceShoot) {
+      setSignedRoles([])
+      return
+    }
+    const client = api(idToken)
+    client.compliance.signed(complianceShoot.shoot_id)
+      .then(setSignedRoles)
+      .catch(() => setSignedRoles([]))
+  }, [idToken, complianceShoot])
 
   const hasScriptContent = useMemo(
     () => scripts.some(s => (s.theme?.trim() || s.plot?.trim())),
@@ -366,36 +384,49 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
             <ModalStat label="Scenes" value={String(shoot.scenes.length)} sub={shoot.source_tab || "—"} />
           </div>
 
-          {(shoot.female_talent || shoot.male_talent) && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <SectionLabel>Talent</SectionLabel>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 12 }}>
-                {shoot.female_talent && (
-                  <TalentRow
-                    name={shoot.female_talent}
-                    agency={shoot.female_agency}
-                    rate={shoot.female_rate}
-                    paymentName={shoot.female_payment_name}
-                    w9Name={legalDocs?.w9_name}
-                    legalFiles={legalDocs?.files}
-                    folderUrl={legalDocs?.folder_url ?? undefined}
-                    loading={legalDocsLoading}
-                  />
-                )}
-                {shoot.male_talent && (
-                  <TalentRow
-                    name={shoot.male_talent}
-                    agency={shoot.male_agency}
-                    rate={shoot.male_rate}
-                    paymentName={shoot.male_payment_name}
-                    legalFiles={legalDocs?.files}
-                    folderUrl={legalDocs?.folder_url ?? undefined}
-                    loading={legalDocsLoading}
-                  />
-                )}
+          {(shoot.female_talent || shoot.male_talent) && (() => {
+            // Per IRS W-9: line 2 (DBA / LLC name) wins when present, otherwise
+            // line 1 (legal name). The signed records carry both.
+            const payNameFor = (role: "female" | "male"): string | undefined => {
+              const r = signedRoles.find(s => s.talent_role === role)
+              if (!r) return undefined
+              const biz = r.business_name?.trim()
+              return biz || r.legal_name || undefined
+            }
+            const femaleW9PayName = payNameFor("female")
+            const maleW9PayName = payNameFor("male")
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <SectionLabel>Talent</SectionLabel>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 12 }}>
+                  {shoot.female_talent && (
+                    <TalentRow
+                      name={shoot.female_talent}
+                      agency={shoot.female_agency}
+                      rate={shoot.female_rate}
+                      paymentName={shoot.female_payment_name || femaleW9PayName}
+                      w9Name={legalDocs?.w9_name}
+                      legalFiles={legalDocs?.files}
+                      folderUrl={legalDocs?.folder_url ?? undefined}
+                      loading={legalDocsLoading}
+                    />
+                  )}
+                  {shoot.male_talent && (
+                    <TalentRow
+                      name={shoot.male_talent}
+                      agency={shoot.male_agency}
+                      rate={shoot.male_rate}
+                      paymentName={shoot.male_payment_name || maleW9PayName}
+                      w9Name={legalDocs?.w9_name}
+                      legalFiles={legalDocs?.files}
+                      folderUrl={legalDocs?.folder_url ?? undefined}
+                      loading={legalDocsLoading}
+                    />
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {shoot.scenes.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
