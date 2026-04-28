@@ -21,11 +21,15 @@ export function ExistingCompModal({
   comp,
   studioColor,
   onClose,
+  onDeleted,
   serverIdToken,
 }: {
   comp: ExistingComp
   studioColor: string
   onClose: () => void
+  /** Fired after a successful DELETE so the parent can drop the comp from
+   *  its list without a full refetch. The modal closes itself. */
+  onDeleted?: (compId: string) => void
   serverIdToken?: string
 }) {
   const [mounted, setMounted] = useState(false)
@@ -49,6 +53,31 @@ export function ExistingCompModal({
   } | null>(null)
 
   const [photosetOpen, setPhotosetOpen] = useState(false)
+  // Two-stage destructive confirm — first click arms, second click commits.
+  // Auto-disarms after 4s so a stale armed state doesn't surprise the user
+  // when they come back to the modal later.
+  const [armDelete, setArmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  useEffect(() => {
+    if (!armDelete) return
+    const t = setTimeout(() => setArmDelete(false), 4000)
+    return () => clearTimeout(t)
+  }, [armDelete])
+
+  async function remove() {
+    setDeleting(true)
+    setSaveErr(null)
+    try {
+      await client.compilations.remove(comp.comp_id)
+      onDeleted?.(comp.comp_id)
+      onClose()
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Delete failed")
+      setArmDelete(false)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   // Stay in sync if the parent swaps the comp object (e.g. list refresh).
   useEffect(() => {
@@ -609,10 +638,34 @@ export function ExistingCompModal({
             background: "var(--color-surface)",
           }}
         >
-          <span style={{ fontSize: 10, color: "var(--color-text-faint)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-            {comp.created_by ? `By ${comp.created_by}` : "—"}
-            {comp.updated && comp.updated !== comp.created && ` · Updated ${comp.updated}`}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+            <span style={{ fontSize: 10, color: "var(--color-text-faint)", letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {comp.created_by ? `By ${comp.created_by}` : "—"}
+              {comp.updated && comp.updated !== comp.created && ` · Updated ${comp.updated}`}
+            </span>
+            {!editing && (
+              <button
+                type="button"
+                onClick={() => (armDelete ? remove() : setArmDelete(true))}
+                disabled={deleting}
+                aria-label={armDelete ? `Confirm delete ${comp.comp_id}` : `Delete ${comp.comp_id}`}
+                style={{
+                  padding: "5px 10px",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  background: armDelete ? "var(--color-err)" : "transparent",
+                  color: armDelete ? "var(--color-base)" : "var(--color-err)",
+                  border: `1px solid ${armDelete ? "var(--color-err)" : "color-mix(in srgb, var(--color-err) 35%, transparent)"}`,
+                  cursor: deleting ? "wait" : "pointer",
+                  flexShrink: 0,
+                }}
+              >
+                {deleting ? "Deleting…" : armDelete ? "Confirm delete" : "Delete"}
+              </button>
+            )}
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {saveErr && (
               <span style={{ fontSize: 10, color: "var(--color-err)", letterSpacing: "0.04em" }}>

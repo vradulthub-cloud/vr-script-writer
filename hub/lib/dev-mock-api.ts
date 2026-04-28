@@ -474,6 +474,11 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
       description: body.description ?? "",
     } as unknown as T)
   }
+  // DELETE /compilations/{comp_id} — echo a success in dev-mock; the real
+  // backend removes the v3 block from the studio Index sheet.
+  if (compPatch && (init.method || "").toUpperCase() === "DELETE") {
+    return wait({ status: "ok", comp_id: compPatch[1], rows_removed: 7 } as unknown as T)
+  }
 
   // ── Shoots ────────────────────────────────────────────────────────────
   if (base === "/shoots/") {

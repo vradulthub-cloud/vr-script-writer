@@ -928,6 +928,77 @@ async def patch_existing_comp(comp_id: str, body: CompPatchBody, user: CurrentUs
     }
 
 
+@router.delete("/{comp_id}")
+async def delete_existing_comp(comp_id: str, user: CurrentUser):
+    """Remove a v3 block from the studio Index tab.
+
+    Scans col B for the title row matching `comp_id`, then walks forward
+    until the next title row (any STUDIO-CNNNN pattern) or end of sheet —
+    that range is the comp's block (title + meta + subhdr + scenes + spacer).
+    Removes those rows via deleteDimension so subsequent comps shift up
+    naturally. Held under the studio lock to avoid clobbering an in-flight
+    save or patch.
+    """
+    from api.sheets_client import with_retry
+
+    m = re.match(r"^([A-Z]+)-C\d{4}$", comp_id)
+    if not m:
+        raise HTTPException(status_code=400, detail=f"Invalid comp_id: {comp_id}")
+    key = m.group(1)
+    if key not in STUDIO_ACCENTS:
+        raise HTTPException(status_code=400, detail=f"Unknown studio key: {key}")
+
+    title_row_pattern = re.compile(r"^[A-Z]+-C\d{4}$")
+
+    with _STUDIO_LOCKS[key]:
+        try:
+            ws = _open_index_ws(key)
+            col_b = with_retry(lambda: ws.col_values(2))
+        except Exception as exc:
+            _log.error("Could not open Index for %s: %s", key, exc)
+            raise HTTPException(status_code=502, detail="Sheet read failed") from exc
+
+        title_idx: Optional[int] = None  # 0-indexed
+        for i, cell in enumerate(col_b):
+            if cell.strip() == comp_id:
+                title_idx = i
+                break
+        if title_idx is None:
+            raise HTTPException(status_code=404, detail=f"Comp not found: {comp_id}")
+
+        # End is the row index of the *next* title row (exclusive), or the
+        # length of col_b if this is the last block.
+        end_idx = len(col_b)
+        for j in range(title_idx + 1, len(col_b)):
+            if title_row_pattern.match(col_b[j].strip()):
+                end_idx = j
+                break
+
+        # Sheets API row indices are 0-based, end-exclusive — perfect match.
+        delete_request = {
+            "deleteDimension": {
+                "range": {
+                    "sheetId": ws.id,
+                    "dimension": "ROWS",
+                    "startIndex": title_idx,
+                    "endIndex": end_idx,
+                }
+            }
+        }
+
+        try:
+            with_retry(lambda: ws.spreadsheet.batch_update({"requests": [delete_request]}))
+        except Exception as exc:
+            _log.error("Failed to delete %s: %s", comp_id, exc, exc_info=True)
+            raise HTTPException(status_code=502, detail="Sheet write failed") from exc
+
+    _log.info(
+        "Deleted comp %s by %s (rows %d-%d)",
+        comp_id, user.email, title_idx + 1, end_idx,
+    )
+    return {"status": "ok", "comp_id": comp_id, "rows_removed": end_idx - title_idx}
+
+
 # ---------------------------------------------------------------------------
 # Grail write (unchanged — flags scenes as is_compilation)
 # ---------------------------------------------------------------------------
