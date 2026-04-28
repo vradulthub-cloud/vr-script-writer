@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react"
 
-export type TabKey = "users" | "system" | "activity" | "prompts"
+export type TabKey = "users" | "system" | "activity" | "prompts" | "compliance"
 
 interface TabDef {
   key: TabKey
@@ -24,10 +24,11 @@ interface AdminTabsProps {
 }
 
 const TABS: TabDef[] = [
-  { key: "users",    label: "Users",      description: "Roles & tab access" },
-  { key: "system",   label: "System",     description: "Health, syncs, system check" },
-  { key: "activity", label: "Activity",   description: "Background tasks & audit log" },
-  { key: "prompts",  label: "AI Prompts", description: "Edit description / title / script generation" },
+  { key: "users",       label: "Users",      description: "Roles & tab access" },
+  { key: "system",      label: "System",     description: "Health, syncs, system check" },
+  { key: "activity",    label: "Activity",   description: "Background tasks & audit log" },
+  { key: "prompts",     label: "AI Prompts", description: "Edit description / title / script generation" },
+  { key: "compliance",  label: "Compliance", description: "W-9 / talent tax records — accountant export" },
 ]
 
 export function AdminTabs({ panels, badges, initial = "users" }: AdminTabsProps) {

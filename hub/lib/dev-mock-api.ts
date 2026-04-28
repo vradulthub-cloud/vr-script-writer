@@ -519,6 +519,42 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
     } as unknown as T)
   }
 
+  // ── Compliance: admin endpoints (TKT-0153) ────────────────────────────
+  if (base === "/compliance/admin/w9-summary") {
+    const total = Array.from(mockSignedByShoot.values()).reduce((s, l) => s + l.length, 0)
+    let female = 0, male = 0
+    for (const list of mockSignedByShoot.values()) {
+      for (const s of list) {
+        if (s.talent_role === "female") female++
+        if (s.talent_role === "male") male++
+      }
+    }
+    return wait({
+      total,
+      by_studio: total > 0
+        ? { "VRHush": Math.floor(total / 2), "FuckPassVR": total - Math.floor(total / 2) }
+        : {},
+      by_role: { female, male },
+      date_from: "",
+      date_to: "",
+      studio: "",
+    } as unknown as T)
+  }
+  if (base === "/compliance/admin/bulk-import-from-drive" && init?.method === "POST") {
+    return wait({
+      folders_seen: 18,
+      folders_matched: 12,
+      shoots: MOCK_COMPLIANCE_SHOOTS.slice(0, 2).map((s, i) => ({
+        shoot_id: s.shoot_id,
+        shoot_date: s.shoot_date,
+        folder_name: `${s.shoot_date.replace(/-/g, "").slice(2,8)}-${s.female_talent.replace(/ /g, "")}-${s.male_talent.replace(/ /g, "")}`,
+        talents_imported: i + 1,
+        skipped_reason: "",
+      })),
+      errors: [],
+    } as unknown as T)
+  }
+
   // ── Compliance ────────────────────────────────────────────────────────
   if (base.startsWith("/compliance/shoots")) {
     // List shoots for a date

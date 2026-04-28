@@ -255,6 +255,94 @@ def get_signed_pdf_path(shoot_id: str, talent_role: str, talent_slug: str) -> Op
     return (row["pdf_local_path"] if row else None) or None
 
 
+@dataclass(frozen=True)
+class W9Record:
+    """Full row used by the admin W-9 export. Mirrors compliance_signatures."""
+    shoot_id: str
+    shoot_date: str
+    scene_id: str
+    studio: str
+    talent_role: str
+    talent_slug: str
+    talent_display: str
+    legal_name: str
+    business_name: str
+    tax_classification: str
+    llc_class: str
+    other_classification: str
+    exempt_payee_code: str
+    fatca_code: str
+    tin_type: str
+    tin: str
+    street_address: str
+    city_state_zip: str
+    phone: str
+    email: str
+    signed_at: str
+    signed_by_user: str
+    contract_version: str
+    pdf_local_path: str
+    pdf_mega_path: str
+
+
+def list_w9_records(
+    *,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    studio: Optional[str] = None,
+) -> list[W9Record]:
+    """Bulk-load every signature (one row per signed talent) for the W-9 export.
+    Inclusive date bounds on shoot_date. Empty filters → all rows."""
+    where: list[str] = []
+    params: list = []
+    if date_from:
+        where.append("shoot_date >= ?")
+        params.append(date_from)
+    if date_to:
+        where.append("shoot_date <= ?")
+        params.append(date_to)
+    if studio:
+        where.append("studio = ?")
+        params.append(studio)
+    sql = """SELECT * FROM compliance_signatures"""
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY shoot_date DESC, talent_role, talent_display"
+    with get_db() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    out: list[W9Record] = []
+    for r in rows:
+        d = dict(r)
+        out.append(W9Record(
+            shoot_id=d.get("shoot_id", ""),
+            shoot_date=d.get("shoot_date", ""),
+            scene_id=d.get("scene_id", "") or "",
+            studio=d.get("studio", "") or "",
+            talent_role=d.get("talent_role", ""),
+            talent_slug=d.get("talent_slug", ""),
+            talent_display=d.get("talent_display", ""),
+            legal_name=d.get("legal_name", "") or "",
+            business_name=d.get("business_name", "") or "",
+            tax_classification=d.get("tax_classification", "") or "",
+            llc_class=d.get("llc_class", "") or "",
+            other_classification=d.get("other_classification", "") or "",
+            exempt_payee_code=d.get("exempt_payee_code", "") or "",
+            fatca_code=d.get("fatca_code", "") or "",
+            tin_type=d.get("tin_type", "") or "",
+            tin=d.get("tin", "") or "",
+            street_address=d.get("street_address", "") or "",
+            city_state_zip=d.get("city_state_zip", "") or "",
+            phone=d.get("phone", "") or "",
+            email=d.get("email", "") or "",
+            signed_at=d.get("signed_at", "") or "",
+            signed_by_user=d.get("signed_by_user", "") or "",
+            contract_version=d.get("contract_version", "") or "",
+            pdf_local_path=d.get("pdf_local_path", "") or "",
+            pdf_mega_path=d.get("pdf_mega_path", "") or "",
+        ))
+    return out
+
+
 def is_shoot_complete(shoot_id: str, has_male: bool) -> bool:
     """A shoot is complete when every required talent role has a signature row.
     For a female-only BG, that means 1 row with talent_role='female'.

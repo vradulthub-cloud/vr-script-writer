@@ -575,6 +575,33 @@ export interface DriveImportResult {
   errors: string[]
 }
 
+/**
+ * Admin W-9 export summary (TKT-0153). Counts only — no PII.
+ */
+export interface W9Summary {
+  total: number
+  by_studio: Record<string, number>
+  by_role: Record<string, number>
+  date_from: string
+  date_to: string
+  studio: string
+}
+
+export interface BulkDriveImportShootResult {
+  shoot_id: string
+  shoot_date: string
+  folder_name: string
+  talents_imported: number
+  skipped_reason: string
+}
+
+export interface BulkDriveImportResult {
+  folders_seen: number
+  folders_matched: number
+  shoots: BulkDriveImportShootResult[]
+  errors: string[]
+}
+
 export const SHOOT_ASSET_ORDER: readonly AssetType[] = [
   "script_done",
   "call_sheet_sent",
@@ -1055,9 +1082,12 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
     },
 
     compliance: {
-      shoots: (date?: string) => {
-        const qs = date ? `?date=${encodeURIComponent(date)}` : ""
-        return get<ComplianceShoot[]>(`/compliance/shoots${qs}`)
+      shoots: (date?: string, query?: string) => {
+        const params = new URLSearchParams()
+        if (query && query.trim()) params.set("q", query.trim())
+        else if (date) params.set("date", date)
+        const qs = params.toString()
+        return get<ComplianceShoot[]>(`/compliance/shoots${qs ? `?${qs}` : ""}`)
       },
       prepare: (shootId: string) =>
         post<CompliancePrepareResult>(`/compliance/shoots/${encodeURIComponent(shootId)}/prepare`, {}),
@@ -1136,6 +1166,34 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
           `/compliance/shoots/${encodeURIComponent(shootId)}/import-from-drive`,
           { folder_url: folderUrl, imported_from_date: importedFromDate ?? "" },
         ),
+
+      // Admin-only W-9 records (TKT-0153). Summary returns counts; xlsx
+      // returns a binary download URL the browser can fetch directly. PII
+      // is never deserialized by the Hub — the xlsx is rendered server-side.
+      w9Summary: (params: { from?: string; to?: string; studio?: string } = {}) => {
+        const qs = new URLSearchParams()
+        if (params.from)   qs.set("from",   params.from)
+        if (params.to)     qs.set("to",     params.to)
+        if (params.studio) qs.set("studio", params.studio)
+        const qStr = qs.toString()
+        return get<W9Summary>(`/compliance/admin/w9-summary${qStr ? `?${qStr}` : ""}`)
+      },
+      // Bulk import every paperwork PDF under a Drive root, matching shoots
+      // by `MMDDYY-FemaleSlug[-MaleSlug]` folder naming.
+      bulkImportFromDrive: (folderUrl: string, label?: string) =>
+        post<BulkDriveImportResult>(
+          `/compliance/admin/bulk-import-from-drive`,
+          { folder_url: folderUrl, imported_from_label: label ?? "" },
+        ),
+
+      w9ExportUrl: (params: { from?: string; to?: string; studio?: string } = {}) => {
+        const qs = new URLSearchParams()
+        if (params.from)   qs.set("from",   params.from)
+        if (params.to)     qs.set("to",     params.to)
+        if (params.studio) qs.set("studio", params.studio)
+        const qStr = qs.toString()
+        return `${API_BASE}/api/compliance/admin/w9-export.xlsx${qStr ? `?${qStr}` : ""}`
+      },
     },
   }
 }
