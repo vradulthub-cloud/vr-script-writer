@@ -657,20 +657,26 @@ def sync_scripts() -> int:
         except (ValueError, IndexError):
             return (0, 0)
 
-    # Sort all tabs by date, filter to those <= current month (exclude future placeholders)
+    # Writers draft scripts *ahead* of shoots, so the queue must include
+    # upcoming months. Window: previous month + current + next 2.
     now_dt = datetime.now(timezone.utc)
-    def _is_past_or_current(tab_name: str) -> bool:
+    cur = (now_dt.year, now_dt.month)
+    def _months_diff(tab_name: str) -> int | None:
+        """Returns months from current (negative=past, positive=future)."""
         parts = tab_name.rsplit(" ", 1)
         try:
             month_idx = list(month_name).index(parts[0].capitalize())
             year = int(parts[1])
-            return (year, month_idx) <= (now_dt.year, now_dt.month)
+            return (year - cur[0]) * 12 + (month_idx - cur[1])
         except (ValueError, IndexError):
-            return False
+            return None
 
-    past_tabs = [t for t in valid_tabs if _is_past_or_current(t)]
-    sorted_tabs = sorted(past_tabs, key=_tab_sort_key, reverse=True)
-    tabs_to_sync = sorted_tabs[:3]  # current + last 2
+    in_window: list[str] = []
+    for t in valid_tabs:
+        d = _months_diff(t)
+        if d is not None and -1 <= d <= 2:
+            in_window.append(t)
+    tabs_to_sync = sorted(in_window, key=_tab_sort_key, reverse=True)
 
     now = datetime.now(timezone.utc).isoformat()
     total_count = 0
