@@ -33,17 +33,20 @@ from typing import Optional
 import base64
 import re
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from api.auth import CurrentUser
 from api.config import get_settings
+from api.auth import require_admin
 from api.compliance_db import (
     SignedTalent,
+    W9Record,
     contract_version,
     get_signed_pdf_path,
     is_shoot_complete,
     list_signed_talents,
+    list_w9_records,
     upsert_signature,
 )
 from api.compliance_photos_db import (
@@ -543,14 +546,33 @@ def _window() -> tuple[date, date]:
 async def list_compliance_shoots(
     user: CurrentUser,
     date: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None, description="Search by talent name across a wide date window"),
 ):
-    """Return BG shoots for a given date (default: today) with compliance status."""
-    target_date_str = date or datetime.now(timezone.utc).date().isoformat()
-    target_date = _parse_shoot_date(target_date_str)
-    if target_date is None:
-        raise HTTPException(status_code=400, detail="Invalid date")
+    """Return BG shoots for a given date (default: today) with compliance status.
 
-    shoots = _load_shoots_window(target_date, target_date, include_cancelled=False)
+    When `q` is provided, the date filter is widened to a year of context and
+    shoots are filtered to those whose female or male talent name matches the
+    query (case-insensitive substring). Used by the compliance page's name
+    search so admins can find a specific talent's shoot without paging by date.
+    """
+    if q and q.strip():
+        # Wide window: 1 year back, 4 months forward — enough for tax-year work
+        today = datetime.now(timezone.utc).date()
+        window_lo = today - timedelta(days=365)
+        window_hi = today + timedelta(days=120)
+        shoots = _load_shoots_window(window_lo, window_hi, include_cancelled=False)
+        needle = q.strip().lower()
+        shoots = [
+            s for s in shoots
+            if needle in s.female_talent.lower()
+            or needle in (s.male_talent or "").lower()
+        ]
+    else:
+        target_date_str = date or datetime.now(timezone.utc).date().isoformat()
+        target_date = _parse_shoot_date(target_date_str)
+        if target_date is None:
+            raise HTTPException(status_code=400, detail="Invalid date")
+        shoots = _load_shoots_window(target_date, target_date, include_cancelled=False)
     token = _get_drive_token()
     # Bulk-fetch DB-backed signatures so is_complete + pdfs_ready don't depend
     # on Drive folder presence (the Drive proxy false-positives the moment
@@ -1848,3 +1870,437 @@ async def delete_compliance_photo(shoot_id: str, slot_id: str, user: CurrentUser
         except Exception as exc:
             _log.debug("photo unlink failed: %s", exc)
     return {"ok": True}
+
+
+# ─── Admin W-9 export (TKT-0153) ─────────────────────────────────────────────
+# Admin-only spreadsheet export of every compliance_signatures row, formatted
+# for handoff to the accountant. The export is generated on the server and
+# streamed as an .xlsx — admins can filter by date range and studio. SSN/EIN
+# are formatted with dashes for readability.
+
+
+def _format_tin(tin_type: str, tin: str) -> str:
+    digits = "".join(c for c in (tin or "") if c.isdigit())
+    if not digits:
+        return ""
+    if tin_type == "ein" and len(digits) == 9:
+        return f"{digits[:2]}-{digits[2:]}"
+    if tin_type == "ssn" and len(digits) == 9:
+        return f"{digits[:3]}-{digits[3:5]}-{digits[5:]}"
+    return digits
+
+
+def _format_phone(phone: str) -> str:
+    digits = "".join(c for c in (phone or "") if c.isdigit())
+    if len(digits) == 10:
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+1 ({digits[1:4]}) {digits[4:7]}-{digits[7:]}"
+    return phone or ""
+
+
+def _tax_class_label(c: str, llc: str = "", other: str = "") -> str:
+    labels = {
+        "individual":   "Individual / Sole Proprietor",
+        "c_corp":       "C Corporation",
+        "s_corp":       "S Corporation",
+        "partnership":  "Partnership",
+        "trust_estate": "Trust / Estate",
+    }
+    if c in labels:
+        return labels[c]
+    if c == "llc":
+        return f"LLC ({llc or '?'})"
+    if c == "other":
+        return f"Other — {other or '?'}"
+    return c or ""
+
+
+def _build_w9_xlsx(records: list[W9Record], date_from: str, date_to: str, studio: str) -> bytes:
+    """Render compliance_signatures rows into a polished Excel workbook.
+
+    Single sheet with frozen header, banded rows, and column widths sized to
+    fit content. SSN/EIN/phone are pre-formatted; the original signed PDF
+    path is included so the accountant can pull source artifacts on demand."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "W-9 Records"
+
+    # Header palette — neutral graphite + Eclatech lime accent
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="1A1A1A")
+    title_font  = Font(name="Calibri", size=16, bold=True, color="1A1A1A")
+    subtitle_font = Font(name="Calibri", size=10, color="666666", italic=True)
+    body_font   = Font(name="Calibri", size=10, color="222222")
+    mono_font   = Font(name="Consolas",  size=10, color="222222")
+    band_fill   = PatternFill("solid", fgColor="F6F6F4")
+    thin_border = Border(
+        bottom=Side(style="thin", color="DCDCDC"),
+        right=Side(style="thin", color="ECECEC"),
+    )
+
+    # Title block — three rows above the data
+    today = datetime.now(timezone.utc).strftime("%b %-d, %Y") if hasattr(datetime, "strftime") else datetime.now(timezone.utc).strftime("%b %d, %Y")
+    ws.cell(row=1, column=1, value="Eclatech LLC — W-9 / Talent Tax Records").font = title_font
+    range_str = f"{date_from or '—'}  →  {date_to or '—'}"
+    studio_str = studio or "All studios"
+    ws.cell(row=2, column=1, value=f"{range_str}    ·    {studio_str}    ·    Generated {today} UTC    ·    {len(records)} record(s)").font = subtitle_font
+
+    # Column definitions
+    columns = [
+        ("Shoot Date",       16, "shoot_date",        "date"),
+        ("Studio",           12, "studio",            "text"),
+        ("Scene",            10, "scene_id",          "text"),
+        ("Talent (Stage)",   22, "talent_display",    "text"),
+        ("Role",              8, "talent_role",       "text"),
+        ("Legal Name",       28, "legal_name",        "text"),
+        ("Business Name",    24, "business_name",     "text"),
+        ("Tax Class",        28, "_tax_class",        "text"),
+        ("TIN Type",          9, "tin_type",          "text"),
+        ("TIN",              14, "_tin",              "mono"),
+        ("Address",          34, "street_address",    "text"),
+        ("City / State / ZIP", 24, "city_state_zip",  "text"),
+        ("Phone",            16, "_phone",            "mono"),
+        ("Email",            30, "email",             "text"),
+        ("Signed (UTC)",     20, "signed_at",         "text"),
+        ("Signed By (audit)",26, "signed_by_user",    "text"),
+        ("PDF (server)",     50, "pdf_local_path",    "text"),
+        ("PDF (MEGA)",       50, "pdf_mega_path",     "text"),
+    ]
+
+    HEADER_ROW = 4
+    for i, (label, width, _, _) in enumerate(columns, start=1):
+        cell = ws.cell(row=HEADER_ROW, column=i, value=label)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+        ws.column_dimensions[get_column_letter(i)].width = width
+
+    ws.row_dimensions[HEADER_ROW].height = 22
+    ws.freeze_panes = ws.cell(row=HEADER_ROW + 1, column=1)
+
+    # Body rows
+    for r_idx, rec in enumerate(records, start=HEADER_ROW + 1):
+        derived = {
+            "_tax_class": _tax_class_label(rec.tax_classification, rec.llc_class, rec.other_classification),
+            "_tin":       _format_tin(rec.tin_type, rec.tin),
+            "_phone":     _format_phone(rec.phone),
+        }
+        banded = (r_idx - HEADER_ROW) % 2 == 0
+        for c_idx, (_, _, key, kind) in enumerate(columns, start=1):
+            val = derived.get(key, getattr(rec, key, ""))
+            if key == "talent_role" and isinstance(val, str):
+                val = val.title()
+            cell = ws.cell(row=r_idx, column=c_idx, value=val if val != "" else None)
+            cell.font = mono_font if kind == "mono" else body_font
+            cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=False)
+            cell.border = thin_border
+            if banded:
+                cell.fill = band_fill
+
+    # Filter handle on the header row so the accountant can sort/filter natively
+    last_col = get_column_letter(len(columns))
+    last_row = HEADER_ROW + max(0, len(records))
+    if records:
+        ws.auto_filter.ref = f"A{HEADER_ROW}:{last_col}{last_row}"
+
+    # Footer note (one row below the table)
+    if records:
+        footer_row = last_row + 2
+    else:
+        footer_row = HEADER_ROW + 2
+        ws.cell(row=HEADER_ROW + 1, column=1, value="No signed paperwork in this range.").font = subtitle_font
+    ws.cell(row=footer_row, column=1, value=(
+        "Source: compliance_signatures table (Hub-signed + legacy-import rows). "
+        "TIN values come from the talent's W-9 entry; verify against the linked PDF before tax filing."
+    )).font = subtitle_font
+
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+@router.get("/admin/w9-export.xlsx")
+async def export_w9_xlsx(
+    _admin: dict = Depends(require_admin),
+    date_from: Optional[str] = Query(default=None, alias="from"),
+    date_to: Optional[str] = Query(default=None, alias="to"),
+    studio: Optional[str] = Query(default=None),
+):
+    """Admin-only Excel download of every W-9 / talent tax record on file.
+
+    Filters are inclusive on shoot_date. The xlsx is rendered server-side so
+    PII never lives in the Hub's client memory. The header is frozen and a
+    native Excel filter is applied to the data range so the accountant can
+    sort / filter without external tooling."""
+    from fastapi.responses import Response as FastAPIResponse
+
+    records = list_w9_records(date_from=date_from, date_to=date_to, studio=studio)
+    xlsx_bytes = _build_w9_xlsx(records, date_from or "", date_to or "", studio or "")
+    range_tag = f"{date_from or 'all'}_to_{date_to or 'all'}".replace(":", "-")
+    filename = f"eclatech-w9-records_{range_tag}.xlsx"
+    return FastAPIResponse(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+class BulkDriveImportRequest(BaseModel):
+    """Walk a Drive folder recursively and import every shoot's PDFs that
+    match the conventional `MMDDYY-FemaleSlug[-MaleSlug]` folder naming.
+    Useful for back-filling historical paperwork in one shot."""
+    folder_url: str
+    imported_from_label: str = ""   # e.g. "Drive 2026" — recorded in audit trail
+
+
+class BulkDriveImportShootResult(BaseModel):
+    shoot_id: str
+    shoot_date: str
+    folder_name: str
+    talents_imported: int
+    skipped_reason: str = ""
+
+
+class BulkDriveImportResult(BaseModel):
+    folders_seen: int
+    folders_matched: int
+    shoots: list[BulkDriveImportShootResult] = []
+    errors: list[str] = []
+
+
+_SHOOT_FOLDER_RE = re.compile(r"^(\d{2})(\d{2})(\d{2})-(.+?)(?:-(.+))?$")
+
+
+def _list_subfolders(parent_id: str, token: str) -> list[dict]:
+    q = (
+        f"'{parent_id}' in parents "
+        "and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    )
+    res = _drive_json(
+        "https://www.googleapis.com/drive/v3/files"
+        f"?q={urllib.parse.quote(q)}&fields=files(id,name)&pageSize=1000",
+        token,
+    )
+    return (res or {}).get("files") or []
+
+
+@router.post("/admin/bulk-import-from-drive", response_model=BulkDriveImportResult)
+async def bulk_import_from_drive(
+    body: BulkDriveImportRequest,
+    request: Request,
+    _admin: dict = Depends(require_admin),
+):
+    """Recursively walk a Drive root and import every matching shoot folder.
+
+    The expected layout is the legacy legal-docs root: month folders →
+    `MMDDYY-FemaleSlug[-MaleSlug]` shoot folders → `*Slug-MMDDYY.pdf` files.
+    For each shoot folder we resolve the date + talent pair, look up the
+    corresponding shoot in the local DB, and run the same per-shoot import
+    used by `/import-from-drive`. Audit user is `legacy_import:bulk[:label]`.
+    """
+    token = _get_drive_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="Drive credentials unavailable")
+    root_id = _parse_drive_folder_id(body.folder_url)
+
+    audit_user = (
+        "legacy_import:bulk"
+        + (f":{body.imported_from_label}" if body.imported_from_label else "")
+    )
+    placeholder_png = _import_placeholder_signature_png()
+    result = BulkDriveImportResult(folders_seen=0, folders_matched=0)
+
+    # 1. List month-level subfolders, then shoot-level subfolders inside each
+    month_folders = await asyncio.to_thread(_list_subfolders, root_id, token)
+    if not month_folders:
+        # Fallback: maybe the user pointed at a year-level "shoots only" folder
+        month_folders = [{"id": root_id, "name": ""}]
+
+    # Cache shoots once per call. We pull a generous window so every 2026
+    # shoot is reachable without hitting Drive once per query.
+    today = datetime.now(timezone.utc).date()
+    window_lo = today - timedelta(days=400)
+    window_hi = today + timedelta(days=120)
+    all_shoots = _load_shoots_window(window_lo, window_hi, include_cancelled=False)
+
+    for month in month_folders:
+        try:
+            shoot_folders = await asyncio.to_thread(_list_subfolders, month["id"], token)
+        except Exception as exc:
+            result.errors.append(f"list {month.get('name','?')}: {exc}")
+            continue
+
+        for shoot_folder in shoot_folders:
+            result.folders_seen += 1
+            name = shoot_folder.get("name", "") or ""
+            m = _SHOOT_FOLDER_RE.match(name.replace(" ", ""))
+            if not m:
+                continue
+            mm, dd, yy, female_slug_raw, male_slug_raw = m.groups()
+            try:
+                year = 2000 + int(yy)
+                shoot_date_obj = datetime(year, int(mm), int(dd)).date()
+            except ValueError:
+                continue
+            shoot_date_iso = shoot_date_obj.isoformat()
+            female_slug = (female_slug_raw or "").strip()
+            male_slug = (male_slug_raw or "").strip()
+
+            # Match the local shoot by date + female slug (slug-collapsed)
+            shoot = next(
+                (s for s in all_shoots
+                 if s.shoot_date == shoot_date_iso
+                 and s.female_talent.replace(" ", "").lower() == female_slug.lower()),
+                None,
+            )
+            if not shoot:
+                result.shoots.append(BulkDriveImportShootResult(
+                    shoot_id="",
+                    shoot_date=shoot_date_iso,
+                    folder_name=name,
+                    talents_imported=0,
+                    skipped_reason="No matching shoot in local DB",
+                ))
+                continue
+            result.folders_matched += 1
+
+            # Pull PDFs in the shoot folder + match by talent slug prefix
+            try:
+                files = await asyncio.to_thread(_list_folder_files, shoot_folder["id"], token)
+            except Exception as exc:
+                result.errors.append(f"list {name}: {exc}")
+                continue
+            pdfs = [f for f in files if (f.get("name") or "").lower().endswith(".pdf")]
+
+            bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in ("BG", "BGCP")]
+            if not bg_scenes:
+                result.shoots.append(BulkDriveImportShootResult(
+                    shoot_id=shoot.shoot_id,
+                    shoot_date=shoot.shoot_date,
+                    folder_name=name,
+                    talents_imported=0,
+                    skipped_reason="Shoot has no BG scene",
+                ))
+                continue
+            primary = bg_scenes[0]
+            scene_id = primary.scene_id or ""
+            studio = primary.studio or ""
+            mega_studio = STUDIO_TO_MEGA.get(studio, studio)
+
+            db_female = shoot.female_talent.replace(" ", "")
+            db_male   = (shoot.male_talent or "").replace(" ", "")
+            matches: dict[str, dict] = {}
+            for f in pdfs:
+                fn = (f.get("name") or "").replace(" ", "").lower()
+                if db_female and fn.startswith(db_female.lower()):
+                    matches.setdefault("female", f)
+                elif db_male and fn.startswith(db_male.lower()):
+                    matches.setdefault("male", f)
+
+            imported = 0
+            date_code = shoot_date_obj.strftime("%m%d%y")
+            for role, drive_file in matches.items():
+                slug = db_female if role == "female" else db_male
+                display = shoot.female_talent if role == "female" else shoot.male_talent
+                try:
+                    pdf_bytes = await asyncio.to_thread(_drive_download_bytes, drive_file["id"], token)
+                except Exception as exc:
+                    result.errors.append(f"{name}/{slug}: download — {exc}")
+                    continue
+                pdf_name = f"{slug}-{date_code}.pdf"
+                pdf_path = _legal_pdf_dir() / shoot.shoot_date / pdf_name
+                pdf_path.parent.mkdir(parents=True, exist_ok=True)
+                pdf_path.write_bytes(pdf_bytes)
+
+                sig_path = _signature_dir() / f"{shoot.shoot_date}-{slug}-{role}.png"
+                sig_path.write_bytes(placeholder_png)
+
+                mega_remote = ""
+                mega_err: Optional[str] = None
+                if scene_id:
+                    mega_remote = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/{pdf_name}"
+                    mega_err = await asyncio.to_thread(_push_to_mega, pdf_path, mega_remote)
+                    if mega_err:
+                        _log.warning("MEGA push failed for %s: %s", pdf_name, mega_err)
+
+                upsert_signature(
+                    shoot_id=shoot.shoot_id,
+                    shoot_date=shoot.shoot_date,
+                    scene_id=scene_id,
+                    studio=studio,
+                    talent_role=role,
+                    talent_slug=slug,
+                    talent_display=display,
+                    legal_name=display,
+                    business_name="",
+                    tax_classification="individual",
+                    llc_class="",
+                    other_classification="",
+                    exempt_payee_code="",
+                    fatca_code="",
+                    tin_type="ssn",
+                    tin="",
+                    dob="",
+                    place_of_birth="",
+                    street_address="",
+                    city_state_zip="",
+                    phone="",
+                    email="",
+                    id1_type="",
+                    id1_number="",
+                    id2_type="",
+                    id2_number="",
+                    stage_names=display,
+                    professional_names="",
+                    nicknames_aliases="",
+                    previous_legal_names="",
+                    signature_image_path=str(sig_path.relative_to(get_settings().base_dir)),
+                    signed_ip=request.client.host if request.client else "",
+                    signed_user_agent="legacy-import-bulk",
+                    signed_by_user=audit_user,
+                    pdf_local_path=str(pdf_path),
+                    pdf_mega_path=mega_remote if (mega_remote and not mega_err) else "",
+                )
+                imported += 1
+
+            result.shoots.append(BulkDriveImportShootResult(
+                shoot_id=shoot.shoot_id,
+                shoot_date=shoot.shoot_date,
+                folder_name=name,
+                talents_imported=imported,
+                skipped_reason="" if imported else "No PDFs matched talent slug prefix",
+            ))
+
+    return result
+
+
+@router.get("/admin/w9-summary")
+async def w9_summary(
+    _admin: dict = Depends(require_admin),
+    date_from: Optional[str] = Query(default=None, alias="from"),
+    date_to: Optional[str] = Query(default=None, alias="to"),
+    studio: Optional[str] = Query(default=None),
+):
+    """Counts to render in the admin panel before downloading."""
+    records = list_w9_records(date_from=date_from, date_to=date_to, studio=studio)
+    by_studio: dict[str, int] = {}
+    by_role: dict[str, int] = {"female": 0, "male": 0}
+    for r in records:
+        by_studio[r.studio or "—"] = by_studio.get(r.studio or "—", 0) + 1
+        by_role[r.talent_role] = by_role.get(r.talent_role, 0) + 1
+    return {
+        "total": len(records),
+        "by_studio": by_studio,
+        "by_role": by_role,
+        "date_from": date_from or "",
+        "date_to": date_to or "",
+        "studio": studio or "",
+    }

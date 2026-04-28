@@ -1904,6 +1904,9 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   const [date, setDate] = useState(initialDate)
   const [shoots, setShoots] = useState<ComplianceShoot[]>(initialShoots)
   const [loading, setLoading] = useState(false)
+  // Optional name search — when non-empty, the date filter is widened
+  // server-side so the admin can find any talent across the recent year.
+  const [searchQuery, setSearchQuery] = useState("")
 
   // Wizard state
   const [selected, setSelected] = useState<ComplianceShoot | null>(null)
@@ -1962,12 +1965,12 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   // (postMessage cross-tab handoff used by the legacy /sign route is no
   // longer needed — signing happens inline in the wizard.)
 
-  // ── Date fetch ────────────────────────────────────────────────────────
+  // ── Date fetch + name search ──────────────────────────────────────────
 
-  async function loadDate(d: string) {
+  async function loadDate(d: string, q?: string) {
     setLoading(true)
     try {
-      const data = await client.compliance.shoots(d)
+      const data = await client.compliance.shoots(d, q)
       setShoots(data)
     } catch (e) {
       setShoots([])
@@ -1978,7 +1981,17 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
 
   function handleDateChange(d: string) {
     setDate(d)
+    setSearchQuery("")
     void loadDate(d)
+  }
+
+  function handleSearchChange(q: string) {
+    setSearchQuery(q)
+    if (q.trim()) {
+      void loadDate(date, q)
+    } else {
+      void loadDate(date)
+    }
   }
 
   // ── Select shoot ──────────────────────────────────────────────────────
@@ -2319,8 +2332,48 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
       {step === "select" && (
         <div style={{ padding: "16px 16px 0" }}>
 
-          {/* Date navigation */}
-          {(() => {
+          {/* Search by name — when non-empty, results expand across a year
+              window so admins can find a specific talent's shoot. */}
+          <div style={{ marginBottom: 10, position: "relative" }}>
+            <input
+              type="search"
+              inputMode="search"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Search talent name…"
+              value={searchQuery}
+              onChange={e => handleSearchChange(e.target.value)}
+              style={{
+                width: "100%",
+                background: "var(--color-elevated)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 10,
+                padding: "11px 36px 11px 14px",
+                fontSize: 13,
+                color: "var(--color-text)",
+                outline: "none",
+                boxSizing: "border-box",
+                fontFamily: "inherit",
+              }}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => handleSearchChange("")}
+                aria-label="Clear search"
+                style={{
+                  position: "absolute", right: 8, top: 0, bottom: 0,
+                  background: "transparent", border: "none",
+                  color: "var(--color-text-faint)", cursor: "pointer",
+                  display: "flex", alignItems: "center",
+                }}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Date navigation — hidden while searching */}
+          {!searchQuery.trim() && (() => {
             const isToday = date === new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date())
             const label = new Date(date + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })
             function shiftDay(delta: number) {
@@ -2386,6 +2439,15 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               </div>
             )
           })()}
+
+          {searchQuery.trim() && (
+            <div style={{
+              fontSize: 11, color: "var(--color-text-faint)", marginBottom: 12,
+              letterSpacing: "0.04em",
+            }}>
+              Searching across the past year for "{searchQuery.trim()}" — clear to return to the day view.
+            </div>
+          )}
 
           {loadError && (
             <div style={{
@@ -2461,6 +2523,11 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
                         {shoot.scene_id && (
                           <span style={{ fontSize: 11, color: "var(--color-text-faint)", fontFamily: "var(--font-mono)" }}>
                             {shoot.scene_id}
+                          </span>
+                        )}
+                        {searchQuery.trim() && (
+                          <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                            {formatLongDate(shoot.shoot_date)}
                           </span>
                         )}
                       </div>
