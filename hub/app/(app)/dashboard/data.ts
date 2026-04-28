@@ -1,15 +1,30 @@
 import { cache } from "react"
+import { unstable_cache } from "next/cache"
 import { api, type Notification, type Scene, type SceneStats, type Script, type Shoot } from "@/lib/api"
 
 /**
- * React `cache()` dedupes within a single render. Several dashboard sections
- * need the same payload (the briefing computes from shoots + stats + scripts;
- * the calendar and strip use shoots and stats independently), so wrapping the
- * fetchers here means each backend endpoint hits at most once per request.
+ * Two layers of caching are composed here:
  *
- * Each fetcher swallows errors and returns a sentinel (null / [] / false-ish)
- * so a slow or failing backend collapses one section without taking down the
- * whole page. The slowest section's failure is bounded to its Suspense block.
+ * 1. `unstable_cache` (Next.js) memoizes results across requests for `revalidate`
+ *    seconds and tags them so any mutation can call `revalidateTag(...)` from
+ *    `lib/cache-tags.ts` to expire the entry on demand.
+ *    Goal: most dashboard renders never cross the WAN to the Windows backend.
+ *
+ * 2. React `cache()` wraps the result of #1 so multiple sections inside a single
+ *    render share the same in-flight promise (e.g. BriefingSection +
+ *    CalendarSection both consume getShoots).
+ *
+ * The fetchers swallow backend errors and return sentinels (null / [] / false)
+ * so a slow or failing endpoint collapses one section without taking down the
+ * whole page. unstable_cache will not memoize a thrown error — the inner
+ * try/catch keeps the cache populated with the sentinel until revalidation,
+ * which is fine for a brief outage and still prompts a fresh attempt later.
+ *
+ * `idToken` is included as a function argument so each user's calls authorize
+ * correctly. Token rotation produces fresh cache keys roughly hourly which is
+ * acceptable churn — within an hour the same user shares cache entries across
+ * navigations, and the underlying data is global anyway (notifications differ
+ * by recipient, which the recipient's token already keys correctly).
  */
 
 export interface DashboardData {
@@ -22,60 +37,111 @@ export interface DashboardData {
   systemOk: boolean
 }
 
-export const getSceneStats = cache(async (idToken: string | undefined): Promise<SceneStats | null> => {
-  try {
-    return await api(idToken ?? null).scenes.stats()
-  } catch {
-    return null
-  }
-})
+// ─── revalidate windows ─────────────────────────────────────────────────────
+// The sync engine pulls Sheets every 300s, so anything <300s here is bounded
+// by the sync floor. We pick shorter windows than the sync to keep the cache
+// fresh while still absorbing the typical user navigation burst.
+const REV_FAST = 30   // notifications, health
+const REV_MED  = 60   // shoots, scenes, scripts, stats — also revalidatable on write
+const REV_SLOW = 120  // scene stats — global aggregate, changes slowly
 
-export const getScripts = cache(async (idToken: string | undefined): Promise<Script[]> => {
-  try {
-    return await api(idToken ?? null).scripts.list({ needs_script: true })
-  } catch {
-    return []
-  }
-})
+// Cache tags — exported as constants so mutation handlers can import and
+// revalidate the right surface without typo risk.
+export const TAG_SHOOTS        = "shoots"
+export const TAG_SCENES        = "scenes"
+export const TAG_SCENE_STATS   = "scene-stats"
+export const TAG_SCRIPTS       = "scripts"
+export const TAG_NOTIFICATIONS = "notifications"
+export const TAG_HEALTH        = "health"
 
-export const getShoots = cache(async (
-  idToken: string | undefined,
-): Promise<{ shoots: Shoot[]; failed: boolean }> => {
-  try {
-    const shoots = await api(idToken ?? null).shoots.list()
-    return { shoots, failed: false }
-  } catch {
-    return { shoots: [], failed: true }
-  }
-})
+export const getSceneStats = cache(
+  unstable_cache(
+    async (idToken: string | undefined): Promise<SceneStats | null> => {
+      try {
+        return await api(idToken ?? null).scenes.stats()
+      } catch {
+        return null
+      }
+    },
+    ["dashboard:scene-stats"],
+    { tags: [TAG_SCENE_STATS, TAG_SCENES], revalidate: REV_SLOW },
+  ),
+)
+
+export const getScripts = cache(
+  unstable_cache(
+    async (idToken: string | undefined): Promise<Script[]> => {
+      try {
+        return await api(idToken ?? null).scripts.list({ needs_script: true })
+      } catch {
+        return []
+      }
+    },
+    ["dashboard:scripts-needs-script"],
+    { tags: [TAG_SCRIPTS], revalidate: REV_MED },
+  ),
+)
+
+export const getShoots = cache(
+  unstable_cache(
+    async (idToken: string | undefined): Promise<{ shoots: Shoot[]; failed: boolean }> => {
+      try {
+        const shoots = await api(idToken ?? null).shoots.list()
+        return { shoots, failed: false }
+      } catch {
+        return { shoots: [], failed: true }
+      }
+    },
+    ["dashboard:shoots"],
+    { tags: [TAG_SHOOTS], revalidate: REV_MED },
+  ),
+)
 
 // Fetch per-studio so a studio with heavier recent activity (e.g. VRH) can't
 // crowd FPVR / VRA out of a global limit. Triage feed shows top 5 per studio.
 const RECENT_SCENE_STUDIOS = ["FuckPassVR", "VRHush", "VRAllure"] as const
 
-export const getRecentScenes = cache(async (idToken: string | undefined): Promise<Scene[]> => {
-  const client = api(idToken ?? null)
-  const results = await Promise.all(
-    RECENT_SCENE_STUDIOS.map(studio =>
-      client.scenes.list({ studio, limit: 5, missing_only: true }).catch(() => [] as Scene[])
-    )
-  )
-  return results.flat()
-})
+export const getRecentScenes = cache(
+  unstable_cache(
+    async (idToken: string | undefined): Promise<Scene[]> => {
+      const client = api(idToken ?? null)
+      const results = await Promise.all(
+        RECENT_SCENE_STUDIOS.map(studio =>
+          client.scenes.list({ studio, limit: 5, missing_only: true }).catch(() => [] as Scene[])
+        )
+      )
+      return results.flat()
+    },
+    ["dashboard:recent-scenes"],
+    { tags: [TAG_SCENES], revalidate: REV_MED },
+  ),
+)
 
-export const getNotifications = cache(async (idToken: string | undefined): Promise<Notification[]> => {
-  try {
-    return await api(idToken ?? null).notifications.list(12)
-  } catch {
-    return []
-  }
-})
+export const getNotifications = cache(
+  unstable_cache(
+    async (idToken: string | undefined): Promise<Notification[]> => {
+      try {
+        return await api(idToken ?? null).notifications.list(12)
+      } catch {
+        return []
+      }
+    },
+    ["dashboard:notifications-12"],
+    { tags: [TAG_NOTIFICATIONS], revalidate: REV_FAST },
+  ),
+)
 
-export const getHealthOk = cache(async (idToken: string | undefined): Promise<boolean> => {
-  try {
-    await api(idToken ?? null).health()
-    return true
-  } catch {
-    return false
-  }
-})
+export const getHealthOk = cache(
+  unstable_cache(
+    async (idToken: string | undefined): Promise<boolean> => {
+      try {
+        await api(idToken ?? null).health()
+        return true
+      } catch {
+        return false
+      }
+    },
+    ["dashboard:health"],
+    { tags: [TAG_HEALTH], revalidate: REV_FAST },
+  ),
+)
