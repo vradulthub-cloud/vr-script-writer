@@ -19,11 +19,18 @@ export default async function MissingPage() {
   let error: string | null = null
   let sceneSyncedAt: string | null = null
 
+  // The initial scenes payload powers the grid before the user touches the
+  // "Per studio" dropdown. A flat `limit: 20` here would order by id DESC
+  // and skew the entire grid to VRH/VRA (their prefixes sort highest in
+  // ASCII), so FPVR and NJOI rows wouldn't appear at all on first load.
+  // Fan out per studio to mirror what the dropdown does — the page already
+  // knows about exactly four studios.
+  const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"]
   try {
-    const [statsResult, syncResult, scenesResult] = await Promise.allSettled([
+    const [statsResult, syncResult, ...studioResults] = await Promise.allSettled([
       client.scenes.stats(),
       client.sync.status(),
-      client.scenes.list({ limit: 20, missing_only: true }),
+      ...STUDIOS.map(s => client.scenes.list({ studio: s, limit: 5, missing_only: true })),
     ])
     if (statsResult.status === "fulfilled") stats = statsResult.value
     else error = "Failed to load scenes"
@@ -31,7 +38,7 @@ export default async function MissingPage() {
       const sceneSync = syncResult.value.find(s => s.source === "scenes")
       sceneSyncedAt = sceneSync?.last_synced_at ?? null
     }
-    scenes = scenesResult.status === "fulfilled" ? scenesResult.value : []
+    scenes = studioResults.flatMap(r => (r.status === "fulfilled" ? r.value : []))
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load scenes"
   }
