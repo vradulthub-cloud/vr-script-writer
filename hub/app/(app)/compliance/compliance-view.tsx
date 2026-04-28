@@ -1364,8 +1364,11 @@ interface PhotoSlot {
   fileType?: "image" | "video"
 }
 
-function buildSlots(female: string, male: string): PhotoSlot[] {
-  const slots: PhotoSlot[] = [
+// Photo slots are female-talent-only by design. Male performers are recurring
+// crew whose IDs live in a static Drive folder maintained by admin and
+// referenced day-to-day; capturing them per-shoot is just churn.
+function buildSlots(female: string, _male: string): PhotoSlot[] {
+  return [
     {
       id: `${female.replace(/ /g, "")}-id-front`,
       label: `${female.replace(/ /g, "")}-id-front.jpg`,
@@ -1384,39 +1387,16 @@ function buildSlots(female: string, male: string): PhotoSlot[] {
       display: `${female} — Bunny Ear`,
       talent: "female", category: "bunny", required: true,
     },
+    {
+      id: "signout-video",
+      label: "signout-video.mp4",
+      display: "Sign Out Video",
+      talent: "female",
+      category: "signout",
+      required: true,
+      fileType: "video",
+    },
   ]
-  if (male) {
-    slots.push(
-      {
-        id: `${male.replace(/ /g, "")}-id-front`,
-        label: `${male.replace(/ /g, "")}-id-front.jpg`,
-        display: `${male} — IDs Front`,
-        talent: "male", category: "id", required: true,
-      },
-      {
-        id: `${male.replace(/ /g, "")}-id-back`,
-        label: `${male.replace(/ /g, "")}-id-back.jpg`,
-        display: `${male} — IDs Back`,
-        talent: "male", category: "id", required: true,
-      },
-      {
-        id: `${male.replace(/ /g, "")}-bunny`,
-        label: `${male.replace(/ /g, "")}-bunny-ear.jpg`,
-        display: `${male} — Bunny Ear`,
-        talent: "male", category: "bunny", required: true,
-      },
-    )
-  }
-  slots.push({
-    id: "signout-video",
-    label: "signout-video.mp4",
-    display: "Sign Out Video",
-    talent: "female",
-    category: "signout",
-    required: true,
-    fileType: "video",
-  })
-  return slots
 }
 
 // ─── Captured photo state ─────────────────────────────────────────────────────
@@ -2815,7 +2795,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               {selected.female_talent}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {slots.filter(s => s.talent === "female").map(slot => {
+              {slots.filter(s => s.talent === "female" && s.category !== "signout").map(slot => {
                 const captured = capturedFor(slot.id)
                 const uploading = perSlotUploading[slot.id]
                 const error = perSlotError[slot.id]
@@ -2839,39 +2819,6 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               })}
             </div>
           </div>
-
-          {/* Male section */}
-          {selected.male_talent && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--color-text-muted)", marginBottom: 10 }}>
-                {selected.male_talent}
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {slots.filter(s => s.talent === "male").map(slot => {
-                  const captured = capturedFor(slot.id)
-                  const uploading = perSlotUploading[slot.id]
-                  const error = perSlotError[slot.id]
-                  return (
-                    <div key={slot.id}>
-                      <CameraButton
-                        slot={slot}
-                        captured={captured}
-                        onCapture={(file, preview) => capturePhoto(slot, file, preview)}
-                      />
-                      {uploading && (
-                        <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
-                          <Loader2 size={10} className="animate-spin" /> Saving…
-                        </div>
-                      )}
-                      {error && (
-                        <div style={{ fontSize: 10, color: "#f87171", marginTop: 4 }}>{error}</div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
 
           {/* Sign Out Video */}
           {(() => {
