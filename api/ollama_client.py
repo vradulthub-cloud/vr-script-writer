@@ -51,20 +51,24 @@ def ollama_generate(
     max_tokens: int = 400,
     temperature: float = 0.6,
     timeout: int = 90,
+    seed: Optional[int] = None,
 ) -> str:
     """
     Single-shot generation. Returns the completion text (stripped).
     Raises RuntimeError on any failure — callers should translate to HTTPException.
     """
     model = _model_for(task)
+    options: dict = {
+        "temperature": temperature,
+        "num_predict": max_tokens,
+    }
+    if seed is not None:
+        options["seed"] = seed
     payload: dict = {
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "options": {
-            "temperature": temperature,
-            "num_predict": max_tokens,
-        },
+        "options": options,
     }
     if system:
         payload["system"] = system
@@ -93,22 +97,29 @@ def ollama_stream(
     max_tokens: int = 2048,
     temperature: float = 0.7,
     timeout: int = 300,
+    seed: Optional[int] = None,
 ) -> Generator[str, None, None]:
     """
     Streaming generation. Yields text deltas as they arrive.
 
     Raises RuntimeError on connection failure before any data; per-chunk errors
     are logged and the stream ends (matches Claude SSE behavior).
+
+    Pass `seed` to force fresh sampling entropy per call — without it the
+    model can lock onto the same dominant pattern across back-to-back calls.
     """
     model = _model_for(task)
+    options: dict = {
+        "temperature": temperature,
+        "num_predict": max_tokens,
+    }
+    if seed is not None:
+        options["seed"] = seed
     payload: dict = {
         "model": model,
         "prompt": prompt,
         "stream": True,
-        "options": {
-            "temperature": temperature,
-            "num_predict": max_tokens,
-        },
+        "options": options,
     }
     if system:
         payload["system"] = system

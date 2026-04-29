@@ -16,6 +16,12 @@ SYSTEM_PROMPT = """You are a professional VR adult film script writer for two st
 
 ---
 
+## DIRECTOR'S NOTE — AUTHORITY RULE
+
+If the user prompt contains a "DIRECTOR'S NOTE — HIGHEST PRIORITY" block, treat it as a binding override on format choice, vibe, and angle. Do not dilute it. Do not treat it as one element among many. Build the entire script around it. The note picks the format (Fantasy Scenario vs Pornstar Experience for VRH); the note picks the angle. Everything else in this system prompt is a constraint, not creative direction.
+
+---
+
 ## STUDIOS
 
 ### VRHush (VRH)
@@ -79,6 +85,7 @@ WARDROBE - MALE: [Full outfit description]
 
 ## SCENE RULES
 
+- **POV rule (CRITICAL):** The male talent IS the viewer. Never write the male character's first or last name in the plot. Refer to him only as "you." All action is described from his perspective. The female model is the only character named in the plot.
 - 45-minute scene, two performers only — no extras
 - Filmed entirely at the studio shoot location
 - Scene opens with seduction; the balance is sex
@@ -556,6 +563,13 @@ def build_script_prompt(
     """
     Build the user-turn prompt for script generation.
 
+    Director's note (when present) leads the prompt and is wrapped in
+    authority language so the model treats it as a binding override on
+    format choice and angle — not one more flavor element competing with
+    the structural rules. The studio rules (FPVR passport, BGCP intimacy)
+    still ride at the bottom because they're constraints, not creative
+    direction.
+
     Args:
         studio: UI studio name ("VRHush", "FuckPassVR")
         scene_type: "BG" or "BGCP"
@@ -564,8 +578,25 @@ def build_script_prompt(
         destination: Travel destination for FPVR scenes
         director_note: Optional creative direction from the director
     """
-    prompt_parts = [
-        "Please write a complete VR production script for the following shoot:",
+    prompt_parts: list[str] = [
+        "Please write a complete VR production script for the following shoot.",
+    ]
+
+    if director_note:
+        prompt_parts += [
+            "",
+            "═══ DIRECTOR'S NOTE — HIGHEST PRIORITY ═══",
+            director_note.strip(),
+            "",
+            "This note OVERRIDES default format/style choices. If it names a "
+            "format (e.g. 'Pornstar Experience', 'breaking the fourth wall', "
+            "'[Performer] experience'), use that format. If it names a tone, "
+            "vibe, or angle, that is the script's center of gravity — not a "
+            "flavor element. Build the script around this note.",
+            "═══════════════════════════════════════════",
+        ]
+
+    prompt_parts += [
         "",
         f"- **Studio**: {studio}",
     ]
@@ -576,17 +607,12 @@ def build_script_prompt(
     prompt_parts += [
         f"- **Scene Type**: {scene_type}",
         f"- **Female Talent**: {female}",
-        f"- **Male Talent**: {male}",
+        f"- **Male Talent (POV — refer to as 'you' in the plot, never by name)**: {male}",
         "",
         f"First, research {female} online to understand her appearance, body type, tattoos, typical on-screen persona, and the roles she commonly plays. Use this research to inform the plot, wardrobe, and set design.",
         "",
         "Then produce the full script using EXACTLY these section headers in this order: THEME, PLOT, SHOOT LOCATION, SET DESIGN, PROPS, WARDROBE - FEMALE, WARDROBE - MALE. Do not rename, reorder, or add markdown bold to the section headers.",
     ]
-
-    if director_note:
-        prompt_parts.append(
-            f"\nDirector's note — use this as the creative direction for the scene: {director_note}"
-        )
 
     if studio == "FuckPassVR" and destination:
         prompt_parts.append(
@@ -596,6 +622,17 @@ def build_script_prompt(
     if scene_type == "BGCP":
         prompt_parts.append(
             "\nThis is a BGCP (Creampie) scene. The plot must reflect the heightened intimacy of this ending — make it feel special and meaningful. The female model should convey why this level of connection is significant."
+        )
+
+    if not director_note:
+        # Without a director's note the model defaults to its dominant pattern
+        # (struggling neighbor / age-gap setups, etc.). Nudge it off the rails
+        # so back-to-back generations actually differ.
+        prompt_parts.append(
+            "\nVary from the most obvious narrative pattern. Rotate room "
+            "choices, scenario types, and seduction beats. Avoid recycling "
+            "common tropes (neighbor crushes, age-gap dynamics, struggling-"
+            "writer setups) unless specifically requested."
         )
 
     return "\n".join(prompt_parts)

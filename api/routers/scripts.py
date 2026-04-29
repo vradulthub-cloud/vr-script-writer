@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import threading
 from datetime import datetime, timezone
 from typing import Optional
@@ -171,7 +172,13 @@ async def generate_script(body: ScriptGenRequest, user: CurrentUser):
                 body.director_note,
             )
             sys_p = get_prompt("script.system", fallback=SYSTEM_PROMPT)
-            for delta in ollama_stream("script", prompt, system=sys_p, max_tokens=4096, temperature=0.8):
+            # Per-call random seed so back-to-back generations actually differ.
+            # Without this, the local model's dominant pattern wins every time.
+            seed = random.randint(0, 2**31 - 1)
+            for delta in ollama_stream(
+                "script", prompt, system=sys_p,
+                max_tokens=4096, temperature=0.8, seed=seed,
+            ):
                 yield f"data: {json.dumps({'type': 'text', 'text': delta})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
@@ -298,7 +305,7 @@ async def validate_script(body: ValidateBody, user: CurrentUser):
     if not body.shoot_location.strip():
         violations.append("Missing required section: SHOOT LOCATION")
     if not body.wardrobe_f.strip():
-        violations.append("Missing required section: WARDROBE (F)")
+        violations.append("Missing required section: WARDROBE - FEMALE")
 
     # Check for banned content
     all_text = f"{body.plot} {body.theme} {body.shoot_location}".lower()
