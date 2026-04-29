@@ -76,7 +76,7 @@
       "image": ["9", 0],
       "model": "RMBG-2.0",
       "sensitivity": 1.0,
-      "process_res": 1024,
+      "process_res": 512,
       "mask_blur": 0,
       "mask_offset": 0,
       "background": "Alpha",
