@@ -432,8 +432,8 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
         notes: "",
         scene_count: 3,
         scenes: [
-          { scene_id: `${key}0369`, scene_num: 1, title: "Sample Scene 1", performers: "Ava Addams", slr_link: "", mega_link: "https://mega.nz/folder/AAAA#demo1" },
-          { scene_id: `${key}0412`, scene_num: 2, title: "Sample Scene 2", performers: "Mia Khalifa", slr_link: "", mega_link: "https://mega.nz/folder/BBBB#demo2" },
+          { scene_id: `${key}0369`, scene_num: 1, title: "Sample Scene 1", performers: "Ava Addams", slr_link: "", mega_link: `https://${key.toLowerCase()}.s3.g.s4.mega.io/${key}0369/Videos/sample-1.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=604800&X-Amz-Signature=demo1` },
+          { scene_id: `${key}0412`, scene_num: 2, title: "Sample Scene 2", performers: "Mia Khalifa", slr_link: "", mega_link: `https://${key.toLowerCase()}.s3.g.s4.mega.io/${key}0412/Videos/sample-2.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=604800&X-Amz-Signature=demo2` },
           { scene_id: `${key}0455`, scene_num: 3, title: "Sample Scene 3", performers: "Riley Reid", slr_link: "", mega_link: "" },
         ],
       },

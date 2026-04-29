@@ -72,8 +72,15 @@ The Streamlit app runs on Windows. Do NOT try to import or test app modules on t
 | App UI | FuckPassVR | VRHush | VRAllure | NaughtyJOI |
 | Scripts Sheet | FuckPassVR | VRHush | VRAllure | NaughtyJOI |
 | Grail Tabs | FPVR | VRH | VRA | NNJOI |
-| MEGA Folders | Grail/FPVR | Grail/VRH | Grail/VRA | Grail/NNJOI |
+| S4 Buckets | fpvr | vrh | vra | njoi |
 | Site Codes | fpvr | vrh | vra | njoi |
+
+**S4 keys** are bucket-rooted scene IDs with no `/Grail/` prefix
+(e.g. `vrh/VRH0762/Description/foo.docx`). The legacy `Grail/Backup/`
+hierarchy was merged into the main tree on 2026-04-29.
+`s4_client._STUDIO_ALIASES` resolves all of `NNJOI`, `FuckPassVR`, `VRHush`,
+`VRAllure`, `NaughtyJOI` (and lowercase forms) to the canonical 4-letter
+code.
 
 ---
 
@@ -81,7 +88,7 @@ The Streamlit app runs on Windows. Do NOT try to import or test app modules on t
 Detailed rules for each subsystem are in `.claude/rules/`:
 - `hub-app.md` — Streamlit app, auth, caching, Python 3.11 gotchas
 - `sheets.md` — Google Sheets IDs, column mappings, service account
-- `mega.md` — MEGA storage paths, rclone, scan/sync
+- `mega.md` — MEGA S4 (S3) buckets, key shape, casing, scan/sync, refresher cron
 - `audio.md` — Director voice removal, WAV handling
 - `comfyui.md` — Image generation, LoRA training, CTA titles, compilations
 - `windows-ssh.md` — SSH lessons learned (process lifecycle gotchas)
