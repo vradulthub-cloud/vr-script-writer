@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     # --- Ollama ---
     ollama_base_url: str = "http://localhost:11434/v1"
 
+    # --- ComfyUI (Windows box, FLUX local title generation) ---
+    comfyui_host: str = "http://100.90.90.68:8188"
+    comfyui_timeout_seconds: int = 120
+
     # --- Sync Engine ---
     sheets_sync_interval_seconds: int = 300  # 5 minutes
 

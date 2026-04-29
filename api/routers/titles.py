@@ -1,12 +1,13 @@
 """
 Titles API router.
 
-Provides AI-powered title card generation via fal.ai Ideogram V3
-and local PIL-based model name card generation.
+Local-only title PNG generation. Two pipelines:
 
-Routes:
-  POST /api/titles/cloud      — generate title card image via fal.ai Ideogram V3
-  POST /api/titles/model-name — generate model name PNG (VRA/VRH PIL renderer)
+  POST /api/titles/local        — render via PIL treatment library (700+ themes)
+  POST /api/titles/flux-local   — render via ComfyUI on Windows box (FLUX.1 Schnell + RMBG-2.0)
+  POST /api/titles/refine       — re-render an existing local title with adjustments
+  POST /api/titles/model-name   — render model name PNG (VRA/VRH PIL renderer)
+  GET  /api/titles/treatments   — list available PIL treatments
 """
 
 from __future__ import annotations
@@ -14,7 +15,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import json
 import logging
+import uuid
+from pathlib import Path
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter
@@ -29,78 +34,7 @@ router = APIRouter(prefix="/api/titles", tags=["titles"])
 
 
 # ---------------------------------------------------------------------------
-# Pydantic models
-# ---------------------------------------------------------------------------
-
-_STYLE_HINTS: dict[str, str] = {
-    "cinematic": "dramatic cinematic style, dark moody atmosphere, film poster composition, deep shadows",
-    "bold": "bold graphic design, high contrast, heavy display typography, editorial punch",
-    "minimal": "minimal clean design, generous white space, elegant refined typography, restrained palette",
-}
-
-class TitleRequest(BaseModel):
-    text: str
-    style: str = "cinematic"        # "cinematic", "bold", "minimal"
-    studio: str | None = None       # optional studio context for color hints
-    n: int = 1                      # number of variations (1–4)
-
-
-class TitleResponse(BaseModel):
-    url: str | None
-    error: str | None
-
-
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
-
-async def _generate_one(client: httpx.AsyncClient, fal_key: str, prompt: str) -> TitleResponse:
-    """Run a single fal.ai Ideogram V3 request."""
-    try:
-        resp = await client.post(
-            "https://fal.run/fal-ai/ideogram/v3",
-            headers={"Authorization": f"Key {fal_key}"},
-            json={"prompt": prompt, "style_type": "DESIGN"},
-            timeout=90,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        url = data.get("images", [{}])[0].get("url")
-        return TitleResponse(url=url, error=None)
-    except httpx.HTTPStatusError as exc:
-        return TitleResponse(url=None, error=f"fal.ai error: {exc.response.status_code}")
-    except Exception as exc:
-        return TitleResponse(url=None, error=str(exc))
-
-
-@router.post("/cloud", response_model=list[TitleResponse])
-async def generate_cloud_title(body: TitleRequest, user: CurrentUser):
-    """
-    Generate title card image(s) via fal.ai Ideogram V3.
-
-    With n=1 (default) returns a single-element list for backwards compat.
-    With n=2–4 runs requests concurrently and returns all results.
-    """
-    import asyncio
-
-    settings = get_settings()
-
-    if not settings.fal_key:
-        return [TitleResponse(url=None, error="FAL_KEY not configured")]
-
-    n = max(1, min(20, body.n))
-    style_hint = _STYLE_HINTS.get(body.style, _STYLE_HINTS["cinematic"])
-    prompt = f"VR adult entertainment title card: {body.text}. {style_hint}."
-
-    async with httpx.AsyncClient() as client:
-        tasks = [_generate_one(client, settings.fal_key, prompt) for _ in range(n)]
-        results = await asyncio.gather(*tasks)
-
-    return list(results)
-
-
-# ---------------------------------------------------------------------------
-# Local PIL title generation (690+ treatments)
+# Local PIL title generation (700+ treatments)
 # ---------------------------------------------------------------------------
 
 def _get_cta_module():
@@ -229,7 +163,13 @@ async def refine_title(body: RefineRequest, user: CurrentUser):
     """
     import random
 
-    seed = body.seed if body.seed > 0 else random.randint(1, 999999)
+    base_seed = body.seed if body.seed > 0 else random.randint(1, 999999)
+    # Mix the refine prompt into the seed so re-rendering actually varies the
+    # composition (different palette samples, different stochastic effects)
+    # rather than just applying post-processing to the original render.
+    import hashlib as _hashlib
+    prompt_hash = int(_hashlib.md5(body.refine_prompt.encode()).hexdigest(), 16) % (2**31)
+    seed = (base_seed + prompt_hash) % (2**31)
 
     def _render():
         cta = _get_cta_module()
@@ -237,14 +177,15 @@ async def refine_title(body: RefineRequest, user: CurrentUser):
         if body.treatment_name not in treatments:
             return LocalTitleResponse(data_url="", treatment_name=body.treatment_name, error="Treatment not found")
 
-        # Simple keyword-based adjustment as fallback
         render_fn = treatments[body.treatment_name]
         try:
             img = render_fn(body.text, random.Random(seed))
             from PIL import ImageFilter, ImageEnhance
             img = img.filter(ImageFilter.UnsharpMask(radius=1.5, percent=60))
 
-            # Apply simple adjustments based on refine prompt
+            # Apply intent-driven adjustments on top of the re-rendered image.
+            # Layered with the seed-jitter above, the refine result both varies
+            # (new draw) AND honors the explicit color/brightness intent.
             prompt_lower = body.refine_prompt.lower()
             if "darker" in prompt_lower:
                 img = ImageEnhance.Brightness(img).enhance(0.7)
@@ -315,3 +256,150 @@ async def generate_model_name(body: ModelNameRequest, user: CurrentUser):
     except Exception as exc:
         _log.exception("Model name render failed")
         return ModelNameResponse(data_url="", error=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Local AI generation — ComfyUI (FLUX.1 Schnell + RMBG-2.0) on Windows box
+# ---------------------------------------------------------------------------
+
+_FLUX_TITLE_LORA = "title_card_style_v2-000002.safetensors"
+_WORKFLOW_PATH = Path(__file__).resolve().parent.parent / "workflows" / "flux_transparent_title.json"
+
+_FLUX_PROMPT_PREFIX = (
+    "title card text reading {text}, isolated on pure white background, "
+    "bold display typography, dramatic lighting, cinematic, high contrast, "
+    "no other elements, centered composition"
+)
+
+
+class FluxLocalRequest(BaseModel):
+    text: str
+    use_lora: bool = True                                 # apply trained title_card_style_v2 LoRA
+    steps: int = 4                                        # FLUX Schnell sweet spot
+    seed: int = 0                                         # 0 = random
+    width: int = 1024                                     # multiple of 64
+    height: int = 512                                     # multiple of 64
+    bg_remove: Literal["rmbg2", "none"] = "rmbg2"         # extract alpha (rmbg2) or pass-through
+
+
+class FluxLocalResponse(BaseModel):
+    data_url: str
+    seed: int
+    error: str | None = None
+
+
+def _build_flux_workflow(req: FluxLocalRequest, seed: int) -> dict:
+    """Render the workflow JSON template with this request's parameters."""
+    template = _WORKFLOW_PATH.read_text()
+    populated = template.format(
+        prompt=_FLUX_PROMPT_PREFIX.format(text=req.text.replace('"', "'")),
+        seed=seed,
+        steps=max(1, min(8, req.steps)),
+        lora_name=_FLUX_TITLE_LORA if req.use_lora else "",
+        lora_strength=0.85 if req.use_lora else 0.0,
+        width=req.width - (req.width % 64) or 1024,
+        height=req.height - (req.height % 64) or 512,
+    )
+    graph = json.loads(populated)
+    # Remove the human-readable comment; ComfyUI rejects unknown keys at top level.
+    graph.pop("_comment", None)
+    if req.bg_remove == "none":
+        # SaveImage points at VAEDecode output instead of RMBG.
+        graph["11"]["inputs"]["images"] = ["9", 0]
+        graph.pop("10", None)
+    return graph
+
+
+async def _comfyui_health(client: httpx.AsyncClient, host: str) -> bool:
+    try:
+        resp = await client.get(f"{host}/system_stats", timeout=2.0)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+async def _submit_comfyui_workflow(graph: dict, host: str, timeout_s: int) -> bytes:
+    """POST a graph to /prompt, poll /history until done, return output PNG bytes."""
+    client_id = uuid.uuid4().hex
+    async with httpx.AsyncClient() as client:
+        if not await _comfyui_health(client, host):
+            raise RuntimeError(
+                f"ComfyUI offline at {host} — start it on the Windows box "
+                f"(PowerShell: & 'C:\\Program Files\\Python311\\python.exe' E:\\ComfyUI\\main.py --listen 0.0.0.0 --port 8188)"
+            )
+
+        submit = await client.post(
+            f"{host}/prompt",
+            json={"prompt": graph, "client_id": client_id},
+            timeout=10.0,
+        )
+        submit.raise_for_status()
+        prompt_id = submit.json().get("prompt_id")
+        if not prompt_id:
+            raise RuntimeError(f"ComfyUI did not return prompt_id: {submit.text}")
+
+        elapsed = 0.0
+        while elapsed < timeout_s:
+            await asyncio.sleep(1.5)
+            elapsed += 1.5
+            hist = await client.get(f"{host}/history/{prompt_id}", timeout=10.0)
+            if hist.status_code != 200:
+                continue
+            history = hist.json()
+            if prompt_id not in history:
+                continue
+            outputs = history[prompt_id].get("outputs", {})
+            for node_outputs in outputs.values():
+                imgs = node_outputs.get("images", [])
+                if not imgs:
+                    continue
+                meta = imgs[0]
+                view = await client.get(
+                    f"{host}/view",
+                    params={
+                        "filename": meta["filename"],
+                        "subfolder": meta.get("subfolder", ""),
+                        "type": meta.get("type", "output"),
+                    },
+                    timeout=30.0,
+                )
+                view.raise_for_status()
+                return view.content
+        raise RuntimeError(f"ComfyUI generation timed out after {timeout_s}s")
+
+
+@router.post("/flux-local", response_model=FluxLocalResponse)
+async def generate_flux_local(body: FluxLocalRequest, user: CurrentUser):
+    """
+    Generate a transparent title PNG via ComfyUI on the Windows box.
+
+    Pipeline: FLUX.1 Schnell (4 steps) → optional title_card_style_v2 LoRA →
+    optional RMBG-2.0 background removal → RGBA PNG.
+
+    ComfyUI must be running at the configured `comfyui_host` (default
+    http://100.90.90.68:8188). Returns a clear offline error if not.
+    """
+    import random
+    settings = get_settings()
+    seed = body.seed if body.seed > 0 else random.randint(1, 2**31 - 1)
+
+    try:
+        graph = _build_flux_workflow(body, seed)
+    except (KeyError, json.JSONDecodeError) as exc:
+        _log.exception("Failed to build FLUX workflow")
+        return FluxLocalResponse(data_url="", seed=seed, error=f"Workflow build failed: {exc}")
+
+    try:
+        png_bytes = await _submit_comfyui_workflow(
+            graph,
+            host=settings.comfyui_host.rstrip("/"),
+            timeout_s=settings.comfyui_timeout_seconds,
+        )
+        b64 = base64.b64encode(png_bytes).decode()
+        return FluxLocalResponse(data_url=f"data:image/png;base64,{b64}", seed=seed)
+    except RuntimeError as exc:
+        # Expected offline / timeout cases — surface message verbatim, no stack trace.
+        return FluxLocalResponse(data_url="", seed=seed, error=str(exc))
+    except Exception as exc:
+        _log.exception("FLUX local generation failed")
+        return FluxLocalResponse(data_url="", seed=seed, error=str(exc))

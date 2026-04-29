@@ -701,6 +701,12 @@ export interface LocalTitleResult {
   error: string | null
 }
 
+export interface FluxLocalResult {
+  data_url: string
+  seed: number
+  error: string | null
+}
+
 export interface CompSceneRow {
   scene_id: string
   scene_num: number
@@ -940,6 +946,16 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<LocalTitleResult>("/titles/refine", body),
       modelName: (body: { name: string; studio: string }) =>
         post<{ data_url: string; error?: string | null }>("/titles/model-name", body),
+      fluxLocal: (body: {
+        text: string
+        use_lora?: boolean
+        steps?: number
+        seed?: number
+        width?: number
+        height?: number
+        bg_remove?: "rmbg2" | "none"
+      }) =>
+        post<FluxLocalResult>("/titles/flux-local", body),
     },
 
     models: {

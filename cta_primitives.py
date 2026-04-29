@@ -107,10 +107,13 @@ def measure(d: ImageDraw.Draw, text: str, font) -> tuple:
     bb = d.textbbox((0,0), text, font=font)
     return bb[2]-bb[0], bb[3]-bb[1], bb[1]
 
-def make_mask(text: str, font, pad: int = 80, max_width: int = 3600) -> Image.Image:
+def make_mask(text: str, font, pad: int = 80, max_width: int = 3600,
+              supersample: int = 2) -> Image.Image:
     """Render text as a greyscale alpha mask.
     - pad=80 gives glow/shadow effects room to breathe without clipping.
     - max_width auto-scales the font down if text would exceed that pixel width.
+    - supersample (default 2) renders at NxN, then downsamples with LANCZOS for
+      sub-pixel-smooth alpha edges. Set to 1 to disable for testing/perf.
     """
     dummy = ImageDraw.Draw(Image.new("L", (10000, 3000), 0))
     w, h, top = measure(dummy, text, font)
@@ -123,6 +126,16 @@ def make_mask(text: str, font, pad: int = 80, max_width: int = 3600) -> Image.Im
             w, h, top = measure(dummy, text, font)
         except Exception:
             pass
+    if supersample > 1:
+        try:
+            big_font = ImageFont.truetype(font.path, font.size * supersample)
+            big_w, big_h, big_top = measure(dummy, text, big_font)
+            big_pad = pad * supersample
+            big = Image.new("L", (big_w + big_pad * 2, big_h + big_pad * 2), 0)
+            ImageDraw.Draw(big).text((big_pad, big_pad - big_top), text, fill=255, font=big_font)
+            return big.resize((w + pad * 2, h + pad * 2), Image.LANCZOS)
+        except Exception:
+            pass  # fall through to native-resolution path
     img = Image.new("L", (w + pad * 2, h + pad * 2), 0)
     ImageDraw.Draw(img).text((pad, pad - top), text, fill=255, font=font)
     return img
@@ -142,8 +155,11 @@ def auto_size_hd(title: str, base: int = 420, pivot: int = 14) -> int:
         return base
     return max(120, int(base * pivot / n))
 
-def make_mask_hd(text: str, font, pad: int = 100, max_width: int = 3840) -> Image.Image:
-    """HD mask — larger canvas, more padding for effects at 4K resolution."""
+def make_mask_hd(text: str, font, pad: int = 100, max_width: int = 3840,
+                 supersample: int = 2) -> Image.Image:
+    """HD mask — larger canvas, more padding for effects at 4K resolution.
+    supersample=2 by default for crisp 4K edges on transparent backgrounds.
+    """
     dummy = ImageDraw.Draw(Image.new("L", (12000, 4000), 0))
     w, h, top = measure(dummy, text, font)
     if w > max_width:
@@ -154,9 +170,58 @@ def make_mask_hd(text: str, font, pad: int = 100, max_width: int = 3840) -> Imag
             w, h, top = measure(dummy, text, font)
         except Exception:
             pass
+    if supersample > 1:
+        try:
+            big_font = ImageFont.truetype(font.path, font.size * supersample)
+            big_w, big_h, big_top = measure(dummy, text, big_font)
+            big_pad = pad * supersample
+            big = Image.new("L", (big_w + big_pad * 2, big_h + big_pad * 2), 0)
+            ImageDraw.Draw(big).text((big_pad, big_pad - big_top), text, fill=255, font=big_font)
+            return big.resize((w + pad * 2, h + pad * 2), Image.LANCZOS)
+        except Exception:
+            pass
     img = Image.new("L", (w + pad * 2, h + pad * 2), 0)
     ImageDraw.Draw(img).text((pad, pad - top), text, fill=255, font=font)
     return img
+
+
+# ── Blend mode helpers (RGBA-aware, float32 internal) ─────────────────────────
+
+def _to_f32(img: Image.Image) -> np.ndarray:
+    """RGBA -> float32 in [0,1]."""
+    return np.array(img.convert("RGBA"), dtype=np.float32) / 255.0
+
+def _to_rgba(arr: np.ndarray) -> Image.Image:
+    return Image.fromarray(np.clip(arr * 255, 0, 255).astype(np.uint8), "RGBA")
+
+def screen_blend(base: Image.Image, top: Image.Image) -> Image.Image:
+    """Screen blend (1 - (1-a)(1-b)) on RGB, alpha = max(base.a, top.a).
+    Use for additive light effects — glows, highlights — without crushing whites.
+    """
+    a = _to_f32(base); b = _to_f32(top)
+    if a.shape != b.shape:
+        # Conform sizes by pasting onto common canvas
+        size = (max(a.shape[1], b.shape[1]), max(a.shape[0], b.shape[0]))
+        ca = Image.new("RGBA", size, (0, 0, 0, 0)); ca.paste(base, (0, 0), base)
+        cb = Image.new("RGBA", size, (0, 0, 0, 0)); cb.paste(top, (0, 0), top)
+        a = _to_f32(ca); b = _to_f32(cb)
+    out = np.empty_like(a)
+    out[..., :3] = 1.0 - (1.0 - a[..., :3]) * (1.0 - b[..., :3])
+    out[..., 3]  = np.maximum(a[..., 3], b[..., 3])
+    return _to_rgba(out)
+
+def multiply_blend(base: Image.Image, top: Image.Image) -> Image.Image:
+    """Multiply RGB, alpha = base.a * top.a. Use for shadows and tints."""
+    a = _to_f32(base); b = _to_f32(top)
+    if a.shape != b.shape:
+        size = (max(a.shape[1], b.shape[1]), max(a.shape[0], b.shape[0]))
+        ca = Image.new("RGBA", size, (0, 0, 0, 0)); ca.paste(base, (0, 0), base)
+        cb = Image.new("RGBA", size, (0, 0, 0, 0)); cb.paste(top, (0, 0), top)
+        a = _to_f32(ca); b = _to_f32(cb)
+    out = np.empty_like(a)
+    out[..., :3] = a[..., :3] * b[..., :3]
+    out[..., 3]  = a[..., 3] * b[..., 3]
+    return _to_rgba(out)
 
 
 def colorize(mask: Image.Image, stops: list) -> Image.Image:

@@ -379,6 +379,19 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
     return wait({ data_url: `data:image/png;base64,${pixel}` } as unknown as T)
   }
+  // ── Titles — Local AI (FLUX + RMBG via Windows ComfyUI) ───────────
+  if (base === "/titles/flux-local") {
+    const body = init.body ? JSON.parse(init.body as string) : {}
+    const seed = body.seed && body.seed > 0 ? body.seed : 424242
+    // 1x1 transparent PNG — real generation needs ComfyUI online.
+    const pixel =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+    return wait({
+      data_url: `data:image/png;base64,${pixel}`,
+      seed,
+      error: null,
+    } as unknown as T)
+  }
 
   // ── Descriptions regen ────────────────────────────────────────────
   if (base === "/descriptions/regenerate-paragraph") {
