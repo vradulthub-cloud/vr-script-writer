@@ -31,11 +31,15 @@ MEGACMD_DIR = Path(os.environ.get(
 ))
 MEGA_LS = str(MEGACMD_DIR / "mega-ls.bat")
 
-STUDIOS = {
-    "FPVR": "/Grail/FPVR",
-    "VRH":  "/Grail/VRH",
-    "VRA":  "/Grail/VRA",
-    "NJOI": "/Grail/NNJOI",
+# Each studio can have multiple paths (primary + backup). Older VRH/VRA
+# scenes live in /Grail/Backup/{studio}/. Skipping the backup paths means
+# ~175 VRH + ~375 VRA scenes silently look "missing" in the catalog after
+# any on-demand scan — same issue scan_mega.py had before this was fixed.
+STUDIOS: dict[str, list[str]] = {
+    "FPVR": ["/Grail/FPVR"],
+    "VRH":  ["/Grail/VRH",  "/Grail/Backup/VRH"],
+    "VRA":  ["/Grail/VRA",  "/Grail/Backup/VRA"],
+    "NJOI": ["/Grail/NNJOI"],
 }
 
 OUTPUT_FILE = Path(os.path.dirname(__file__)) / "mega_scan.json"
@@ -197,17 +201,20 @@ def _build_scene_dict(scene_id: str, studio: str, file_paths: list[str]) -> dict
     }
 
 
-# Mapping from scene_id prefix → MEGA path (used by hot scan for per-scene lookups)
-_STUDIO_FROM_PREFIX = {
-    "FPVR": ("FPVR", "/Grail/FPVR"),
-    "VRH":  ("VRH",  "/Grail/VRH"),
-    "VRA":  ("VRA",  "/Grail/VRA"),
-    "NJOI": ("NJOI", "/Grail/NNJOI"),
+# Mapping from scene_id prefix → (studio_key, candidate roots). Backup paths
+# are tried as fallback for VRH/VRA so the hot-scan finds older scenes that
+# live in /Grail/Backup/. Primary path is first — if the scene exists there,
+# we use it without making the second call.
+_STUDIO_FROM_PREFIX: dict[str, tuple[str, list[str]]] = {
+    "FPVR": ("FPVR", ["/Grail/FPVR"]),
+    "VRH":  ("VRH",  ["/Grail/VRH",  "/Grail/Backup/VRH"]),
+    "VRA":  ("VRA",  ["/Grail/VRA",  "/Grail/Backup/VRA"]),
+    "NJOI": ("NJOI", ["/Grail/NNJOI"]),
 }
 
 
-def _studio_for_scene_id(scene_id: str) -> tuple[str, str] | None:
-    """FPVR0401 → ('FPVR', '/Grail/FPVR'). None if unrecognized prefix."""
+def _studio_for_scene_id(scene_id: str) -> tuple[str, list[str]] | None:
+    """FPVR0401 → ('FPVR', ['/Grail/FPVR']). None if unrecognized prefix."""
     for prefix, info in _STUDIO_FROM_PREFIX.items():
         if scene_id.startswith(prefix):
             return info
@@ -260,13 +267,19 @@ def run_hot_scan(scene_ids: list[str], progress_callback=None) -> dict:
             info = _studio_for_scene_id(scene_id)
             if not info:
                 continue
-            studio, studio_root = info
-            scene_path = f"{studio_root}/{scene_id}/"
-            try:
-                output = _mega_ls_recursive(scene_path)
-            except (subprocess.TimeoutExpired, RuntimeError) as e:
-                print(f"[WARN] hot scan failed for {scene_id}: {e}", file=sys.stderr)
-                continue
+            studio, studio_roots = info
+            # Try primary first, fall back to backup. Stop at first non-empty hit.
+            output = ""
+            for studio_root in studio_roots:
+                scene_path = f"{studio_root}/{scene_id}/"
+                try:
+                    candidate = _mega_ls_recursive(scene_path)
+                except (subprocess.TimeoutExpired, RuntimeError) as e:
+                    print(f"[WARN] hot scan failed for {scene_id} at {studio_root}: {e}", file=sys.stderr)
+                    continue
+                if candidate.strip():
+                    output = candidate
+                    break
             # mega-ls -R on a specific scene path emits the scene's *subfolders*
             # at level 0 (no scene_id header), so the tree parser — which keys
             # off a level-0 scene row — returns {}. Prepend a synthetic scene
@@ -352,21 +365,34 @@ def _run_scan_locked(progress_callback=None) -> dict:
         except (json.JSONDecodeError, KeyError):
             pass
 
-    for studio, mega_path in STUDIOS.items():
+    for studio, mega_paths in STUDIOS.items():
         if progress_callback:
             progress_callback(f"Scanning {studio}...")
-        try:
-            output = _mega_ls_recursive(mega_path + "/")
-        except (subprocess.TimeoutExpired, RuntimeError) as e:
-            errors.append(f"{studio}: {e}")
-            print(f"[WARN] {studio} scan failed: {e}", file=sys.stderr)
-            # Preserve previous data for this studio
+        # Merge results across primary + backup paths. Primary wins on
+        # collision (older Backup copy doesn't override fresh asset state).
+        scene_files: dict[str, list[str]] = {}
+        path_failures: list[str] = []
+        for mega_path in mega_paths:
+            try:
+                output = _mega_ls_recursive(mega_path + "/")
+            except (subprocess.TimeoutExpired, RuntimeError) as e:
+                path_failures.append(f"{mega_path}: {e}")
+                print(f"[WARN] {studio} scan failed for {mega_path}: {e}", file=sys.stderr)
+                continue
+            for sid, files in _parse_mega_ls_tree(output).items():
+                # Case-insensitive dedupe — backup folders sometimes mix
+                # casing (vrh0002 vs VRH0485 in /Grail/Backup/VRH).
+                if sid not in scene_files and not any(k.lower() == sid.lower() for k in scene_files):
+                    scene_files[sid] = files
+        # If every path failed, preserve previous data for the whole studio.
+        if not scene_files and path_failures:
+            errors.extend(path_failures)
             if studio in prev_scenes_by_studio:
                 all_scenes.extend(prev_scenes_by_studio[studio])
                 print(f"[{studio}] Preserved {len(prev_scenes_by_studio[studio])} scenes from previous scan")
             continue
-
-        scene_files = _parse_mega_ls_tree(output)
+        if path_failures:
+            errors.extend(path_failures)
 
         # Guard: if scan returned 0 scenes but we had data before, keep the old data
         if not scene_files and studio in prev_scenes_by_studio and prev_scenes_by_studio[studio]:
