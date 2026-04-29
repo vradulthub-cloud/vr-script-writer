@@ -18,7 +18,7 @@ import re
 import threading
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel, Field
 
@@ -556,27 +556,65 @@ async def naming_issues(scene_id: str, user: CurrentUser):
 # ---------------------------------------------------------------------------
 
 @router.post("/mega-refresh")
-async def trigger_mega_refresh(user: CurrentUser):
+async def trigger_mega_refresh(user: CurrentUser, background_tasks: BackgroundTasks):
     """
-    Write a trigger file requesting a MEGA scan refresh.
+    Run a fresh MEGA scan and refresh the scenes table.
 
-    The Windows-side mega_scan_worker.py watches for mega_scan_request.json
-    and runs a fresh scan when it appears.
+    History: the original implementation wrote a `mega_scan_request.json`
+    trigger file and assumed a watcher process would pick it up. There was
+    no watcher — the file just accumulated stale entries while the UI
+    button silently did nothing for days. Now we run the scan inline as a
+    FastAPI BackgroundTask: scan_worker.run_scan() rewrites mega_scan.json,
+    then sync_scenes() pulls those flags into SQLite immediately so the
+    user doesn't wait for the next 5-min sync tick.
+
+    The endpoint returns immediately; the scan takes ~30-60s in the
+    background. The dashboard's normal revalidation picks up the fresh
+    data on the next render.
     """
-    import json
-    from datetime import datetime, timezone
-    from api.config import get_settings
+    import sys
+    import os
+    # mega_scan_worker.py lives at the repo root, alongside the api/ package.
+    # Make sure the parent dir is on sys.path before importing.
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
 
-    trigger_path = get_settings().base_dir / "mega_scan_request.json"
-    data = {
-        "requested_at": datetime.now(timezone.utc).isoformat(),
-        "requested_by": user.get("email", user.get("name", "unknown")),
+    def _run_refresh() -> None:
+        """Scan + sync, swallowing exceptions to logs (BackgroundTask runs
+        outside the request scope so a raise here would crash the server
+        worker silently)."""
+        try:
+            import mega_scan_worker  # type: ignore
+            from api import sync_engine
+        except Exception:
+            _log.exception("mega-refresh: import failure")
+            return
+
+        requester = user.get("email", user.get("name", "unknown"))
+        try:
+            _log.info("mega-refresh: starting scan (requested by %s)", requester)
+            result = mega_scan_worker.run_scan()
+            _log.info(
+                "mega-refresh: scan complete (%d scenes scanned at %s)",
+                len(result.get("scenes", [])),
+                result.get("scanned_at", ""),
+            )
+        except Exception:
+            _log.exception("mega-refresh: scan failed")
+            return
+
+        try:
+            count = sync_engine.sync_scenes()
+            _log.info("mega-refresh: re-synced %d scenes into SQLite", count)
+        except Exception:
+            _log.exception("mega-refresh: sync_scenes failed")
+
+    background_tasks.add_task(_run_refresh)
+    return {
+        "status": "started",
+        "message": "MEGA scan running — fresh asset flags in ~30-60s.",
     }
-    try:
-        trigger_path.write_text(json.dumps(data))
-        return {"status": "triggered", "message": "MEGA scan requested — worker will run shortly"}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to write trigger file: {exc}")
 
 
 class FolderCreateBody(BaseModel):
