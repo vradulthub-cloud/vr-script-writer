@@ -1094,34 +1094,5 @@ def texture_modulate(mask: Image.Image, base_rgba: Image.Image,
     return Image.fromarray((out * 255).astype(np.uint8), "RGBA")
 
 
-def screen_blend(base: Image.Image, top: Image.Image) -> Image.Image:
-    """Screen blend (1 - (1-a)(1-b)) on RGB. Use for additive light/glow."""
-    a = np.array(base.convert("RGBA"), dtype=np.float32) / 255.0
-    b = np.array(top.convert("RGBA"), dtype=np.float32) / 255.0
-    if a.shape != b.shape:
-        size = (max(a.shape[1], b.shape[1]), max(a.shape[0], b.shape[0]))
-        ca = Image.new("RGBA", size, (0, 0, 0, 0)); ca.paste(base, (0, 0), base)
-        cb = Image.new("RGBA", size, (0, 0, 0, 0)); cb.paste(top, (0, 0), top)
-        a = np.array(ca, dtype=np.float32) / 255.0
-        b = np.array(cb, dtype=np.float32) / 255.0
-    out = np.empty_like(a)
-    out[..., :3] = 1.0 - (1.0 - a[..., :3]) * (1.0 - b[..., :3])
-    out[..., 3]  = np.maximum(a[..., 3], b[..., 3])
-    return Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8), "RGBA")
-
-
-def multiply_blend(base: Image.Image, top: Image.Image) -> Image.Image:
-    """Multiply RGB + alpha. Use for tints and shadow grading."""
-    a = np.array(base.convert("RGBA"), dtype=np.float32) / 255.0
-    b = np.array(top.convert("RGBA"), dtype=np.float32) / 255.0
-    if a.shape != b.shape:
-        size = (max(a.shape[1], b.shape[1]), max(a.shape[0], b.shape[0]))
-        ca = Image.new("RGBA", size, (0, 0, 0, 0)); ca.paste(base, (0, 0), base)
-        cb = Image.new("RGBA", size, (0, 0, 0, 0)); cb.paste(top, (0, 0), top)
-        a = np.array(ca, dtype=np.float32) / 255.0
-        b = np.array(cb, dtype=np.float32) / 255.0
-    out = np.empty_like(a)
-    out[..., :3] = a[..., :3] * b[..., :3]
-    out[..., 3]  = a[..., 3] * b[..., 3]
-    return Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8), "RGBA")
+# screen_blend / multiply_blend are defined earlier in this file (~line 197).
 
