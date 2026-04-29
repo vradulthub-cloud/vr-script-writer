@@ -657,20 +657,26 @@ def sync_scripts() -> int:
         except (ValueError, IndexError):
             return (0, 0)
 
-    # Sort all tabs by date, filter to those <= current month (exclude future placeholders)
+    # Window: 6 months past through 2 months future. The forward window is
+    # what the user actually plans into — they create the next-month tab
+    # and start dropping shoot rows in well before the month begins. Earlier
+    # logic excluded all future tabs and broke planning workflow on the very
+    # last day of the prior month.
     now_dt = datetime.now(timezone.utc)
-    def _is_past_or_current(tab_name: str) -> bool:
+    now_epoch = now_dt.year * 12 + now_dt.month
+    def _within_sync_window(tab_name: str) -> bool:
         parts = tab_name.rsplit(" ", 1)
         try:
             month_idx = list(month_name).index(parts[0].capitalize())
             year = int(parts[1])
-            return (year, month_idx) <= (now_dt.year, now_dt.month)
         except (ValueError, IndexError):
             return False
+        delta = (year * 12 + month_idx) - now_epoch
+        return -6 <= delta <= 2
 
-    past_tabs = [t for t in valid_tabs if _is_past_or_current(t)]
-    sorted_tabs = sorted(past_tabs, key=_tab_sort_key, reverse=True)
-    tabs_to_sync = sorted_tabs[:3]  # current + last 2
+    windowed_tabs = [t for t in valid_tabs if _within_sync_window(t)]
+    sorted_tabs = sorted(windowed_tabs, key=_tab_sort_key, reverse=True)
+    tabs_to_sync = sorted_tabs[:5]  # near future + current + recent past
 
     now = datetime.now(timezone.utc).isoformat()
     total_count = 0
