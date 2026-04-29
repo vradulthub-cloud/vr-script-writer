@@ -360,16 +360,8 @@ def _build_desc_user_prompt(body: DescGenRequest) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Save description as DOCX to MEGA Description/ folder
+# Save description as DOCX to MEGA S4 Description/ folder
 # ---------------------------------------------------------------------------
-
-_STUDIO_TO_MEGA: dict[str, str] = {
-    "FuckPassVR": "FPVR",
-    "VRHush":     "VRH",
-    "VRAllure":   "VRA",
-    "NaughtyJOI": "NNJOI",
-}
-
 
 class DescSaveMegaBody(BaseModel):
     scene_id: str
@@ -379,44 +371,38 @@ class DescSaveMegaBody(BaseModel):
     meta_description: str | None = None
 
 
-# rclone lives at a fixed path; the NSSM service runs as LocalSystem so we
-# must explicitly point at the andre-user's config file.
-_RCLONE = r"C:\Users\andre\rclone.exe"
-_RCLONE_CONF = r"C:\Users\andre\.config\rclone\rclone.conf"
-
-
-def _upload_description_to_mega(tmp_dir: str, mega_path: str, scene_id: str) -> None:
-    """Background worker: copies the DOCX up to MEGA, then cleans up."""
+def _upload_description_to_mega(src_path: str, studio: str, key: str, scene_id: str) -> None:
+    """Background worker: PUTs the DOCX to S4, then cleans up the temp file."""
+    import s4_client
     try:
-        r = subprocess.run(
-            [_RCLONE, "--config", _RCLONE_CONF, "copy", tmp_dir, mega_path],
-            capture_output=True, text=True, timeout=600,
+        s4_client.put_object(
+            studio, key, src_path,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
-        if r.returncode == 0:
-            _log.info("save-mega %s: uploaded to %s", scene_id, mega_path)
-        else:
-            _log.error(
-                "save-mega %s: rclone exit=%d stderr=%r",
-                scene_id, r.returncode, r.stderr[:400],
-            )
+        _log.info("save-mega %s: uploaded to s3://%s/%s", scene_id,
+                  s4_client.STUDIO_BUCKETS.get(studio, studio), key)
     except Exception:
         _log.exception("save-mega %s: background upload failed", scene_id)
     finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        try:
+            Path(src_path).unlink(missing_ok=True)
+            Path(src_path).parent.rmdir()
+        except OSError:
+            shutil.rmtree(Path(src_path).parent, ignore_errors=True)
 
 
 @router.post("/save-mega")
 async def save_description_to_mega(body: DescSaveMegaBody, user: CurrentUser):
     """
     Build a DOCX from the description and upload it to the scene's
-    MEGA Description/ subfolder. Returns immediately — rclone runs in a
-    background thread because MEGA uploads can take 1-2 minutes and the
-    browser's fetch would time out waiting for the response.
+    Description/ subfolder in S4. Returns immediately — boto3 upload runs in
+    a background thread (large/slow scenes shouldn't block the request).
     """
     import threading
     from io import BytesIO
     from docx import Document
     from docx.shared import Pt, RGBColor
+    import s4_client
 
     with get_db() as conn:
         row = conn.execute(
@@ -427,9 +413,11 @@ async def save_description_to_mega(body: DescSaveMegaBody, user: CurrentUser):
         scene = dict(row)
         conn.execute("UPDATE scenes SET has_description=1 WHERE id=?", (body.scene_id,))
 
-    mega_studio = _STUDIO_TO_MEGA.get(scene["studio"], scene.get("grail_tab", scene["studio"]))
-    mega_path = f"mega:/Grail/{mega_studio}/{body.scene_id}/Description/"
+    # s4_client._STUDIO_ALIASES handles both UI names ("FuckPassVR") and
+    # Grail-tab codes ("NNJOI") — pass whichever the DB has.
+    studio_id = scene["studio"] or scene.get("grail_tab") or ""
     filename = f"{body.scene_id}_description.docx"
+    key = s4_client.key_for(body.scene_id, "Description", filename)
 
     # Build DOCX
     doc = Document()
@@ -455,15 +443,15 @@ async def save_description_to_mega(body: DescSaveMegaBody, user: CurrentUser):
     doc.save(buf)
     buf.seek(0)
 
-    # Write DOCX to a fresh tmp dir; the worker thread will clean it up
-    # once rclone finishes (success or failure).
+    # Write DOCX to a fresh tmp dir; the worker thread cleans up after upload.
     tmp_dir = tempfile.mkdtemp()
-    (Path(tmp_dir) / filename).write_bytes(buf.read())
-    _log.info("save-mega %s: queued upload of %s -> %s", body.scene_id, filename, mega_path)
+    src_path = Path(tmp_dir) / filename
+    src_path.write_bytes(buf.read())
+    _log.info("save-mega %s: queued upload of %s -> s4 %s", body.scene_id, filename, key)
 
     threading.Thread(
         target=_upload_description_to_mega,
-        args=(tmp_dir, mega_path, body.scene_id),
+        args=(str(src_path), studio_id, key, body.scene_id),
         daemon=True,
     ).start()
 

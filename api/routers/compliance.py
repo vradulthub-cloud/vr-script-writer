@@ -80,15 +80,9 @@ MALE_TPLS: dict[str, str] = {
 }
 DATE_FIELDS = {"Date 1", "Date 2", "Custom Field 13"}
 
-_RCLONE = r"C:\Users\andre\rclone.exe"
-_RCLONE_CONF = r"C:\Users\andre\.config\rclone\rclone.conf"
-
-STUDIO_TO_MEGA: dict[str, str] = {
-    "FuckPassVR": "FPVR",
-    "VRHush":     "VRH",
-    "VRAllure":   "VRA",
-    "NaughtyJOI": "NNJOI",
-}
+# S4 mapping is centralized in s4_client._STUDIO_ALIASES — accept the legacy
+# UI/Grail-tab names and resolve at upload time.
+import s4_client
 
 
 # ─── Response models ──────────────────────────────────────────────────────────
@@ -871,20 +865,15 @@ async def upload_photos(
             for (label, content, _mime) in file_tuples:
                 if label in uploaded:
                     (Path(tmp_dir) / label).write_bytes(content)
-            mega_studio = STUDIO_TO_MEGA.get(studio, studio)
-            mega_path = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/"
             try:
-                r = await asyncio.to_thread(
-                    subprocess.run,
-                    [_RCLONE, "--config", _RCLONE_CONF, "copy", tmp_dir, mega_path],
-                    capture_output=True, text=True, timeout=120,
-                )
-                if r.returncode == 0:
-                    mega_paths = [f"{mega_path}{n}" for n in uploaded]
-                else:
-                    errors.append(f"MEGA: {r.stderr[:200]}")
+                bucket = s4_client.STUDIO_BUCKETS[s4_client._STUDIO_ALIASES.get(studio, studio).upper()]
+                for label in uploaded:
+                    key = s4_client.key_for(scene_id, "Legal", label)
+                    src = Path(tmp_dir) / label
+                    await asyncio.to_thread(s4_client.put_object, studio, key, src)
+                    mega_paths.append(f"s3://{bucket}/{key}")
             except Exception as exc:
-                errors.append(f"MEGA: {exc}")
+                errors.append(f"S4: {exc}")
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -948,24 +937,28 @@ async def mega_sync(
             except Exception as exc:
                 _log.warning("sync download failed %s: %s", name, exc)
 
-        mega_studio = STUDIO_TO_MEGA.get(studio, studio)
-        mega_path = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/"
-        r = subprocess.run(
-            [_RCLONE, "--config", _RCLONE_CONF, "copy", tmp_dir, mega_path],
-            capture_output=True, text=True, timeout=300,
-        )
-        if r.returncode == 0:
+        bucket = s4_client.STUDIO_BUCKETS[s4_client._STUDIO_ALIASES.get(studio, studio).upper()]
+        s4_prefix = s4_client.key_for(scene_id, "Legal") + "/"
+        try:
+            uploaded = 0
+            for f in Path(tmp_dir).iterdir():
+                if not f.is_file():
+                    continue
+                key = s4_prefix + f.name
+                s4_client.put_object(studio, key, f)
+                uploaded += 1
             return MegaSyncResult(
                 status="ok",
-                mega_path=mega_path,
-                files_copied=downloaded,
-                message=f"Copied {downloaded} file(s) to MEGA",
+                mega_path=f"s3://{bucket}/{s4_prefix}",
+                files_copied=uploaded,
+                message=f"Copied {uploaded} file(s) to S4",
             )
-        return MegaSyncResult(
-            status="error",
-            mega_path=mega_path,
-            message=r.stderr[:300] or "rclone error",
-        )
+        except Exception as exc:
+            return MegaSyncResult(
+                status="error",
+                mega_path=f"s3://{bucket}/{s4_prefix}",
+                message=str(exc)[:300],
+            )
     except Exception as exc:
         return MegaSyncResult(status="error", message=str(exc))
     finally:
@@ -1254,18 +1247,18 @@ def _legal_pdf_dir() -> Path:
     return p
 
 
-def _push_to_mega(local: Path, remote: str) -> Optional[str]:
-    """copyto local → mega path; returns stderr on failure, None on success."""
+def _push_to_mega(local: Path, studio: str, key: str) -> Optional[str]:
+    """Upload `local` to S4 at studio/key; returns error string on failure, None on success.
+
+    Function name is preserved (rather than _push_to_s4) so the four legacy
+    callsites read straightforwardly. Studio identifier is resolved by
+    s4_client to its bucket; key is bucket-rooted (e.g. "VRH0030/Legal/x.pdf").
+    """
     try:
-        r = subprocess.run(
-            [_RCLONE, "--config", _RCLONE_CONF, "copyto", str(local), remote],
-            capture_output=True, text=True, timeout=120,
-        )
-        if r.returncode == 0:
-            return None
-        return (r.stderr or "rclone failed")[:300]
+        s4_client.put_object(studio, key, local)
+        return None
     except Exception as exc:
-        return str(exc)
+        return str(exc)[:300]
 
 
 @router.post("/shoots/{shoot_id}/sign", response_model=SignResult)
@@ -1350,17 +1343,18 @@ async def sign_shoot(shoot_id: str, user: CurrentUser, request: Request, body: S
         output_path=pdf_path,
     )
 
-    # 3. Push to MEGA
-    mega_studio = STUDIO_TO_MEGA.get(studio, studio)
-    mega_remote = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/{pdf_name}"
+    # 3. Push to MEGA S4
+    mega_remote = ""
     mega_err: Optional[str] = None
     if scene_id:
-        mega_err = _push_to_mega(pdf_path, mega_remote)
+        s4_key = s4_client.key_for(scene_id, "Legal", pdf_name)
+        bucket = s4_client.STUDIO_BUCKETS[s4_client._STUDIO_ALIASES.get(studio, studio).upper()]
+        mega_remote = f"s3://{bucket}/{s4_key}"
+        mega_err = _push_to_mega(pdf_path, studio, s4_key)
         if mega_err:
-            _log.warning("MEGA push failed for %s: %s", pdf_name, mega_err)
+            _log.warning("S4 push failed for %s: %s", pdf_name, mega_err)
     else:
-        _log.warning("Skipping MEGA push: no scene_id for %s", shoot_id)
-        mega_remote = ""
+        _log.warning("Skipping S4 push: no scene_id for %s", shoot_id)
 
     # 4. Persist
     upsert_signature(
@@ -1560,7 +1554,6 @@ async def import_from_drive(
     primary = bg_scenes[0]
     scene_id = primary.scene_id or ""
     studio = primary.studio or ""
-    mega_studio = STUDIO_TO_MEGA.get(studio, studio)
 
     shoot_date_obj = _parse_shoot_date(shoot.shoot_date)
     if not shoot_date_obj:
@@ -1622,14 +1615,16 @@ async def import_from_drive(
         sig_path = _signature_dir() / f"{shoot.shoot_date}-{slug}-{role}.png"
         sig_path.write_bytes(placeholder_png)
 
-        # Push to MEGA
+        # Push to MEGA S4
         mega_remote = ""
         mega_err: Optional[str] = None
         if scene_id:
-            mega_remote = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/{pdf_name}"
-            mega_err = await asyncio.to_thread(_push_to_mega, pdf_path, mega_remote)
+            s4_key = s4_client.key_for(scene_id, "Legal", pdf_name)
+            bucket = s4_client.STUDIO_BUCKETS[s4_client._STUDIO_ALIASES.get(studio, studio).upper()]
+            mega_remote = f"s3://{bucket}/{s4_key}"
+            mega_err = await asyncio.to_thread(_push_to_mega, pdf_path, studio, s4_key)
             if mega_err:
-                _log.warning("MEGA push failed for %s: %s", pdf_name, mega_err)
+                _log.warning("S4 push failed for %s: %s", pdf_name, mega_err)
 
         # Insert compliance_signatures row — W-9/2257 fields stay empty, the
         # linked PDF is the legal record. legal_name defaults to the talent
@@ -1821,16 +1816,16 @@ async def upload_compliance_photo(
     dest = _photo_dir(shoot_id) / f"{safe_slot}__{safe_label}"
     dest.write_bytes(content)
 
-    # Push to MEGA when we know the scene
+    # Push to MEGA S4 when we know the scene
     mega_path = ""
     if scene_id and studio:
-        mega_studio = STUDIO_TO_MEGA.get(studio, studio)
-        mega_remote = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/{safe_label}"
-        err = await asyncio.to_thread(_push_to_mega, dest, mega_remote)
+        s4_key = s4_client.key_for(scene_id, "Legal", safe_label)
+        bucket = s4_client.STUDIO_BUCKETS[s4_client._STUDIO_ALIASES.get(studio, studio).upper()]
+        err = await asyncio.to_thread(_push_to_mega, dest, studio, s4_key)
         if err:
-            _log.warning("MEGA push failed for photo %s: %s", safe_label, err)
+            _log.warning("S4 push failed for photo %s: %s", safe_label, err)
         else:
-            mega_path = mega_remote
+            mega_path = f"s3://{bucket}/{s4_key}"
 
     _db_upsert_photo(
         shoot_id=shoot_id,
@@ -2193,7 +2188,6 @@ async def bulk_import_from_drive(
             primary = bg_scenes[0]
             scene_id = primary.scene_id or ""
             studio = primary.studio or ""
-            mega_studio = STUDIO_TO_MEGA.get(studio, studio)
 
             db_female = shoot.female_talent.replace(" ", "")
             db_male   = (shoot.male_talent or "").replace(" ", "")
@@ -2226,10 +2220,12 @@ async def bulk_import_from_drive(
                 mega_remote = ""
                 mega_err: Optional[str] = None
                 if scene_id:
-                    mega_remote = f"mega:/Grail/{mega_studio}/{scene_id}/Legal/{pdf_name}"
-                    mega_err = await asyncio.to_thread(_push_to_mega, pdf_path, mega_remote)
+                    s4_key = s4_client.key_for(scene_id, "Legal", pdf_name)
+                    bucket = s4_client.STUDIO_BUCKETS[s4_client._STUDIO_ALIASES.get(studio, studio).upper()]
+                    mega_remote = f"s3://{bucket}/{s4_key}"
+                    mega_err = await asyncio.to_thread(_push_to_mega, pdf_path, studio, s4_key)
                     if mega_err:
-                        _log.warning("MEGA push failed for %s: %s", pdf_name, mega_err)
+                        _log.warning("S4 push failed for %s: %s", pdf_name, mega_err)
 
                 upsert_signature(
                     shoot_id=shoot.shoot_id,
