@@ -289,17 +289,28 @@ class FluxLocalResponse(BaseModel):
 
 
 def _build_flux_workflow(req: FluxLocalRequest, seed: int) -> dict:
-    """Render the workflow JSON template with this request's parameters."""
+    """Render the workflow JSON template with this request's parameters.
+
+    Uses str.replace() rather than str.format() because the JSON file's own
+    {…} braces (object/array syntax, plus the documentation _comment field)
+    confuse format-spec parsing.
+    """
     template = _WORKFLOW_PATH.read_text()
-    populated = template.format(
-        prompt=_FLUX_PROMPT_PREFIX.format(text=req.text.replace('"', "'")),
-        seed=seed,
-        steps=max(1, min(8, req.steps)),
-        lora_name=_FLUX_TITLE_LORA if req.use_lora else "",
-        lora_strength=0.85 if req.use_lora else 0.0,
-        width=req.width - (req.width % 64) or 1024,
-        height=req.height - (req.height % 64) or 512,
-    )
+    prompt_text = _FLUX_PROMPT_PREFIX.replace("{text}", req.text.replace('"', "'"))
+    width  = req.width  - (req.width  % 64) or 1024
+    height = req.height - (req.height % 64) or 512
+    subs = {
+        "{prompt}":         json.dumps(prompt_text)[1:-1],   # JSON-escape
+        "{seed}":           str(seed),
+        "{steps}":          str(max(1, min(8, req.steps))),
+        "{lora_name}":      _FLUX_TITLE_LORA if req.use_lora else "",
+        "{lora_strength}":  f"{0.85 if req.use_lora else 0.0:.2f}",
+        "{width}":          str(width),
+        "{height}":         str(height),
+    }
+    populated = template
+    for k, v in subs.items():
+        populated = populated.replace(k, v)
     graph = json.loads(populated)
     # Remove the human-readable comment; ComfyUI rejects unknown keys at top level.
     graph.pop("_comment", None)
