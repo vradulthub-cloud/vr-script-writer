@@ -25,8 +25,8 @@ Usage:
     will be pulled into the compilation.
 
 Requirements:
-    pip install Pillow
-    rclone configured with mega_test remote (Mac) or mega (Windows)
+    pip install Pillow boto3
+    S4 creds available via s4_client (~/.config/eclatech/s4.env or NSSM env)
 """
 
 import argparse
@@ -54,72 +54,49 @@ LOGOS = {
     "NJOI": os.path.join(LOGO_DIR, "NJOI.png"),
 }
 
-# MEGA studio folder names
-MEGA_STUDIO = {"FPVR": "FPVR", "VRH": "VRH", "VRA": "VRA", "NJOI": "NNJOI"}
-RCLONE_REMOTE = "mega_test"
+import s4_client
 
 # Web JPEG quality — matches the ~8-9% file-size ratio seen in real photosets
 WEB_JPEG_QUALITY = 55
 
 
-# ── MEGA helpers ──────────────────────────────────────────────────────────────
+# ── MEGA S4 helpers ───────────────────────────────────────────────────────────
 
 def get_studio(grail_id: str) -> str:
     m = re.match(r'^([A-Za-z]+)', grail_id)
     return m.group(1).upper() if m else ""
 
 
-def _find_mega_photos_path(grail_id: str) -> str:
-    """Locate the Photos/ folder for a scene on MEGA (main or Backup)."""
-    studio = get_studio(grail_id)
-    m_studio = MEGA_STUDIO.get(studio, studio)
-    candidates = [
-        f"{RCLONE_REMOTE}:/Grail/{m_studio}/{grail_id}/Photos/",
-        f"{RCLONE_REMOTE}:/Grail/Backup/{m_studio}/{grail_id}/Photos/",
-        f"{RCLONE_REMOTE}:/Grail/Backup/{m_studio}/{grail_id.lower()}/Photos/",
-    ]
-    for path in candidates:
-        result = subprocess.run(
-            ["rclone", "lsf", path],
-            capture_output=True, text=True, timeout=60
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return path
-    raise RuntimeError(
-        f"Photos folder not found for {grail_id}. Tried:\n"
-        + "\n".join(f"  - {c}" for c in candidates)
-    )
-
-
 def download_photo_zip(grail_id: str, tmp_dir: str) -> str:
-    """Download the Photos ZIP for a scene from MEGA. Returns local zip path."""
-    remote = _find_mega_photos_path(grail_id)
+    """Download the Photos ZIP for a scene from S4. Returns local zip path.
 
-    result = subprocess.run(
-        ["rclone", "lsf", remote],
-        capture_output=True, text=True, timeout=30
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Cannot list {remote}: {result.stderr.strip()}")
+    Picks the largest ZIP under the scene's Photos/ prefix — some scenes
+    have multiple (e.g. NJOI0001 has both `NJOI0001.zip` and `_NJOI0001.zip`)
+    and the underscore-prefix version is typically a higher-res master.
+    """
+    studio = get_studio(grail_id)
+    if not studio:
+        raise RuntimeError(f"Could not parse studio from grail_id {grail_id!r}")
+    sid = s4_client.normalize_scene_id(grail_id)
+    prefix = f"{sid}/Photos/"
+    zips = []
+    # Cover both casings — scan_mega.py canonicalizes to uppercase but a few
+    # VRH scenes still have lowercase prefixes in S4 until rename runs.
+    for prefix_form in (prefix, prefix.lower()):
+        for obj in s4_client.list_objects(studio, prefix=prefix_form):
+            if obj["key"].lower().endswith(".zip"):
+                zips.append(obj)
+        if zips:
+            break
 
-    zips = [f.strip() for f in result.stdout.strip().splitlines()
-            if f.strip().lower().endswith(".zip")]
     if not zips:
-        raise RuntimeError(f"No ZIP found at {remote}")
+        raise RuntimeError(f"No Photos ZIP found in s4 for {grail_id}")
 
-    zip_name = zips[0]
-    print(f"  Downloading {zip_name} ...")
-    dl_result = subprocess.run(
-        ["rclone", "copy", f"{remote}{zip_name}", tmp_dir, "--progress"],
-        timeout=1800
-    )
-    if dl_result.returncode != 0:
-        raise RuntimeError(f"Download failed for {grail_id}")
-
-    src = os.path.join(tmp_dir, zip_name)
+    chosen = max(zips, key=lambda o: o["size"])
+    zip_name = os.path.basename(chosen["key"])
+    print(f"  Downloading {zip_name} ({chosen['size'] / 1e6:.1f} MB) ...")
     dst = os.path.join(tmp_dir, f"{grail_id}.zip")
-    if src != dst and os.path.exists(src):
-        shutil.move(src, dst)
+    s4_client.get_object(studio, chosen["key"], dst)
     return dst
 
 

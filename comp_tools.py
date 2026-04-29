@@ -34,9 +34,7 @@ COL_CAST  = 4
 COL_CATS  = 5
 COL_TAGS  = 6
 
-# MEGA remote + paths
-MEGA_REMOTE = "mega_test"
-MEGA_STUDIO = {"FPVR": "FPVR", "VRH": "VRH", "VRA": "VRA", "NJOI": "NNJOI"}
+# MEGA studio identifiers are now resolved via s4_client._STUDIO_ALIASES.
 
 
 def _get_gc():
@@ -118,145 +116,87 @@ def find_grail_id(title: str, scenes: list[dict]) -> dict | None:
 
 MEGA_SUBFOLDERS = ["Description", "Legal", "Photos", "Storyboard", "Video Thumbnail", "Videos"]
 
-# rclone path — full path on Windows where it's not in system PATH
-import platform as _platform
-if _platform.system() == "Windows":
-    _RCLONE = r"C:\Users\andre\rclone.exe"
-    _RCLONE_CONF = r"C:\Users\andre\.config\rclone\rclone.conf"
-    _RCLONE_BASE = [_RCLONE, "--config", _RCLONE_CONF]
-    MEGA_REMOTE = "mega"  # override — Windows config uses "mega" not "mega_test"
-else:
-    _RCLONE_BASE = ["rclone"]
-
-_mega_folder_cache: dict[str, set[str]] = {}  # studio → set of grail_ids in main path
-_mega_folder_cache_ts: dict[str, float] = {}  # studio → timestamp
-_MEGA_CACHE_TTL = 3600  # 1 hour
+import s4_client
 
 
 def create_mega_folder(grail_id: str) -> str:
+    """No-op on S4 — buckets don't need pre-created folders, keys are flat.
+
+    Kept for callsite compatibility. Returns the s3:// path of where the
+    scene's content will live, in case callers display it as confirmation.
     """
-    Create a new scene folder on MEGA with the standard subfolder structure.
-    Uses rclone copy with a local scaffold to create all dirs in one shot.
-    Returns the MEGA path of the created folder.
-    """
-    import subprocess, tempfile, shutil
     _m_id = re.match(r'^([A-Za-z]+)', grail_id)
     if not _m_id:
         raise ValueError(f"Invalid grail_id format: {grail_id}")
     studio = _m_id.group(1).upper()
-    m_stu  = MEGA_STUDIO.get(studio, studio)
-    remote = f"{MEGA_REMOTE}:/Grail/{m_stu}/{grail_id}/"
-
-    # Build local scaffold with .keep files so rclone uploads empty dirs
-    tmp = tempfile.mkdtemp(prefix="mega_scaffold_")
-    try:
-        for sub in MEGA_SUBFOLDERS:
-            d = os.path.join(tmp, sub)
-            os.makedirs(d)
-            open(os.path.join(d, ".keep"), "w").close()
-
-        r = subprocess.run(
-            [*_RCLONE_BASE, "copy", tmp, remote, "--create-empty-src-dirs"],
-            capture_output=True, text=True, timeout=120
-        )
-        if r.returncode != 0:
-            raise RuntimeError(f"rclone copy failed: {r.stderr.strip()}")
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-    return remote
-
-def _load_mega_folder_list(studio: str) -> set[str]:
-    """Scan MEGA folder names for a studio. Cached with 1-hour TTL."""
-    import subprocess
-    if studio in _mega_folder_cache:
-        age = time.time() - _mega_folder_cache_ts.get(studio, 0)
-        if age < _MEGA_CACHE_TTL:
-            return _mega_folder_cache[studio]
-    m_stu = MEGA_STUDIO.get(studio, studio)
-    ids = set()
-    try:
-        r = subprocess.run(
-            [*_RCLONE_BASE, "lsf", f"{MEGA_REMOTE}:/Grail/{m_stu}/", "--max-depth", "1"],
-            capture_output=True, text=True, timeout=60
-        )
-        if r.returncode == 0:
-            for line in r.stdout.strip().splitlines():
-                ids.add(line.strip().rstrip("/").upper())
-    except Exception:
-        pass
-    _mega_folder_cache[studio] = ids
-    _mega_folder_cache_ts[studio] = time.time()
-    return ids
+    bucket = s4_client.STUDIO_BUCKETS[studio]
+    sid = s4_client.normalize_scene_id(grail_id)
+    return f"s3://{bucket}/{sid}/"
 
 
 def mega_path(grail_id: str) -> str:
-    """Return the MEGA rclone path for a scene's folder.
-    Uses cached folder listing to pick main vs Backup path."""
+    """Return the s3:// URI for a scene's folder. The /Grail/Backup/ branch
+    that the legacy MEGA used is gone — backups were merged in the migration."""
     _m_id = re.match(r'^([A-Za-z]+)', grail_id)
     if not _m_id:
         raise ValueError(f"Invalid grail_id format: {grail_id}")
     studio = _m_id.group(1).upper()
-    m_stu  = MEGA_STUDIO.get(studio, studio)
-    main_ids = _load_mega_folder_list(studio)
-    if grail_id.upper() in main_ids:
-        return f"{MEGA_REMOTE}:/Grail/{m_stu}/{grail_id}/"
-    # Older scene — Backup folder
-    return f"{MEGA_REMOTE}:/Grail/Backup/{m_stu}/{grail_id}/"
+    bucket = s4_client.STUDIO_BUCKETS[studio]
+    sid = s4_client.normalize_scene_id(grail_id)
+    return f"s3://{bucket}/{sid}/"
 
 
-_megacmd_started = False
+def _pick_share_object(studio: str, scene_id: str) -> str | None:
+    """Choose which object to presign for a 'shareable scene' link.
+
+    Strategy: prefer the largest video in Videos/ (the .mp4 most recipients
+    actually want); fall back to the description docx; fall back to any
+    object under the scene prefix. Returns the canonical key or None if the
+    scene has no objects.
+    """
+    canonical = s4_client.normalize_scene_id(scene_id)
+    # Try the canonical (uppercase) prefix first; resolve_key handles the few
+    # lowercase VRH scenes if they're still around at call time.
+    for prefix_form in (canonical, canonical.lower()):
+        videos = []
+        any_obj = None
+        desc = None
+        for obj in s4_client.list_objects(studio, prefix=f"{prefix_form}/"):
+            if obj["key"].endswith("/") and obj["size"] == 0:
+                continue
+            any_obj = obj
+            rel = obj["key"][len(prefix_form) + 1:]
+            if rel.startswith("Videos/") and rel.lower().endswith(".mp4"):
+                videos.append(obj)
+            elif rel.startswith("Description/") and rel.lower().endswith(".docx"):
+                desc = obj
+        if videos:
+            return max(videos, key=lambda o: o["size"])["key"]
+        if desc:
+            return desc["key"]
+        if any_obj:
+            return any_obj["key"]
+    return None
+
 
 def mega_export_link(grail_id: str) -> str:
-    """Get a shareable MEGA URL for a scene folder using MEGAcmd.
-    Only works on Windows where MEGAcmd is installed.
-    Returns the URL or falls back to the rclone path."""
-    import subprocess
-    global _megacmd_started
-    if _platform.system() != "Windows":
-        return mega_path(grail_id)
+    """Return a shareable URL for a scene. Presigns the scene's primary video
+    (largest .mp4 in Videos/) with a 7-day TTL — the SigV4 maximum. The
+    weekly refresh_comp_links cron regenerates these so the URLs stored in
+    Sheets stay valid.
 
-    MEGACMD = r"C:\Users\andre\AppData\Local\MEGAcmd"
-    EXPORT = os.path.join(MEGACMD, "mega-export.bat")
-
-    # Ensure MEGAcmd server is running (once per process)
-    if not _megacmd_started:
-        subprocess.Popen(
-            [os.path.join(MEGACMD, "MEGAcmdServer.exe")],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-        time.sleep(3)
-        _megacmd_started = True
-
-    # Get the internal MEGA path
-    rpath = mega_path(grail_id)
-    internal = "/" + rpath.split(":/", 1)[1].rstrip("/")
-
-    def _extract_url(text):
-        m = re.search(r'https://mega\.nz/folder/[A-Za-z0-9_#-]+', text)
-        return m.group(0) if m else None
-
+    Returns "" if the scene has no objects we can share."""
+    _m_id = re.match(r'^([A-Za-z]+)', grail_id)
+    if not _m_id:
+        raise ValueError(f"Invalid grail_id format: {grail_id}")
+    studio = _m_id.group(1).upper()
     try:
-        # Try to create new export
-        r = subprocess.run(
-            [EXPORT, "-a", internal],
-            capture_output=True, text=True, timeout=30
-        )
-        url = _extract_url(r.stdout + " " + r.stderr)
-        if url:
-            return url
-
-        # Already exported — list existing link
-        r2 = subprocess.run(
-            [EXPORT, internal],
-            capture_output=True, text=True, timeout=30
-        )
-        url = _extract_url(r2.stdout + " " + r2.stderr)
-        if url:
-            return url
+        key = _pick_share_object(studio, grail_id)
+        if not key:
+            return ""
+        return s4_client.presign(studio, key)
     except Exception:
-        pass
-    return mega_path(grail_id)  # fallback
+        return ""
 
 
 # ── Comp sheet writer ─────────────────────────────────────────────────────────
