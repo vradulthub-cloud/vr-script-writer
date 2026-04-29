@@ -410,6 +410,11 @@ export interface Shoot {
   female_payment_name?: string
   male_rate?: string
   male_payment_name?: string
+  // Pre-joined script rows for this shoot (date + female_talent match).
+  // Embedded by the backend so ShootModal can render scripts instantly
+  // instead of round-tripping /api/scripts/ per studio. Optional for
+  // backward compat — falls back to per-studio fetch when missing.
+  scripts?: Script[]
 }
 
 export interface LegalDocFile {

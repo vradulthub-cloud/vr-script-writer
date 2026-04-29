@@ -119,6 +119,27 @@ class BoardShootScene(BaseModel):
     assets: list[SceneAssetState]
 
 
+class ShootScriptSummary(BaseModel):
+    """Subset of api.routers.scripts.ScriptResponse — embedded directly in
+    the Shoot DTO so the frontend modal can render scripts without firing
+    a separate per-studio /scripts/ fetch on every open."""
+    id: int
+    tab_name: str
+    sheet_row: int
+    studio: str
+    shoot_date: str
+    female: str
+    male: str = ""
+    theme: str = ""
+    plot: str = ""
+    title: str = ""
+    script_status: str = ""
+    wardrobe_f: str = ""
+    wardrobe_m: str = ""
+    shoot_location: str = ""
+    props: str = ""
+
+
 class Shoot(BaseModel):
     shoot_id: str
     shoot_date: str
@@ -135,6 +156,10 @@ class Shoot(BaseModel):
     status: str = "active"
     scenes: list[BoardShootScene]
     aging_hours: int
+    # Pre-joined scripts for this shoot (date + female_talent match). Embedded
+    # so the modal can render instantly from cache instead of round-tripping
+    # /api/scripts/ per studio.
+    scripts: list[ShootScriptSummary] = []
 
 
 # ---------------------------------------------------------------------------
@@ -939,6 +964,35 @@ def _load_shoots_window(from_date: date, to_date: date, include_cancelled: bool)
                 ))
 
             bgt = budget_rates.get((sd_iso, female.lower()), {})
+
+            # Embed the script rows that back this shoot. They're already in
+            # `items` (extracted from the SQLite scripts cache earlier in the
+            # function), so this is just a cheap re-serialization — no extra
+            # query, no Sheets round-trip.
+            scripts_inline: list[ShootScriptSummary] = []
+            for it in items:
+                try:
+                    scripts_inline.append(ShootScriptSummary(
+                        id=int(it.get("id") or 0),
+                        tab_name=str(it.get("tab_name") or ""),
+                        sheet_row=int(it.get("sheet_row") or 0),
+                        studio=str(it.get("studio") or ""),
+                        shoot_date=str(it.get("_parsed_date") or it.get("shoot_date") or ""),
+                        female=str(it.get("female") or ""),
+                        male=str(it.get("male") or ""),
+                        theme=str(it.get("theme") or ""),
+                        plot=str(it.get("plot") or ""),
+                        title=str(it.get("title") or ""),
+                        script_status=str(it.get("script_status") or ""),
+                        wardrobe_f=str(it.get("wardrobe_f") or ""),
+                        wardrobe_m=str(it.get("wardrobe_m") or ""),
+                        shoot_location=str(it.get("location") or ""),
+                        props=str(it.get("props") or ""),
+                    ))
+                except (TypeError, ValueError):
+                    # Skip malformed rows rather than failing the whole shoot
+                    continue
+
             shoots.append(Shoot(
                 shoot_id=shoot_id,
                 shoot_date=sd_iso,
@@ -950,6 +1004,7 @@ def _load_shoots_window(from_date: date, to_date: date, include_cancelled: bool)
                 status=(first.get("script_status") or "active").lower().strip() or "active",
                 scenes=scenes,
                 aging_hours=_aging_hours(sd_obj),
+                scripts=scripts_inline,
             ))
 
         shoots.sort(key=lambda s: s.shoot_date, reverse=True)
