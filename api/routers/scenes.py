@@ -159,9 +159,11 @@ async def list_recent_scenes(
     sub_selects: list[str] = []
     params: list = []
     for studio in studio_list:
+        # SQLite forbids ORDER BY/LIMIT directly inside a UNION ALL leg —
+        # wrap each in a subquery so the per-studio cap survives the UNION.
         sub_selects.append(
-            f"SELECT * FROM scenes WHERE studio = ?{missing_clause}"
-            f" ORDER BY id DESC LIMIT ?"
+            f"SELECT * FROM (SELECT * FROM scenes WHERE studio = ?{missing_clause}"
+            f" ORDER BY id DESC LIMIT ?)"
         )
         params.extend([studio, per_studio])
 
