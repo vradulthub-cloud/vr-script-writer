@@ -53,6 +53,12 @@ interface FetchOptions extends RequestInit {
    * source of the bug.
    */
   expectEmpty?: boolean
+  /**
+   * Per-call timeout override in milliseconds. Default 30s; bump for slow
+   * backends like FLUX local-AI generation (cold-start can be 60–120s on
+   * first call after the model unloads from VRAM).
+   */
+  timeoutMs?: number
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -62,7 +68,8 @@ async function apiFetch<T>(
   idToken: string | undefined,
   options: FetchOptions = {},
 ): Promise<T> {
-  const { expectEmpty, signal: callerSignal, ...rest } = options
+  const { expectEmpty, signal: callerSignal, timeoutMs, ...rest } = options
+  const effectiveTimeout = timeoutMs ?? DEFAULT_TIMEOUT_MS
 
   if (DEV_MOCK) {
     const { mockApi } = await import("./dev-mock-api")
@@ -78,11 +85,11 @@ async function apiFetch<T>(
     headers["Authorization"] = `Bearer ${idToken}`
   }
 
-  // 30s timeout unless caller already wired an AbortSignal. A hung
-  // backend used to freeze the UI indefinitely.
+  // Caller can override the default 30s timeout via timeoutMs (e.g. FLUX
+  // local-AI generation needs 180s for cold-start FLUX+RMBG inference).
   const controller = callerSignal ? undefined : new AbortController()
   const timeoutId = controller
-    ? setTimeout(() => controller.abort(new DOMException("Timeout", "TimeoutError")), DEFAULT_TIMEOUT_MS)
+    ? setTimeout(() => controller.abort(new DOMException("Timeout", "TimeoutError")), effectiveTimeout)
     : undefined
   const signal = callerSignal ?? controller?.signal
 
@@ -91,7 +98,7 @@ async function apiFetch<T>(
     res = await fetch(url, { ...rest, headers, signal })
   } catch (err) {
     if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
-      throw new ApiError(0, `Request timed out after ${DEFAULT_TIMEOUT_MS / 1000}s: ${path}`)
+      throw new ApiError(0, `Request timed out after ${effectiveTimeout / 1000}s: ${path}`)
     }
     throw new ApiError(0, err instanceof Error ? err.message : "Network error")
   } finally {
@@ -767,8 +774,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       : (idTokenOrSession?.idToken ?? undefined)
 
   const get = <T>(path: string) => apiFetch<T>(path, token)
-  const post = <T>(path: string, body: unknown) =>
-    apiFetch<T>(path, token, { method: "POST", body: JSON.stringify(body) })
+  const post = <T>(path: string, body: unknown, opts?: { timeoutMs?: number }) =>
+    apiFetch<T>(path, token, { method: "POST", body: JSON.stringify(body), ...opts })
   const patch = <T>(path: string, body: unknown) =>
     apiFetch<T>(path, token, { method: "PATCH", body: JSON.stringify(body) })
   // For multipart/form-data (file uploads) — do NOT set Content-Type, let the browser set boundary
@@ -955,7 +962,9 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         height?: number
         bg_remove?: "rmbg2" | "none"
       }) =>
-        post<FluxLocalResult>("/titles/flux-local", body),
+        // FLUX cold-start (model load + sampling + RMBG) can take 60-120s
+        // on the Windows box; default 30s timeout would kill it.
+        post<FluxLocalResult>("/titles/flux-local", body, { timeoutMs: 180_000 }),
     },
 
     models: {
