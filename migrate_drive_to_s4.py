@@ -119,6 +119,65 @@ def walk_scene(svc, scene_folder: dict, base_path: str = "") -> list[dict]:
     return files
 
 
+_MULTIPART_THRESHOLD = 4 * 1024 * 1024 * 1024  # 4 GB — files <= this use single PUT
+_MULTIPART_CHUNKSIZE = 64 * 1024 * 1024        # 64 MB chunks for the few that need multipart
+_MAX_RETRIES = 3
+
+
+def _abort_lingering_multipart(bucket: str, key: str) -> None:
+    """Cancel any in-progress multipart upload for `key` so a fresh attempt
+    can use a clean uploadId. MEGA S4 sometimes leaves orphan parts after a
+    failed retry."""
+    try:
+        client = s4_client._client()
+        resp = client.list_multipart_uploads(Bucket=bucket, Prefix=key)
+        for u in resp.get("Uploads", []) or []:
+            if u["Key"] == key:
+                client.abort_multipart_upload(
+                    Bucket=bucket, Key=key, UploadId=u["UploadId"],
+                )
+    except Exception:
+        pass
+
+
+def _upload_with_retry(studio: str, key: str, src_path: str) -> None:
+    """Upload via boto3 TransferConfig, retrying on transient multipart errors.
+
+    Files <= 4 GB take the single-PUT path (no multipart, no chance of
+    InvalidPart). Larger files use 64 MB chunks; on retry we abort any
+    lingering multipart upload first so the next attempt gets a fresh
+    uploadId — works around a S4 quirk where a failed multipart retry
+    refuses overlapping partNumbers.
+    """
+    from boto3.s3.transfer import TransferConfig
+    from botocore.exceptions import ClientError, EndpointConnectionError
+
+    cfg = TransferConfig(
+        multipart_threshold=_MULTIPART_THRESHOLD,
+        multipart_chunksize=_MULTIPART_CHUNKSIZE,
+        max_concurrency=2,
+        use_threads=True,
+    )
+    bucket = s4_client._studio_to_bucket(studio)
+    last_err: Exception | None = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            s4_client._client().upload_file(src_path, bucket, key, Config=cfg)
+            return
+        except ClientError as exc:
+            last_err = exc
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code in ("InvalidPart", "NoSuchUpload", "RequestTimeout"):
+                _abort_lingering_multipart(bucket, key)
+                continue
+            raise
+        except (EndpointConnectionError, OSError) as exc:
+            last_err = exc
+            continue
+    if last_err:
+        raise last_err
+
+
 def stream_file(_svc, file_id: str, studio: str, key: str, dry_run: bool) -> int:
     """Download from Drive into temp file, upload to S4. Returns bytes uploaded."""
     if dry_run:
@@ -134,7 +193,7 @@ def stream_file(_svc, file_id: str, studio: str, key: str, dry_run: bool) -> int
             tf.flush()
             size = tf.tell()
             tf.close()
-            s4_client.put_object(studio, key, tf.name)
+            _upload_with_retry(studio, key, tf.name)
             return size
         finally:
             try: os.unlink(tf.name)
