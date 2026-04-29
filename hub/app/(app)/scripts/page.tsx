@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { api, type Script } from "@/lib/api"
 import { requireTab } from "@/lib/rbac"
 import type { Briefing } from "@/components/ui/today-briefing"
+import { parseLocalDate } from "@/lib/dates"
 
 const ScriptGenerator = nextDynamic(() => import("./script-generator").then(m => m.ScriptGenerator))
 
@@ -79,12 +80,16 @@ function computeScriptsBriefing(input: { queued: Script[]; queueFetchFailed: boo
 
   // Earliest upcoming shoot that still needs a script.
   const withDate = queued
-    .filter(s => s.shoot_date && Number.isFinite(Date.parse(s.shoot_date)))
+    .filter(s => s.shoot_date && parseLocalDate(s.shoot_date) !== null)
     .sort((a, b) => (a.shoot_date ?? "").localeCompare(b.shoot_date ?? ""))
 
   const next = withDate[0] ?? null
   const now = Date.now()
-  const daysOut = next ? Math.round((Date.parse(next.shoot_date!) - now) / (24 * 60 * 60 * 1000)) : null
+  // parseLocalDate keeps the daysOut math anchored to local midnight, so a
+  // shoot on tomorrow's calendar reads as +1 day instead of 0 (or -1) for
+  // users west of UTC.
+  const nextT = next ? parseLocalDate(next.shoot_date!) : null
+  const daysOut = nextT !== null ? Math.round((nextT - now) / (24 * 60 * 60 * 1000)) : null
   const talent = next ? [next.female, next.male].filter(Boolean).join(" / ") : ""
 
   const when =

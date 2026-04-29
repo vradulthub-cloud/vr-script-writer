@@ -10,6 +10,7 @@ import { AddEventModal } from "@/components/ui/add-event-modal"
 import { studioColor } from "@/lib/studio-colors"
 import { rowToEvent, type CalendarEvent } from "@/lib/calendar-events"
 import { showUndoToast } from "@/components/ui/toast"
+import { parseLocalDate } from "@/lib/dates"
 
 const ShootBoard = nextDynamic(() => import("./shoot-board").then(m => m.ShootBoard))
 
@@ -88,8 +89,11 @@ export function ShootsV2View({
   // controls the whole page.
   const monthShoots = useMemo(() => {
     return initialShoots.filter(s => {
-      const t = Date.parse(s.shoot_date || "")
-      if (!Number.isFinite(t)) return false
+      // parseLocalDate keeps the comparison in local TZ — Date.parse on a
+      // bare YYYY-MM-DD interprets as UTC midnight and a late-month shoot
+      // can leak into the next month's bucket for users east of UTC.
+      const t = parseLocalDate(s.shoot_date || "")
+      if (t === null) return false
       return t >= monthStart.getTime() && t < monthEnd.getTime()
     })
   }, [initialShoots, monthStart, monthEnd])

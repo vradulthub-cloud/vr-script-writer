@@ -6,6 +6,7 @@ import type { Shoot } from "@/lib/api"
 import { studioAbbr, studioColor } from "@/lib/studio-colors"
 import { holidayMap } from "@/lib/usa-holidays"
 import { eventColorValue, type CalendarEvent } from "@/lib/calendar-events"
+import { localDateKey, localTodayKey, parseLocalDateAsDate } from "@/lib/dates"
 
 /** Month grid: 7 columns × 5-6 rows of day cells. Each cell lists every
  *  shoot on that day as a studio-coloured pill. Click a pill to open the
@@ -90,7 +91,7 @@ export function MonthCalendar({
 
   const holidays = useMemo(() => holidayMap(monthStart.getFullYear()), [monthStart])
 
-  const todayKey = new Date().toISOString().slice(0, 10)
+  const todayKey = localTodayKey()
   const monthIdx = monthStart.getMonth()
 
   const [mounted, setMounted] = useState(false)
@@ -101,11 +102,11 @@ export function MonthCalendar({
   const overflowHoliday = overflowDate ? holidays.get(overflowDate) : undefined
   const overflowCountTotal = overflowShoots.length + overflowEvents.length
   const overflowLabel = overflowDate
-    ? new Date(overflowDate + "T00:00:00").toLocaleDateString("en-US", {
+    ? (parseLocalDateAsDate(overflowDate)?.toLocaleDateString("en-US", {
         weekday: "long",
         month: "long",
         day: "numeric",
-      })
+      }) ?? overflowDate)
     : ""
 
   return (
@@ -155,7 +156,10 @@ export function MonthCalendar({
           }}
         >
           {row.map((d, c) => {
-            const key = d.toISOString().slice(0, 10)
+            // Use local date key — toISOString shifts to UTC, which lands on
+            // the previous day for users east of UTC (and the next day for
+            // users west when the time is past local-midnight-equivalent).
+            const key = localDateKey(d)
             const cellShoots = shootsByDate[key] ?? []
             const cellEvents = eventsByDate[key] ?? []
             const holiday = holidays.get(key)

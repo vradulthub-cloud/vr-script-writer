@@ -7,6 +7,7 @@ import { X, ChevronDown, ChevronUp, FileText, ClipboardCheck } from "lucide-reac
 import { api, type Shoot, type Script, type LegalDocFile, type LegalDocsResult, type ComplianceShoot, type SignedSummary, SHOOT_ASSET_ORDER, SHOOT_ASSET_LABELS } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { studioAbbr, studioColor } from "@/lib/studio-colors"
+import { formatLocalDate } from "@/lib/dates"
 
 /** Detail modal shared by the week and month calendars. */
 export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => void }) {
@@ -50,6 +51,21 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
   const [signedRoles, setSignedRoles] = useState<SignedSummary[]>([])
 
   useEffect(() => {
+    // Fast path: backend now embeds the matching script rows directly on
+    // the Shoot DTO (api/routers/shoots.py — pre-joined from the same
+    // SQLite cache that powered the per-studio fetch). When present, skip
+    // the network round-trip entirely so the modal renders instantly.
+    if (shoot.scripts && shoot.scripts.length > 0) {
+      const sorted = [...shoot.scripts].sort(
+        (a, b) => a.tab_name.localeCompare(b.tab_name) || a.id - b.id,
+      )
+      setScripts(sorted)
+      setScriptsLoading(false)
+      return
+    }
+    // Fallback path: older backend (no inline scripts) — fan out per studio
+    // and filter locally. Kept for graceful degradation during deploys when
+    // the frontend has shipped but the backend hasn't restarted yet.
     let cancelled = false
     setScriptsLoading(true)
     const client = api(idToken ?? null)
@@ -74,7 +90,7 @@ export function ShootModal({ shoot, onClose }: { shoot: Shoot; onClose: () => vo
       })
       .finally(() => { if (!cancelled) setScriptsLoading(false) })
     return () => { cancelled = true }
-  }, [idToken, shoot.shoot_date, shoot.female_talent, shoot.male_talent, shoot.scenes])
+  }, [idToken, shoot.shoot_date, shoot.female_talent, shoot.male_talent, shoot.scenes, shoot.scripts])
 
   const [legalDocsLoading, setLegalDocsLoading] = useState(true)
 
@@ -988,9 +1004,9 @@ function normalizeDate(raw: string): string {
 }
 
 function formatFullDate(raw: string): string {
-  const t = Date.parse(raw)
-  if (!Number.isFinite(t)) return raw || "—"
-  return new Date(t).toLocaleDateString("en-US", {
+  // Use formatLocalDate so "2026-04-30" renders as Thu Apr 30 instead of
+  // shifting to Wed Apr 29 in PT (Date.parse interprets bare ISO as UTC).
+  return formatLocalDate(raw, {
     weekday: "short",
     month: "short",
     day: "numeric",

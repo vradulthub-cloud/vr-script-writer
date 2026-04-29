@@ -4,6 +4,7 @@ import type { Scene, SceneStats } from "@/lib/api"
 import { PageHeader } from "@/components/ui/page-header"
 import { TodayBriefing, type Briefing } from "@/components/ui/today-briefing"
 import { studioAbbr, studioColor } from "@/lib/studio-colors"
+import { parseLocalDate } from "@/lib/dates"
 
 const STUDIOS = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"] as const
 
@@ -167,10 +168,7 @@ function computeMissingBriefing(input: {
 
   const now = Date.now()
   const earliest = scenes
-    .filter(s => {
-      const t = Date.parse(s.release_date || "")
-      return Number.isFinite(t)
-    })
+    .filter(s => parseLocalDate(s.release_date || "") !== null)
     .sort((a, b) => (a.release_date ?? "").localeCompare(b.release_date ?? ""))
     .find(s => {
       const gaps: string[] = []
@@ -190,8 +188,8 @@ function computeMissingBriefing(input: {
     if (!earliest.has_photos)      gaps.push("photos")
     if (!earliest.has_storyboard)  gaps.push("storyboard")
     const releaseDate = earliest.release_date ? earliest.release_date.slice(0, 10) : "TBD"
-    const release = Date.parse(earliest.release_date || "")
-    const daysOut = Number.isFinite(release)
+    const release = parseLocalDate(earliest.release_date || "")
+    const daysOut = release !== null
       ? Math.round((release - now) / (24 * 60 * 60 * 1000))
       : null
     const when =
