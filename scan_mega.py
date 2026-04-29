@@ -247,8 +247,15 @@ def main():
             if parsed:
                 folder_mtimes[parsed[0]] = parsed[1]
 
-        # Filter to recent folders + dedupe against scenes already scanned
-        # from a higher-priority path (primary before backup).
+        # Process every scene we found. The previous "last 30 days" filter
+        # was a false economy: rclone_lsf_recursive above already paid the
+        # network cost for every file under this studio, and the carry-forward
+        # path can drop scenes permanently if the prior mega_scan.json is
+        # ever truncated (which is what happened — both Mac and Windows
+        # copies shrunk to 41 scenes total). Always-process keeps the scan
+        # output authoritative; per-folder Python work is trivial.
+        # Dedupe against scenes already scanned from a higher-priority path
+        # (primary before backup).
         in_scope = []
         for folder_name in sorted(scene_files.keys()):
             mtime_str = folder_mtimes.get(folder_name, "")
@@ -257,9 +264,8 @@ def main():
             key = (studio, folder_name.lower())
             if key in seen_scenes:
                 continue
-            if args.force or is_recent(mtime_str, RECENT_DAYS):
-                seen_scenes[key] = mtime_str
-                in_scope.append((folder_name, mtime_str))
+            seen_scenes[key] = mtime_str
+            in_scope.append((folder_name, mtime_str))
 
         print(f"  {len(scene_files)} total folders, {len(in_scope)} in scope, {len(all_files)} files indexed")
 
