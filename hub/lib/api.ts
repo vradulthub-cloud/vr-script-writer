@@ -59,9 +59,31 @@ interface FetchOptions extends RequestInit {
    * first call after the model unloads from VRAM).
    */
   timeoutMs?: number
+  /** Internal flag: marks a 401-triggered retry so we don't loop forever. */
+  __retried?: boolean
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
+
+// Google OIDC idTokens expire after ~60 minutes. The server-rendered page
+// passes a fresh idToken to the client as a prop on first load, but if the
+// page sits open longer than that, the prop is stale and any backend call
+// will 401. Calling /api/auth/session triggers NextAuth's jwt() callback,
+// which silently refreshes via the Google refresh_token. Cache the result so
+// subsequent calls don't re-fetch the session every time.
+let cachedFreshToken: string | null = null
+
+async function fetchFreshIdToken(): Promise<string | null> {
+  if (typeof window === "undefined") return null
+  try {
+    const res = await fetch("/api/auth/session", { cache: "no-store" })
+    if (!res.ok) return null
+    const sess = (await res.json()) as { idToken?: string } | null
+    return sess?.idToken ?? null
+  } catch {
+    return null
+  }
+}
 
 async function apiFetch<T>(
   path: string,
@@ -77,12 +99,15 @@ async function apiFetch<T>(
   }
 
   const url = `${API_BASE}/api${path}`
+  // Prefer a refreshed token cached after a prior 401-recovery — the caller's
+  // `idToken` came from a server-render snapshot and may be stale.
+  const effectiveToken = cachedFreshToken ?? idToken
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(rest.headers as Record<string, string>),
   }
-  if (idToken) {
-    headers["Authorization"] = `Bearer ${idToken}`
+  if (effectiveToken) {
+    headers["Authorization"] = `Bearer ${effectiveToken}`
   }
 
   // Caller can override the default 30s timeout via timeoutMs (e.g. FLUX
@@ -106,6 +131,17 @@ async function apiFetch<T>(
   }
 
   if (!res.ok) {
+    // 401 = idToken expired or rejected. Refresh once via /api/auth/session
+    // (which runs NextAuth's jwt callback → Google refresh_token flow) and
+    // retry the request. Subsequent calls reuse the refreshed token via the
+    // module-level cache.
+    if (res.status === 401 && !rest.__retried && typeof window !== "undefined") {
+      const fresh = await fetchFreshIdToken()
+      if (fresh && fresh !== effectiveToken) {
+        cachedFreshToken = fresh
+        return apiFetch<T>(path, fresh, { ...options, __retried: true })
+      }
+    }
     const body = await res.text().catch(() => "")
     throw new ApiError(res.status, body)
   }
@@ -784,18 +820,29 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
   const patch = <T>(path: string, body: unknown) =>
     apiFetch<T>(path, token, { method: "PATCH", body: JSON.stringify(body) })
   // For multipart/form-data (file uploads) — do NOT set Content-Type, let the browser set boundary
-  const postForm = <T>(path: string, formData: FormData, signal?: AbortSignal) => {
+  const postForm = async <T>(path: string, formData: FormData, signal?: AbortSignal): Promise<T> => {
     // Pass the FormData through in dev mock so route handlers can inspect
     // form fields (slot_id, label, etc.) — apiFetch ignores the body for
     // dev mock JSON shaping anyway, but our mock route reads it.
     if (DEV_MOCK) return apiFetch<T>(path, token, { method: "POST", body: formData as unknown as BodyInit })
     const url = `${API_BASE}/api${path}`
-    const headers: Record<string, string> = {}
-    if (token) headers["Authorization"] = `Bearer ${token}`
-    return fetch(url, { method: "POST", headers, body: formData, signal }).then(r => {
-      if (!r.ok) throw new ApiError(r.status, r.statusText)
-      return r.json() as Promise<T>
-    })
+    const send = async (authToken: string | undefined): Promise<Response> => {
+      const headers: Record<string, string> = {}
+      if (authToken) headers["Authorization"] = `Bearer ${authToken}`
+      return fetch(url, { method: "POST", headers, body: formData, signal })
+    }
+    let r = await send(cachedFreshToken ?? token)
+    // Same 401-retry-with-refresh as apiFetch — file uploads suffer the same
+    // stale-token failure mode when the page has been open past the OIDC TTL.
+    if (r.status === 401 && typeof window !== "undefined") {
+      const fresh = await fetchFreshIdToken()
+      if (fresh && fresh !== (cachedFreshToken ?? token)) {
+        cachedFreshToken = fresh
+        r = await send(fresh)
+      }
+    }
+    if (!r.ok) throw new ApiError(r.status, r.statusText)
+    return r.json() as Promise<T>
   }
   // For endpoints that legitimately return 204 No Content.
   const postVoid = (path: string, body: unknown) =>
