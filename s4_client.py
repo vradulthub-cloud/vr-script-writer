@@ -169,6 +169,27 @@ def head_object(studio: str, key: str) -> dict | None:
     }
 
 
+def resolve_key(studio: str, key: str) -> str | None:
+    """Resolve the canonical key to its actual on-disk casing.
+
+    The migration left 23 VRH scenes with lowercase prefixes (`vrh0500/...`)
+    alongside the 281 uppercase ones. Code holding a canonical key calls
+    this to find the real one. Returns None if neither casing exists.
+
+    Costs at most 2 HEAD requests; cache results in callers that do many
+    lookups for the same scene.
+    """
+    if head_object(studio, key) is not None:
+        return key
+    head, sep, rest = key.partition("/")
+    if not sep:
+        return None
+    lower_key = f"{head.lower()}/{rest}"
+    if lower_key != key and head_object(studio, lower_key) is not None:
+        return lower_key
+    return None
+
+
 def get_object(studio: str, key: str, dest_path: str | Path) -> Path:
     """Download to ``dest_path`` (parents created). Returns the path."""
     bucket = _studio_to_bucket(studio)
