@@ -121,7 +121,7 @@ def walk_scene(svc, scene_folder: dict, base_path: str = "") -> list[dict]:
 
 _MULTIPART_THRESHOLD = 4 * 1024 * 1024 * 1024  # 4 GB — files <= this use single PUT
 _MULTIPART_CHUNKSIZE = 64 * 1024 * 1024        # 64 MB chunks for the few that need multipart
-_MAX_RETRIES = 3
+_MAX_RETRIES = 5
 
 
 def _abort_lingering_multipart(bucket: str, key: str) -> None:
@@ -141,16 +141,21 @@ def _abort_lingering_multipart(bucket: str, key: str) -> None:
 
 
 def _upload_with_retry(studio: str, key: str, src_path: str) -> None:
-    """Upload via boto3 TransferConfig, retrying on transient multipart errors.
+    """Upload via boto3 TransferConfig, retrying transient errors.
 
-    Files <= 4 GB take the single-PUT path (no multipart, no chance of
-    InvalidPart). Larger files use 64 MB chunks; on retry we abort any
-    lingering multipart upload first so the next attempt gets a fresh
-    uploadId — works around a S4 quirk where a failed multipart retry
-    refuses overlapping partNumbers.
+    Files <= 4 GB take the single-PUT path; larger files use 64 MB multipart
+    chunks. Retries on:
+      - InvalidPart / NoSuchUpload (S4 multipart-retry quirk; aborts any
+        lingering upload first so the next attempt gets a fresh uploadId)
+      - RequestTimeout
+      - any BotoCoreError (covers ConnectionClosedError, IncompleteReadError,
+        ReadTimeoutError, EndpointConnectionError)
+      - OSError (local fs / socket-level issues)
+
+    Up to 5 attempts with 1s/2s/4s/8s backoff before giving up.
     """
     from boto3.s3.transfer import TransferConfig
-    from botocore.exceptions import ClientError, EndpointConnectionError
+    from botocore.exceptions import ClientError, BotoCoreError
 
     cfg = TransferConfig(
         multipart_threshold=_MULTIPART_THRESHOLD,
@@ -169,11 +174,12 @@ def _upload_with_retry(studio: str, key: str, src_path: str) -> None:
             code = exc.response.get("Error", {}).get("Code", "")
             if code in ("InvalidPart", "NoSuchUpload", "RequestTimeout"):
                 _abort_lingering_multipart(bucket, key)
-                continue
-            raise
-        except (EndpointConnectionError, OSError) as exc:
+            elif code:
+                raise  # non-transient API error
+        except (BotoCoreError, OSError) as exc:
             last_err = exc
-            continue
+        if attempt < _MAX_RETRIES - 1:
+            time.sleep(2 ** attempt)
     if last_err:
         raise last_err
 
