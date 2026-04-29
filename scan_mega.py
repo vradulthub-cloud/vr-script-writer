@@ -1,307 +1,216 @@
 #!/usr/bin/env python3
 """
-scan_mega.py — Scan MEGA for scene folders missing Description .docx files.
+scan_mega.py — Scan MEGA S4 buckets for scene folders missing Description files.
+
+Replaces the legacy rclone-based scan against the MEGA cloud account. One bucket
+per studio (fpvr/vrh/vra/njoi); keys are bucket-rooted scene IDs (no /Grail/
+and no studio prefix). All S4 calls go through s4_client.
+
+Output schema (mega_scan.json) is unchanged so the hub DB and UI are unaffected.
 
 Usage:
-    python3 scan_mega.py          # scan folders modified in last 30 days
-    python3 scan_mega.py --force  # scan ALL folders regardless of age
+    python3 scan_mega.py          # scan only scenes touched in the last 30 days
+    python3 scan_mega.py --force  # scan ALL scenes regardless of mtime
 """
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+# Load S4 creds from the persistent env file (cron-friendly — cron has no shell rc).
+ENV_FILE = Path.home() / ".config" / "eclatech" / "s4.env"
+if ENV_FILE.exists():
+    for _line in ENV_FILE.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k, _v)
+
+import s4_client  # noqa: E402
+
 # ── Config ────────────────────────────────────────────────────────────────────
-
-RCLONE_REMOTE = "mega_test"
-
-# Each studio can have multiple scan paths (primary + backup).
-# Older VRH / VRA scenes live in Grail/Backup/{studio}/ per CLAUDE.md's mega rules
-# (175 VRH + 375 VRA scenes were previously being silently skipped because the
-#  older code explicitly listed "Backup" in the non-scene-folder ignore list).
-STUDIOS = {
-    "FPVR": ["Grail/FPVR"],
-    "VRH":  ["Grail/VRH",  "Grail/Backup/VRH"],
-    "VRA":  ["Grail/VRA",  "Grail/Backup/VRA"],
-    "NJOI": ["Grail/NNJOI"],  # folder name NNJOI, but scene prefix is NJOI
-}
 
 DROPBOX_PATH = Path.home() / "Library" / "CloudStorage" / "Dropbox"
 OUTPUT_FILE = DROPBOX_PATH / "mega_scan.json"
-
 RECENT_DAYS = 30
+
+WIN_DEST = "andre@100.90.90.68:C:/Users/andre/eclatech-hub/mega_scan.json"
+SSH_KEY = str(Path.home() / ".ssh" / "id_ed25519_win")
+
+_DESC_EXTS = (".doc", ".docx", ".txt", ".rtf")
+
+# Studio site codes — used to filter out non-scene top-level prefixes
+# (Brand/, Dump/, SYNC/, Legal/, etc. that exist in some buckets).
+_SITE_CODES = {"FPVR": "FPVR", "VRH": "VRH", "VRA": "VRA", "NJOI": "NJOI"}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def rclone_lsd(remote_path: str) -> list[str]:
-    """Run `rclone lsd` and return stdout lines. Returns [] on error."""
-    cmd = ["rclone", "lsd", f"{RCLONE_REMOTE}:{remote_path}", "--timeout", "600s"]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=660)
-        if result.returncode != 0:
-            print(f"  [WARN] rclone lsd failed for {remote_path}: {result.stderr.strip()}", file=sys.stderr)
-            return []
-        return result.stdout.splitlines()
-    except subprocess.TimeoutExpired:
-        print(f"  [WARN] rclone lsd timed out for {remote_path}", file=sys.stderr)
-        return []
-    except FileNotFoundError:
-        print("[ERROR] rclone not found in PATH", file=sys.stderr)
-        sys.exit(1)
-
-
-def rclone_ls(remote_path: str) -> list[str]:
-    """Run `rclone ls` and return file paths. Returns [] on error."""
-    cmd = ["rclone", "ls", f"{RCLONE_REMOTE}:{remote_path}", "--timeout", "600s"]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=660)
-        if result.returncode != 0:
-            print(f"  [WARN] rclone ls failed for {remote_path}: {result.stderr.strip()}", file=sys.stderr)
-            return []
-        # Each line: "   12345 path/to/file.ext"
-        paths = []
-        for line in result.stdout.splitlines():
-            parts = line.strip().split(None, 1)
-            if len(parts) == 2:
-                paths.append(parts[1])
-        return paths
-    except subprocess.TimeoutExpired:
-        print(f"  [WARN] rclone ls timed out for {remote_path}", file=sys.stderr)
-        return []
-
-
-def parse_lsd_line(line: str):
-    """
-    Parse a line from `rclone lsd` output.
-    Format: '          -1 2026-03-13 08:58:23        -1 FOLDER_NAME'
-    Returns (folder_name, mtime_str) or None if unparseable.
-    """
-    parts = line.strip().split()
-    # Expected: dummy(-1), date(YYYY-MM-DD), time(HH:MM:SS), dummy(-1), folder_name
-    if len(parts) < 5:
-        return None
-    try:
-        date_str = parts[1]   # e.g. 2026-03-13
-        time_str = parts[2]   # e.g. 08:58:23
-        folder_name = parts[4]
-        mtime_str = f"{date_str} {time_str}"
-        return folder_name, mtime_str
-    except IndexError:
-        return None
-
-
 def camel_to_spaced(s: str) -> str:
-    """'ClaraTrinity' → 'Clara Trinity'"""
-    return re.sub(r'([A-Z])', r' \1', s).strip()
+    return re.sub(r"([A-Z])", r" \1", s).strip()
 
 
 def extract_talents(file_paths: list[str]) -> tuple[str, str]:
-    """
-    Extract female/male talent names from filenames in any subfolder.
-    Filenames use CamelCase names joined by hyphens:
-      Videos/ClaraTrinity-DannySteele-180-POV-FPVR-2min_1k.mp4
-      Storyboard/KitanaMontana-Nice-NJOI-Photos_001.jpg
-      Photos/EmmaRosie-Solo-Photos.zip
-    Priority: Videos > Storyboard > Photos > Legal (prefer video filenames).
-    """
-    # Sort by priority: Videos first, then Storyboard, Photos, Legal
+    """Pull (female, male) names from the first CamelCase-looking filename.
+    Priority: Videos > Storyboard > Photos > Legal."""
     priority = {"Videos": 0, "Storyboard": 1, "Photos": 2, "Legal": 3}
-    sorted_paths = sorted(file_paths, key=lambda p: priority.get(p.replace("\\", "/").split("/")[0], 99))
-
+    sorted_paths = sorted(file_paths,
+                          key=lambda p: priority.get(p.split("/")[0], 99))
     for p in sorted_paths:
-        p_norm = p.replace("\\", "/")
-        folder = p_norm.split("/")[0] if "/" in p_norm else ""
-        if folder not in ("Videos", "Storyboard", "Photos", "Legal"):
+        folder = p.split("/", 1)[0] if "/" in p else ""
+        if folder not in priority:
             continue
-        basename = p_norm.split("/")[-1].rsplit(".", 1)[0]
-        # Strip trailing _001 etc from storyboard files
-        basename = re.sub(r'_\d+$', '', basename)
-        parts = basename.split("-")
-        names = []
-        for part in parts:
-            if re.match(r'^[A-Z][a-z]+[A-Z]', part):
+        basename = p.split("/")[-1].rsplit(".", 1)[0]
+        basename = re.sub(r"_\d+$", "", basename)  # strip trailing _001 etc
+        names: list[str] = []
+        for part in basename.split("-"):
+            if re.match(r"^[A-Z][a-z]+[A-Z]", part):
                 names.append(camel_to_spaced(part))
             else:
                 break
         if names:
-            female = names[0]
-            male   = names[1] if len(names) > 1 else ""
-            return female, male
+            return names[0], (names[1] if len(names) > 1 else "")
     return "", ""
 
 
-_DESC_EXTS = (".doc", ".docx", ".txt", ".rtf")
-
-
 def has_description(file_paths: list[str]) -> bool:
-    """Check if any file in a Description folder is a text/document type (.doc, .docx, .txt, .rtf)."""
     for p in file_paths:
-        p_norm = p.replace("\\", "/")
-        if ("Description/" in p_norm or p_norm.startswith("Description/")) and p_norm.lower().endswith(_DESC_EXTS):
+        if p.startswith("Description/") and p.lower().endswith(_DESC_EXTS):
             return True
     return False
 
 
-def is_recent(mtime_str: str, days: int) -> bool:
-    """Return True if mtime_str (YYYY-MM-DD HH:MM:SS) is within the last `days` days."""
-    try:
-        mtime = datetime.strptime(mtime_str, "%Y-%m-%d %H:%M:%S")
-        cutoff = datetime.now() - timedelta(days=days)
-        return mtime >= cutoff
-    except ValueError:
+def is_recent(mtime, days: int) -> bool:
+    if not mtime:
         return False
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    return mtime >= cutoff
+
+
+def is_scene_prefix(raw: str, studio: str) -> bool:
+    """Does `raw` (the first key segment) look like a scene ID for `studio`?"""
+    site = _SITE_CODES[studio]
+    return bool(re.fullmatch(rf"{site}\d+", raw, re.IGNORECASE))
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def rclone_lsf_recursive(remote_path: str) -> list[str]:
-    """Run `rclone lsf -R` to get all files recursively in one call. Much faster than per-folder ls."""
-    cmd = ["rclone", "lsf", "-R", f"{RCLONE_REMOTE}:{remote_path}", "--timeout", "600s"]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=660)
-        if result.returncode != 0:
-            print(f"  [WARN] rclone lsf -R failed for {remote_path}: {result.stderr.strip()}", file=sys.stderr)
-            return []
-        return result.stdout.splitlines()
-    except subprocess.TimeoutExpired:
-        print(f"  [WARN] rclone lsf -R timed out for {remote_path}", file=sys.stderr)
-        return []
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Scan MEGA for scene folders missing Description .docx files.")
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Scan MEGA S4 buckets for scene folders missing Description docs."
+    )
     parser.add_argument("--force", action="store_true",
-                        help="Scan all folders, ignoring the 30-day recency filter")
+                        help="Scan all scenes, ignoring the 30-day recency filter")
     args = parser.parse_args()
 
     scanned_at = datetime.now().isoformat(timespec="seconds")
-    scenes = []
+    scenes: list[dict] = []
 
     print(f"Scan started at {scanned_at}")
-    if args.force:
-        print("Mode: FORCE (scanning all folders)")
-    else:
-        print(f"Mode: recent only (last {RECENT_DAYS} days)")
+    print(f"Mode: {'FORCE (all scenes)' if args.force else f'recent only (last {RECENT_DAYS}d)'}")
     print()
 
-    # Load prior scan so out-of-scope scenes survive a recent-only run.
-    # Without this, a partial scan shrinks mega_scan.json to ~30d of scenes
-    # and sync_scenes() wipes has_* flags on every older scene in the DB.
+    # Carry forward older scenes that fall outside the recency window so the
+    # output doesn't shrink each non-force run (would wipe has_* flags in DB).
     prior_by_id: dict[str, dict] = {}
     if not args.force and OUTPUT_FILE.exists():
         try:
             prior = json.loads(OUTPUT_FILE.read_text())
             for s in prior.get("scenes") or []:
-                sid = s.get("scene_id")
-                if sid:
-                    prior_by_id[sid] = s
+                if s.get("scene_id"):
+                    prior_by_id[s["scene_id"]] = s
             if prior_by_id:
-                print(f"Loaded {len(prior_by_id)} prior scenes to preserve on out-of-scope folders.")
+                print(f"Loaded {len(prior_by_id)} prior scenes to preserve out-of-scope folders.")
+                print()
         except Exception as exc:
             print(f"  [WARN] could not load prior scan: {exc}", file=sys.stderr)
 
-    # De-dupe by (studio, scene_id): if a scene exists in both primary and
-    # backup, prefer whichever has the fresher mtime so the latest asset state
-    # wins.
-    seen_scenes: dict[tuple[str, str], str] = {}  # (studio, scene_id_lower) → mtime
+    # Track casing collisions (e.g. VRH0500 + vrh0500 in same bucket would
+    # canonicalize to the same scene). Warn loudly — that's data corruption,
+    # not just a casing quirk.
+    seen_canonical: dict[str, str] = {}
 
-    for studio, mega_paths in STUDIOS.items():
-      for mega_path in mega_paths:
-        print(f"[{studio}] Single recursive listing of {mega_path}…", flush=True)
+    for studio in s4_client.STUDIO_BUCKETS:
+        bucket = s4_client.STUDIO_BUCKETS[studio]
+        print(f"[{studio}] Listing bucket {bucket}…", flush=True)
 
-        # ONE rclone call per studio path — get all files recursively
-        all_files = rclone_lsf_recursive(mega_path)
-        if not all_files:
-            print(f"  No files found (or error).")
+        try:
+            objects = list(s4_client.list_objects(studio))
+        except Exception as exc:
+            print(f"  [ERR] list_objects({studio}) failed: {exc}", file=sys.stderr)
             continue
 
-        # Group files by scene folder (first path component)
-        # e.g. "VRH0756/Description/file.docx" → scene="VRH0756", path="Description/file.docx"
-        scene_files = {}  # scene_folder → [relative_paths]
-        for f in all_files:
-            f = f.replace("\\", "/")
-            parts = f.split("/", 1)
-            if len(parts) == 2:
-                scene_folder = parts[0]
-                scene_files.setdefault(scene_folder, []).append(parts[1])
-
-        # Filter out non-scene folders (Videos, Legal, Storyboard, etc.)
-        # Note: "Backup" stays in this list to handle the case where someone
-        # runs the scan against /Grail/{STUDIO} (which has a Backup/ subfolder
-        # for VRH/VRA). The backup path itself is scanned explicitly via the
-        # STUDIOS dict above.
-        _SKIP_FOLDERS = {"Videos", "Legal", "Storyboard", "Photos", "Description",
-                         "Brand", "Dump", "SYNC", "Backup", "Models", "Premiums"}
-        scene_files = {k: v for k, v in scene_files.items() if k not in _SKIP_FOLDERS}
-
-        # Also get folder mtimes from lsd (one call, already fast for top-level dirs)
-        lsd_lines = rclone_lsd(mega_path)
-        folder_mtimes = {}
-        for line in lsd_lines:
-            parsed = parse_lsd_line(line)
-            if parsed:
-                folder_mtimes[parsed[0]] = parsed[1]
-
-        # Filter to recent folders + dedupe against scenes already scanned
-        # from a higher-priority path (primary before backup).
-        in_scope = []
-        for folder_name in sorted(scene_files.keys()):
-            mtime_str = folder_mtimes.get(folder_name, "")
-            # Normalize scene_id case for dedupe — backup folders sometimes mix
-            # casing (e.g. vrh0002 vs VRH0485 in /Grail/Backup/VRH).
-            key = (studio, folder_name.lower())
-            if key in seen_scenes:
+        # Group objects by scene id (canonicalized).
+        by_scene: dict[str, dict] = defaultdict(
+            lambda: {"files": [], "mtime": None, "raw_casings": set()}
+        )
+        skipped_non_scene = 0
+        for obj in objects:
+            key = obj["key"]
+            # Skip 0-byte folder markers (key ends in /).
+            if key.endswith("/") and obj["size"] == 0:
                 continue
-            if args.force or is_recent(mtime_str, RECENT_DAYS):
-                seen_scenes[key] = mtime_str
-                in_scope.append((folder_name, mtime_str))
+            head, _, rel = key.partition("/")
+            if not rel or not is_scene_prefix(head, studio):
+                skipped_non_scene += 1
+                continue
+            try:
+                canon = s4_client.normalize_scene_id(head)
+            except ValueError:
+                skipped_non_scene += 1
+                continue
+            entry = by_scene[canon]
+            entry["files"].append(rel)
+            entry["raw_casings"].add(head)
+            mt = obj["last_modified"]
+            if entry["mtime"] is None or mt > entry["mtime"]:
+                entry["mtime"] = mt
 
-        print(f"  {len(scene_files)} total folders, {len(in_scope)} in scope, {len(all_files)} files indexed")
+        print(f"  {len(by_scene)} scene folders, {len(objects)} objects, "
+              f"{skipped_non_scene} non-scene keys skipped")
 
-        for folder_name, mtime_str in in_scope:
-            file_paths = scene_files.get(folder_name, [])
-            has_desc = has_description(file_paths)
-            female, male = extract_talents(file_paths)
+        # Filter to recent + canonical-collision detection.
+        in_scope: list[tuple[str, dict, str]] = []
+        for canon, entry in by_scene.items():
+            mtime = entry["mtime"]
+            mtime_str = mtime.strftime("%Y-%m-%d %H:%M:%S") if mtime else ""
+            if canon in seen_canonical:
+                # Should never happen — same canonical scene-id seen across
+                # two studios would mean a wildly miscategorized bucket.
+                print(f"  [WARN] {canon} already claimed by {seen_canonical[canon]}; skipping", file=sys.stderr)
+                continue
+            if len(entry["raw_casings"]) > 1:
+                cases = sorted(entry["raw_casings"])
+                print(f"  [WARN] {canon} has multiple casings on disk: {cases}", file=sys.stderr)
+            if args.force or is_recent(mtime, RECENT_DAYS):
+                seen_canonical[canon] = studio
+                in_scope.append((canon, entry, mtime_str))
 
-            # Check subfolder statuses
-            has_videos = any(p.startswith("Videos/") and not p.endswith("/") for p in file_paths)
-            has_thumbnail = any(p.startswith("Video Thumbnail/") and not p.endswith("/") for p in file_paths)
-            has_photos = any(p.startswith("Photos/") and not p.endswith("/") for p in file_paths)
-            has_storyboard = any(p.startswith("Storyboard/") and not p.endswith("/") for p in file_paths)
-            # NOTE: there used to be a "dir-existence" fallback here that
-            # flipped has_thumbnail=True whenever the Video Thumbnail/
-            # folder appeared in the lsf output, on the theory that a
-            # MEGA API bug was dropping files inside. Ground-truth probes
-            # via `rclone ls` on the specific folder showed those folders
-            # were genuinely empty — the fallback was producing ~hundreds
-            # of false positives (every scene had a pre-provisioned empty
-            # Video Thumbnail/ shell). Don't add it back without evidence
-            # the files are there; has_thumbnail=True with no filename is
-            # useless anyway because the thumbnail proxy needs the
-            # filename to serve the image.
+        print(f"  {len(in_scope)} in scope")
 
-            # Count files per subfolder
-            video_count = sum(1 for p in file_paths if p.startswith("Videos/") and not p.endswith("/"))
-            storyboard_count = sum(1 for p in file_paths if p.startswith("Storyboard/") and not p.endswith("/"))
+        for canon, entry, mtime_str in in_scope:
+            file_paths = entry["files"]
+            has_desc       = has_description(file_paths)
+            female, male   = extract_talents(file_paths)
+            has_videos     = any(p.startswith("Videos/")          for p in file_paths)
+            has_thumbnail  = any(p.startswith("Video Thumbnail/") for p in file_paths)
+            has_photos     = any(p.startswith("Photos/")          for p in file_paths)
+            has_storyboard = any(p.startswith("Storyboard/")      for p in file_paths)
+            video_count      = sum(1 for p in file_paths if p.startswith("Videos/"))
+            storyboard_count = sum(1 for p in file_paths if p.startswith("Storyboard/"))
 
             status = "OK" if has_desc else "MISSING"
             name_info = f" [{female}{'/' + male if male else ''}]" if female else ""
-            print(f"  {folder_name}… {status}{name_info}")
-
-            # Collect file paths by subfolder for naming validation
-            desc_files = [p for p in file_paths if p.startswith("Description/") and not p.endswith("/")]
-            video_files = [p for p in file_paths if p.startswith("Videos/") and not p.endswith("/")]
-            thumb_files = [p for p in file_paths if p.startswith("Video Thumbnail/") and not p.endswith("/")]
-            photo_files = [p for p in file_paths if p.startswith("Photos/") and not p.endswith("/")]
-            story_files = [p for p in file_paths if p.startswith("Storyboard/") and not p.endswith("/")]
+            print(f"  {canon}… {status}{name_info}")
 
             scenes.append({
-                "scene_id":        folder_name,
+                "scene_id":        canon,
                 "studio":          studio,
                 "has_description": has_desc,
                 "has_videos":      has_videos,
@@ -314,52 +223,41 @@ def main():
                 "female":          female,
                 "male":            male,
                 "files": {
-                    "description": desc_files,
-                    "videos": video_files,
-                    "thumbnail": thumb_files,
-                    "photos": photo_files,
-                    "storyboard": story_files,
+                    "description": [p for p in file_paths if p.startswith("Description/")],
+                    "videos":      [p for p in file_paths if p.startswith("Videos/")],
+                    "thumbnail":   [p for p in file_paths if p.startswith("Video Thumbnail/")],
+                    "photos":      [p for p in file_paths if p.startswith("Photos/")],
+                    "storyboard":  [p for p in file_paths if p.startswith("Storyboard/")],
                 },
             })
 
         print()
 
     # Carry forward prior entries for scenes not touched this run so older
-    # scenes keep their last-known asset state instead of disappearing from
-    # mega_scan.json and being reset to has_*=0 on the next sync_scenes().
+    # scenes keep their last-known asset state.
     if prior_by_id:
         touched = {s["scene_id"] for s in scenes}
-        carried = 0
+        carried = sum(1 for sid in prior_by_id if sid not in touched)
         for sid, prev in prior_by_id.items():
-            if sid in touched:
-                continue
-            scenes.append(prev)
-            carried += 1
+            if sid not in touched:
+                scenes.append(prev)
         if carried:
             print(f"Carried forward {carried} scenes from prior scan.")
 
-    # Sort: missing first, then by scene_id
     scenes.sort(key=lambda s: (s["has_description"], s["scene_id"]))
 
-    output = {
-        "scanned_at": scanned_at,
-        "scenes":     scenes,
-    }
-
+    output = {"scanned_at": scanned_at, "scenes": scenes}
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_FILE.write_text(json.dumps(output, indent=2))
 
     missing = sum(1 for s in scenes if not s["has_description"])
-    total = len(scenes)
-    print(f"Done. {missing}/{total} scenes missing descriptions.")
-    print(f"Output written to: {OUTPUT_FILE}")
+    print(f"Done. {missing}/{len(scenes)} scenes missing descriptions.")
+    print(f"Output: {OUTPUT_FILE}")
 
-    # Deploy to Windows so the app can read it immediately
-    win_dest = "andre@100.90.90.68:C:/Users/andre/eclatech-hub/mega_scan.json"
-    ssh_key  = str(Path.home() / ".ssh" / "id_ed25519_win")
+    # Deploy to Windows so the API service reads the same scan.
     result = subprocess.run(
-        ["scp", "-i", ssh_key, str(OUTPUT_FILE), win_dest],
-        capture_output=True, text=True
+        ["scp", "-i", SSH_KEY, str(OUTPUT_FILE), WIN_DEST],
+        capture_output=True, text=True,
     )
     if result.returncode == 0:
         print("Deployed to Windows.")
