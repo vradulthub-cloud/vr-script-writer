@@ -262,7 +262,7 @@ async def generate_model_name(body: ModelNameRequest, user: CurrentUser):
 # Local AI generation — ComfyUI (FLUX.1 Schnell + RMBG-2.0) on Windows box
 # ---------------------------------------------------------------------------
 
-_FLUX_TITLE_LORA = "title_card_style_v2-000002.safetensors"
+_FLUX_TITLE_LORA = "title_card_style_v2-final.safetensors"
 _WORKFLOW_PATH = Path(__file__).resolve().parent.parent / "workflows" / "flux_transparent_title.json"
 
 _FLUX_PROMPT_PREFIX = (
@@ -314,6 +314,16 @@ def _build_flux_workflow(req: FluxLocalRequest, seed: int) -> dict:
     graph = json.loads(populated)
     # Remove the human-readable comment; ComfyUI rejects unknown keys at top level.
     graph.pop("_comment", None)
+
+    # When use_lora=False the LoraLoader node validates an empty lora_name and
+    # fails. Drop the LoraLoader entirely and rewire CLIPTextEncode / KSampler
+    # to the upstream loaders directly.
+    if not req.use_lora:
+        graph["5"]["inputs"]["clip"] = ["2", 0]   # CLIPTextEncode pos -> DualCLIPLoader
+        graph["6"]["inputs"]["clip"] = ["2", 0]   # CLIPTextEncode neg -> DualCLIPLoader
+        graph["8"]["inputs"]["model"] = ["1", 0]  # KSampler -> UnetLoaderGGUF
+        graph.pop("4", None)
+
     if req.bg_remove == "none":
         # SaveImage points at VAEDecode output instead of RMBG.
         graph["11"]["inputs"]["images"] = ["9", 0]
