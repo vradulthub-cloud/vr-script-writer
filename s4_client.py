@@ -31,6 +31,29 @@ from botocore.client import Config
 from botocore.exceptions import ClientError
 
 
+# ── Cred autoload ─────────────────────────────────────────────────────────────
+# Load ~/.config/eclatech/s4.env at import time so cron, scripts, and the
+# Windows EclatechHubAPI service all pick up the same creds without per-host
+# wiring. NSSM AppEnvironmentExtra still works (env vars set there win, since
+# we only setdefault below).
+def _autoload_creds() -> None:
+    env_file = Path.home() / ".config" / "eclatech" / "s4.env"
+    if not env_file.exists():
+        return
+    try:
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+    except OSError:
+        pass
+
+
+_autoload_creds()
+
+
 # ── Studio map ────────────────────────────────────────────────────────────────
 
 STUDIO_BUCKETS: dict[str, str] = {
