@@ -32,23 +32,40 @@ from botocore.exceptions import ClientError
 
 
 # ── Cred autoload ─────────────────────────────────────────────────────────────
-# Load ~/.config/eclatech/s4.env at import time so cron, scripts, and the
-# Windows EclatechHubAPI service all pick up the same creds without per-host
-# wiring. NSSM AppEnvironmentExtra still works (env vars set there win, since
-# we only setdefault below).
+# Load creds at import time so cron, ad-hoc scripts, and the Windows
+# EclatechHubAPI service (which runs as LocalSystem and has no $HOME) all
+# pick up the same s4.env. Search order:
+#
+#   1. $S4_ENV_FILE if set
+#   2. ~/.config/eclatech/s4.env  — Mac shell + cron
+#   3. <directory of this file>/.config/eclatech/s4.env  — colocated with deploy
+#   4. <directory of this file>/s4.env  — flat, easiest for Windows deploys
+#
+# Env vars already set in os.environ win — we only setdefault.
 def _autoload_creds() -> None:
-    env_file = Path.home() / ".config" / "eclatech" / "s4.env"
-    if not env_file.exists():
-        return
-    try:
-        for line in env_file.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip())
-    except OSError:
-        pass
+    here = Path(__file__).resolve().parent
+    candidates: list[Path] = []
+    override = os.environ.get("S4_ENV_FILE")
+    if override:
+        candidates.append(Path(override))
+    candidates.extend([
+        Path.home() / ".config" / "eclatech" / "s4.env",
+        here / ".config" / "eclatech" / "s4.env",
+        here / "s4.env",
+    ])
+    for env_file in candidates:
+        if not env_file.exists():
+            continue
+        try:
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+            return
+        except OSError:
+            continue
 
 
 _autoload_creds()
