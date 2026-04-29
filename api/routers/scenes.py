@@ -562,25 +562,32 @@ async def naming_issues(scene_id: str, user: CurrentUser):
 @router.post("/mega-refresh")
 async def trigger_mega_refresh(user: CurrentUser):
     """
-    Write a trigger file requesting a MEGA scan refresh.
+    Refresh `mega_scan.json` directly from S4.
 
-    The Windows-side mega_scan_worker.py watches for mega_scan_request.json
-    and runs a fresh scan when it appears.
+    Pre-S4 this wrote a trigger file watched by mega_scan_worker.py on
+    Windows (which used MEGAcmd). With S4 the listing runs from anywhere
+    via boto3 — we just shell out to scan_mega.py in a background thread
+    and return immediately so the request doesn't block on the ~50s scan.
     """
-    import json
-    from datetime import datetime, timezone
-    from api.config import get_settings
+    import subprocess
+    import threading
+    from pathlib import Path
 
-    trigger_path = get_settings().base_dir / "mega_scan_request.json"
-    data = {
-        "requested_at": datetime.now(timezone.utc).isoformat(),
-        "requested_by": user.get("email", user.get("name", "unknown")),
-    }
-    try:
-        trigger_path.write_text(json.dumps(data))
-        return {"status": "triggered", "message": "MEGA scan requested — worker will run shortly"}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to write trigger file: {exc}")
+    scan_script = Path(__file__).resolve().parent.parent.parent / "scan_mega.py"
+    if not scan_script.exists():
+        raise HTTPException(status_code=503, detail=f"scan_mega.py not found at {scan_script}")
+
+    def run() -> None:
+        try:
+            subprocess.run(
+                ["python", str(scan_script), "--force"],
+                capture_output=True, text=True, timeout=300,
+            )
+        except Exception:
+            _log.exception("mega-refresh background scan failed")
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"status": "triggered", "message": "MEGA S4 scan started — refresh in ~60s"}
 
 
 class FolderCreateBody(BaseModel):
@@ -590,45 +597,22 @@ class FolderCreateBody(BaseModel):
 @router.post("/create-folder")
 async def create_mega_folder(body: FolderCreateBody, user: CurrentUser):
     """
-    Queue a MEGA folder creation request for a scene.
+    No-op acknowledgement for the legacy "create scene folder" UI button.
 
-    Appends to mega_folder_request.json — the Windows-side worker
-    reads this and runs `mega-mkdir` for each queued scene.
+    Pre-S4 this queued a request for a Windows worker to run `mega-mkdir`
+    for each subfolder (Description/, Videos/, etc.). S4 doesn't have empty
+    folders — keys are flat, so the prefix appears the moment the first
+    object is uploaded. We return success immediately so the UI flow stays
+    consistent; future uploads to that scene work without any setup.
     """
-    import json
-    from datetime import datetime, timezone
-    from api.config import get_settings
-
     with get_db() as conn:
         row = conn.execute(
-            "SELECT id, studio, mega_path FROM scenes WHERE id=?", (body.scene_id,)
+            "SELECT id, studio FROM scenes WHERE id=?", (body.scene_id,)
         ).fetchone()
-
     if not row:
         raise HTTPException(status_code=404, detail="Scene not found")
-
-    scene = dict(row)
-    trigger_path = get_settings().base_dir / "mega_folder_request.json"
-    entry = {
-        "requested_at": datetime.now(timezone.utc).isoformat(),
-        "requested_by": user.get("email", user.get("name", "unknown")),
-        "scene_id": body.scene_id,
-        "studio": scene["studio"],
-    }
-    try:
-        existing: list = []
-        if trigger_path.exists():
-            try:
-                existing = json.loads(trigger_path.read_text())
-                if not isinstance(existing, list):
-                    existing = [existing]
-            except Exception:
-                existing = []
-        existing.append(entry)
-        trigger_path.write_text(json.dumps(existing, indent=2))
-        return {"status": "queued", "scene_id": body.scene_id}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to queue folder creation: {exc}")
+    return {"status": "ok", "scene_id": body.scene_id,
+            "message": "S4 prefix will be created implicitly on first upload"}
 
 
 # ---------------------------------------------------------------------------

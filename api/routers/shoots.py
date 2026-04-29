@@ -675,7 +675,7 @@ def _load_asset_state_overlay(conn, scene_ids: list[str]) -> dict[str, dict[str,
     Bulk-load the remote `scene_asset_state` rows for these scene_ids and
     return {scene_id: {asset_type: {status, validity_json}}}.
 
-    This table is written by mega_scan_worker / asset_states sync and is the
+    This table is written by scan_mega.py / asset_states sync and is the
     freshest source of truth for MEGA-derived cells (photoset_uploaded,
     bg_edit_uploaded, title_done, etc.). The scenes table booleans are fed
     from a sparse mega_scan.json and go stale fast, so we treat
