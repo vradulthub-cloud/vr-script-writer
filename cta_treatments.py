@@ -27,7 +27,8 @@ from cta_primitives import (
     blend_multiply, blend_screen, edge_glow, letterpress,
     shear_image, long_shadow, wide_track_mask, rule_line,
     wrap_chars, wrap_px, title_seed,
-    NEON_BOX_PALETTES,
+    NEON_BOX_PALETTES, VIVID_BANKS, LIQUID_GOLD_STOPS,
+    texture_overlay, texture_modulate, load_texture,
 )
 
 # ── Color scheme picker ───────────────────────────────────────────────────────
@@ -23356,3 +23357,322 @@ FEATURED_TREATMENTS: dict[str, callable] = {
     "retro_halftone":   render_retro_halftone,
 }
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Texture-overlay treatments (CC0 photographic materials clipped to letterforms)
+#
+# These produce premium photographic surfaces by compositing real CC0 texture
+# photographs onto the text alpha mask. Two flavors:
+#   - direct overlay: texture photo IS the surface (rust, oak, marble, denim)
+#   - modulate: color gradient × texture luminance (gold leaf, copper, etc.)
+# Sourced from polyhaven.com under CC0; see textures/manifest.json.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Pre-defined gradient palettes — gradients give COLOR, textures give GRAIN.
+_GOLD_BRIGHT     = [(255,250,210),(255,225,90),(220,160,20),(160,100,0)]
+_COPPER          = [(255,200,140),(220,140,60),(160,80,20),(90,40,10)]
+_BRONZE          = [(220,180,120),(170,120,60),(110,70,30),(60,35,10)]
+_ROSE_GOLD       = [(255,210,200),(240,170,160),(200,120,120),(140,70,80)]
+_HOLO_RAINBOW    = [(255,150,255),(150,255,255),(255,255,150),(150,150,255),(255,200,150)]
+_CYAN_DEEP       = [(200,255,255),(80,210,235),(0,150,200),(0,80,140)]
+_VIOLET_RICH     = [(220,180,255),(170,110,230),(110,50,180),(60,10,120)]
+_TEAL_DEEP       = [(190,255,235),(70,210,200),(0,140,150),(0,70,90)]
+_DARK_OBSIDIAN   = [(80,80,90),(45,45,55),(20,20,28),(8,8,14)]
+_CARBON_BLUE     = [(50,60,90),(30,38,60),(15,18,32),(8,10,18)]
+_STONE_LIGHT     = [(245,240,235),(180,175,170),(110,100,95),(60,55,50)]
+_DESERT_SUNSET   = [(255,200,140),(240,140,80),(180,80,50),(100,40,20)]
+_LIME_FRESH      = [(220,255,180),(160,240,80),(80,200,0),(30,130,0)]
+
+
+def _tex_render(title: str, rng: random.Random,
+                texture_slug: str | None = None,
+                gradient: list | None = None,
+                strength: float = 0.5,
+                hue_shift_deg: float = 0,
+                sat: float = 1.0,
+                val: float = 1.0,
+                shadow_offset: tuple = (8, 14),
+                shadow_blur: int = 18,
+                shadow_alpha: int = 180,
+                brightness_boost: float = 1.0,
+                contrast_boost: float = 1.15,
+                bevel_strength: float = 0.55,
+                bevel_angle: float = 110,
+                stroke_px: int = 0,
+                stroke_color: tuple = (0, 0, 0),
+                inner_glow_color: tuple | None = None,
+                inner_glow_radii: tuple = (8, 4)):
+    """Shared body for texture-overlay treatments.
+
+    If gradient is None: direct overlay (texture IS the look).
+    If gradient is given: modulate gradient color by texture luminance.
+
+    Polish stack applied to ALL outputs (so output reads as DIMENSIONAL, not
+    flat texture in letters): contrast boost, bevel highlight + shadow,
+    optional inner glow + stroke, drop shadow with soft falloff.
+    """
+    from PIL import ImageEnhance
+    # Preserve user's input case (no random uppercasing — gallery looks
+    # consistent and the user picks their own typographic intent).
+    font = F("headline", auto_size_hd(title, base=380, pivot=14), rng=rng)
+    mask = make_mask_hd(title, font, pad=100)
+
+    if gradient is None:
+        face = texture_overlay(mask, texture_slug, hue_deg=hue_shift_deg, sat=sat, val=val)
+    else:
+        base = colorize(mask, gradient)
+        face = texture_modulate(mask, base, texture_slug, strength=strength)
+        if brightness_boost != 1.0:
+            face = ImageEnhance.Brightness(face).enhance(brightness_boost)
+
+    # Contrast lift — direct overlays especially come out flat-grey by default
+    if contrast_boost != 1.0:
+        face = ImageEnhance.Contrast(face).enhance(contrast_boost)
+
+    # Bevel pass: simulates light direction on the letterforms — converts
+    # "texture clipped to outline" into "dimensional surface."
+    # bevel_light returns (highlight, shadow) — both go into the stack.
+    hl, sh = bevel_light(mask, angle_deg=bevel_angle, strength=bevel_strength)
+
+    # Optional inner-glow rim (great for dark stones / gemstones)
+    layers = [face, hl, sh]
+    if inner_glow_color:
+        # inner_glow takes radii as list of (radius_px, strength) pairs.
+        # Convert simple (outer, inner) shorthand to that shape.
+        if isinstance(inner_glow_radii, tuple) and len(inner_glow_radii) == 2 \
+           and isinstance(inner_glow_radii[0], (int, float)):
+            outer, inner = inner_glow_radii
+            radii_pairs = [(outer, 0.7), (inner, 0.95)]
+        else:
+            radii_pairs = inner_glow_radii
+        layers.append(inner_glow(mask, rgb=inner_glow_color, radii=radii_pairs))
+
+    # Optional outline stroke (great for accent colors that need pop on dark BG)
+    if stroke_px > 0:
+        from cta_primitives import outline_stroke
+        layers.insert(0, outline_stroke(mask, width=stroke_px, rgb=stroke_color))
+
+    shadow = drop_shadow(mask, ox=shadow_offset[0], oy=shadow_offset[1],
+                         blur=shadow_blur, alpha=shadow_alpha)
+    return composite(shadow, *layers, size=mask.size)
+
+
+# ── Modulated (gradient × texture luminance) ─────────────────────────────────
+
+def render_gold_leaf_real(title, rng):
+    return _tex_render(title, rng, texture_slug="metal_plate",
+                       gradient=_GOLD_BRIGHT, strength=0.42, brightness_boost=1.10,
+                       bevel_strength=0.65, contrast_boost=1.20,
+                       shadow_offset=(8, 16), shadow_blur=22)
+
+def render_copper_real(title, rng):
+    return _tex_render(title, rng, texture_slug="rust_coarse_01",
+                       gradient=_COPPER, strength=0.45, brightness_boost=1.10,
+                       bevel_strength=0.60, contrast_boost=1.20,
+                       shadow_offset=(8, 16), shadow_blur=22)
+
+def render_bronze_real(title, rng):
+    return _tex_render(title, rng, texture_slug="rust_coarse_01",
+                       gradient=_BRONZE, strength=0.45, brightness_boost=1.05,
+                       bevel_strength=0.55, contrast_boost=1.15)
+
+def render_rose_gold_real(title, rng):
+    return _tex_render(title, rng, texture_slug="metal_plate",
+                       gradient=_ROSE_GOLD, strength=0.45, brightness_boost=1.10,
+                       bevel_strength=0.55, contrast_boost=1.15,
+                       shadow_offset=(6, 14), shadow_blur=20)
+
+def render_holographic_real(title, rng):
+    return _tex_render(title, rng, texture_slug="metal_plate",
+                       gradient=_HOLO_RAINBOW, strength=0.55, brightness_boost=1.18,
+                       bevel_strength=0.45, contrast_boost=1.30,
+                       inner_glow_color=(255,255,255), inner_glow_radii=(6,3),
+                       shadow_offset=(4, 10), shadow_blur=14)
+
+def render_cyan_chrome_real(title, rng):
+    return _tex_render(title, rng, texture_slug="metal_plate",
+                       gradient=_CYAN_DEEP, strength=0.50, brightness_boost=1.10,
+                       bevel_strength=0.65, contrast_boost=1.25,
+                       inner_glow_color=(140,230,255), inner_glow_radii=(6,3),
+                       stroke_px=4, stroke_color=(0,30,60))
+
+def render_liquid_violet_real(title, rng):
+    return _tex_render(title, rng, texture_slug="metal_plate",
+                       gradient=_VIOLET_RICH, strength=0.55, brightness_boost=1.10,
+                       bevel_strength=0.55, contrast_boost=1.20,
+                       inner_glow_color=(220,180,255), inner_glow_radii=(7,3),
+                       stroke_px=4, stroke_color=(20,0,60))
+
+def render_teal_marble_real(title, rng):
+    return _tex_render(title, rng, texture_slug="rock_face_03",
+                       gradient=_TEAL_DEEP, strength=0.62, brightness_boost=1.05,
+                       bevel_strength=0.55, contrast_boost=1.20,
+                       stroke_px=3, stroke_color=(0,30,40))
+
+def render_polished_obsidian(title, rng):
+    # Dark stone needs a rim-light inner glow + lighter stroke for legibility
+    return _tex_render(title, rng, texture_slug="rock_face_03",
+                       gradient=_DARK_OBSIDIAN, strength=0.65, brightness_boost=1.0,
+                       bevel_strength=0.85, contrast_boost=1.30,
+                       inner_glow_color=(120,140,170), inner_glow_radii=(5,2),
+                       stroke_px=3, stroke_color=(180,190,210),
+                       shadow_offset=(8, 18), shadow_blur=24, shadow_alpha=200)
+
+def render_carbon_real(title, rng):
+    return _tex_render(title, rng, texture_slug="corrugated_iron",
+                       gradient=_CARBON_BLUE, strength=0.50, brightness_boost=1.10,
+                       bevel_strength=0.70, contrast_boost=1.30,
+                       inner_glow_color=(120,160,255), inner_glow_radii=(5,2),
+                       stroke_px=3, stroke_color=(160,180,220))
+
+def render_polished_stone_real(title, rng):
+    return _tex_render(title, rng, texture_slug="rock_face_03",
+                       gradient=_STONE_LIGHT, strength=0.62, brightness_boost=1.0,
+                       bevel_strength=0.55, contrast_boost=1.18,
+                       shadow_offset=(8, 16), shadow_blur=22)
+
+def render_desert_sunset_real(title, rng):
+    return _tex_render(title, rng, texture_slug="concrete_floor_worn_001",
+                       gradient=_DESERT_SUNSET, strength=0.50, brightness_boost=1.10,
+                       bevel_strength=0.60, contrast_boost=1.20)
+
+def render_lime_chrome_real(title, rng):
+    return _tex_render(title, rng, texture_slug="metal_plate",
+                       gradient=_LIME_FRESH, strength=0.50, brightness_boost=1.10,
+                       bevel_strength=0.55, contrast_boost=1.20,
+                       stroke_px=3, stroke_color=(20,60,0))
+
+def render_rose_marble_real(title, rng):
+    return _tex_render(title, rng, texture_slug="rock_face_03",
+                       gradient=_ROSE_GOLD, strength=0.58, brightness_boost=1.08,
+                       bevel_strength=0.50, contrast_boost=1.18)
+
+
+# ── Direct overlay (texture photograph IS the look) ──────────────────────────
+
+def render_real_rust(title, rng):
+    return _tex_render(title, rng, texture_slug="rust_coarse_01",
+                       contrast_boost=1.30, val=1.10,
+                       bevel_strength=0.45,
+                       shadow_offset=(6, 14), shadow_blur=20, shadow_alpha=180)
+
+def render_real_oak(title, rng):
+    return _tex_render(title, rng, texture_slug="oak_veneer_01",
+                       contrast_boost=1.30, val=1.10, sat=1.20,
+                       bevel_strength=0.50,
+                       shadow_offset=(6, 12), shadow_blur=18, shadow_alpha=170)
+
+def render_real_dark_wood(title, rng):
+    return _tex_render(title, rng, texture_slug="dark_wood",
+                       contrast_boost=1.35, val=1.15,
+                       bevel_strength=0.55,
+                       inner_glow_color=(180,140,90), inner_glow_radii=(5,2),
+                       shadow_offset=(8, 14), shadow_blur=20, shadow_alpha=190)
+
+def render_real_weathered_wood(title, rng):
+    return _tex_render(title, rng, texture_slug="weathered_brown_planks",
+                       contrast_boost=1.30, val=1.10,
+                       bevel_strength=0.45,
+                       shadow_offset=(6, 14), shadow_blur=18, shadow_alpha=170)
+
+def render_real_marble_dark(title, rng):
+    return _tex_render(title, rng, texture_slug="rock_face_03",
+                       contrast_boost=1.35, val=1.15,
+                       bevel_strength=0.65,
+                       inner_glow_color=(220,220,235), inner_glow_radii=(5,2),
+                       shadow_offset=(8, 18), shadow_blur=24, shadow_alpha=200)
+
+def render_real_stone_tile(title, rng):
+    return _tex_render(title, rng, texture_slug="stone_tiles_02",
+                       contrast_boost=1.30, val=1.10,
+                       bevel_strength=0.55,
+                       shadow_offset=(6, 14), shadow_blur=20, shadow_alpha=180)
+
+def render_real_denim(title, rng):
+    return _tex_render(title, rng, texture_slug="denim_fabric",
+                       contrast_boost=1.25, sat=1.30,
+                       bevel_strength=0.40,
+                       stroke_px=3, stroke_color=(20,30,60),
+                       shadow_offset=(4, 10), shadow_blur=14, shadow_alpha=160)
+
+def render_real_leather(title, rng):
+    return _tex_render(title, rng, texture_slug="leather_white",
+                       contrast_boost=1.25, val=1.05,
+                       bevel_strength=0.50,
+                       shadow_offset=(6, 12), shadow_blur=18, shadow_alpha=170)
+
+def render_real_corrugated(title, rng):
+    return _tex_render(title, rng, texture_slug="corrugated_iron",
+                       contrast_boost=1.30, val=1.05,
+                       bevel_strength=0.60,
+                       shadow_offset=(8, 14), shadow_blur=20, shadow_alpha=190)
+
+def render_real_concrete(title, rng):
+    return _tex_render(title, rng, texture_slug="concrete_floor_worn_001",
+                       contrast_boost=1.30, val=1.10,
+                       bevel_strength=0.50,
+                       shadow_offset=(6, 14), shadow_blur=18, shadow_alpha=170)
+
+def render_real_plywood(title, rng):
+    return _tex_render(title, rng, texture_slug="plywood",
+                       contrast_boost=1.30, val=1.10, sat=1.15,
+                       bevel_strength=0.50,
+                       shadow_offset=(4, 12), shadow_blur=16, shadow_alpha=160)
+
+def render_real_brushed_silver(title, rng):
+    """Desaturated metal_plate -> brushed silver."""
+    return _tex_render(title, rng, texture_slug="metal_plate",
+                       sat=0.0, val=1.20, contrast_boost=1.30,
+                       bevel_strength=0.70,
+                       inner_glow_color=(255,255,255), inner_glow_radii=(5,2),
+                       shadow_offset=(8, 14), shadow_blur=20, shadow_alpha=180)
+
+def render_real_factory_wall(title, rng):
+    return _tex_render(title, rng, texture_slug="factory_wall",
+                       contrast_boost=1.30, val=1.05,
+                       bevel_strength=0.50,
+                       shadow_offset=(6, 12), shadow_blur=18, shadow_alpha=180)
+
+def render_real_blue_steel(title, rng):
+    return _tex_render(title, rng, texture_slug="blue_metal_plate",
+                       contrast_boost=1.30, sat=1.20, val=1.10,
+                       bevel_strength=0.65,
+                       inner_glow_color=(180,210,255), inner_glow_radii=(5,2),
+                       shadow_offset=(6, 14), shadow_blur=20, shadow_alpha=180)
+
+
+# ── Register the new treatments ──────────────────────────────────────────────
+
+_TEXTURE_TREATMENTS = {
+    "gold_leaf_real":        render_gold_leaf_real,
+    "copper_real":           render_copper_real,
+    "bronze_real":           render_bronze_real,
+    "rose_gold_real":        render_rose_gold_real,
+    "holographic_real":      render_holographic_real,
+    "cyan_chrome_real":      render_cyan_chrome_real,
+    "liquid_violet_real":    render_liquid_violet_real,
+    "teal_marble_real":      render_teal_marble_real,
+    "polished_obsidian":     render_polished_obsidian,
+    "carbon_real":           render_carbon_real,
+    "polished_stone_real":   render_polished_stone_real,
+    "desert_sunset_real":    render_desert_sunset_real,
+    "lime_chrome_real":      render_lime_chrome_real,
+    "rose_marble_real":      render_rose_marble_real,
+    "real_rust":             render_real_rust,
+    "real_oak":              render_real_oak,
+    "real_dark_wood":        render_real_dark_wood,
+    "real_weathered_wood":   render_real_weathered_wood,
+    "real_marble_dark":      render_real_marble_dark,
+    "real_stone_tile":       render_real_stone_tile,
+    "real_denim":            render_real_denim,
+    "real_leather":          render_real_leather,
+    "real_corrugated":       render_real_corrugated,
+    "real_concrete":         render_real_concrete,
+    "real_plywood":          render_real_plywood,
+    "real_brushed_silver":   render_real_brushed_silver,
+    "real_factory_wall":     render_real_factory_wall,
+    "real_blue_steel":       render_real_blue_steel,
+}
+TREATMENTS.update(_TEXTURE_TREATMENTS)
+FEATURED_TREATMENTS.update(_TEXTURE_TREATMENTS)

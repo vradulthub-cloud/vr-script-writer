@@ -84,8 +84,8 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
     client.scripts.validate({
       theme: s["THEME"] ?? "",
       plot: s["PLOT"] ?? "",
-      wardrobe_f: s["WARDROBE (F)"] ?? "",
-      wardrobe_m: s["WARDROBE (M)"] ?? "",
+      wardrobe_f: s["WARDROBE - FEMALE"] ?? "",
+      wardrobe_m: s["WARDROBE - MALE"] ?? "",
       shoot_location: s["SHOOT LOCATION"] ?? "",
       female,
       male,
@@ -212,10 +212,10 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
         sheet_row: selectedRow.sheet_row,
         theme: sections["THEME"] ?? "",
         plot: sections["PLOT"] ?? "",
-        wardrobe_f: sections["WARDROBE (F)"],
-        wardrobe_m: sections["WARDROBE (M)"],
-        shoot_location: sections["SHOOT LOCATION"],
-        props: "",
+        wardrobe_f: sections["WARDROBE - FEMALE"] ?? "",
+        wardrobe_m: sections["WARDROBE - MALE"] ?? "",
+        shoot_location: sections["SHOOT LOCATION"] ?? "",
+        props: sections["PROPS"] ?? "",
       })
       setSaveMsg("Saved to sheet.")
       setSavedAt(new Date())

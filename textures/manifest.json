@@ -1,0 +1,461 @@
+{
+  "source": "polyhaven.com (CC0)",
+  "count": 91,
+  "textures": [
+    {
+      "category": "metal",
+      "slug": "metal_plate",
+      "file": "metal_plate_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "corrugated_iron",
+      "file": "corrugated_iron_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "blue_metal_plate",
+      "file": "blue_metal_plate_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "factory_wall",
+      "file": "factory_wall_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "rust_coarse_01",
+      "file": "rust_coarse_01_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "green_metal_rust",
+      "file": "green_metal_rust_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "rusty_metal_02",
+      "file": "rusty_metal_02_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "rusty_metal_04",
+      "file": "rusty_metal_04_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "metal_grate_rusty",
+      "file": "metal_grate_rusty_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "metal_plate_02",
+      "file": "metal_plate_02_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "rusty_metal_03",
+      "file": "rusty_metal_03_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "painted_metal_shutter",
+      "file": "painted_metal_shutter_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "corrugated_iron_02",
+      "file": "corrugated_iron_02_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "rusty_metal_05",
+      "file": "rusty_metal_05_diff_1k.jpg"
+    },
+    {
+      "category": "metal",
+      "slug": "worn_corrugated_iron",
+      "file": "worn_corrugated_iron_diff_1k.jpg"
+    },
+    {
+      "category": "fabric",
+      "slug": "leather_white",
+      "file": "leather_white_diff_1k.jpg"
+    },
+    {
+      "category": "fabric",
+      "slug": "denim_fabric",
+      "file": "denim_fabric_diff_1k.jpg"
+    },
+    {
+      "category": "fabric",
+      "slug": "denmin_fabric_02",
+      "file": "denmin_fabric_02_diff_1k.jpg"
+    },
+    {
+      "category": "fabric",
+      "slug": "fabric_leather_02",
+      "file": "fabric_leather_02_diff_1k.jpg"
+    },
+    {
+      "category": "fabric",
+      "slug": "fabric_leather_01",
+      "file": "fabric_leather_01_diff_1k.jpg"
+    },
+    {
+      "category": "leather",
+      "slug": "brown_leather",
+      "file": "brown_leather_albedo_1k.jpg"
+    },
+    {
+      "category": "wood",
+      "slug": "plywood",
+      "file": "plywood_diff_1k.jpg"
+    },
+    {
+      "category": "wood",
+      "slug": "oak_veneer_01",
+      "file": "oak_veneer_01_diff_1k.jpg"
+    },
+    {
+      "category": "wood",
+      "slug": "wood_table_001",
+      "file": "wood_table_001_diff_1k.jpg"
+    },
+    {
+      "category": "wood",
+      "slug": "dark_wood",
+      "file": "dark_wood_diff_1k.jpg"
+    },
+    {
+      "category": "wood",
+      "slug": "weathered_brown_planks",
+      "file": "weathered_brown_planks_diff_1k.jpg"
+    },
+    {
+      "category": "wood",
+      "slug": "wood_floor",
+      "file": "wood_floor_diff_1k.jpg"
+    },
+    {
+      "category": "wood",
+      "slug": "rough_wood",
+      "file": "rough_wood_diff_1k.jpg"
+    },
+    {
+      "category": "wood",
+      "slug": "wood_table_worn",
+      "file": "wood_table_worn_diff_1k.jpg"
+    },
+    {
+      "category": "wood",
+      "slug": "kitchen_wood",
+      "file": "kitchen_wood_diff_1k.jpg"
+    },
+    {
+      "category": "wood",
+      "slug": "laminate_floor_02",
+      "file": "laminate_floor_02_diff_1k.jpg"
+    },
+    {
+      "category": "rock",
+      "slug": "rock_face_03",
+      "file": "rock_face_03_diff_1k.jpg"
+    },
+    {
+      "category": "rock",
+      "slug": "rock_boulder_dry",
+      "file": "rock_boulder_dry_diff_1k.jpg"
+    },
+    {
+      "category": "rock",
+      "slug": "stone_tiles_02",
+      "file": "stone_tiles_02_diff_1k.jpg"
+    },
+    {
+      "category": "rock",
+      "slug": "aerial_rocks_02",
+      "file": "aerial_rocks_02_diff_1k.jpg"
+    },
+    {
+      "category": "rock",
+      "slug": "aerial_rocks_04",
+      "file": "aerial_rocks_04_diff_1k.jpg"
+    },
+    {
+      "category": "rock",
+      "slug": "rock_01",
+      "file": "rock_01_diff_1k.jpg"
+    },
+    {
+      "category": "rock",
+      "slug": "forest_ground_04",
+      "file": "forest_ground_04_diff_1k.jpg"
+    },
+    {
+      "category": "rock",
+      "slug": "rocks_ground_02",
+      "file": "rocks_ground_02_col_1k.jpg"
+    },
+    {
+      "category": "rock",
+      "slug": "aerial_grass_rock",
+      "file": "aerial_grass_rock_diff_1k.jpg"
+    },
+    {
+      "category": "concrete",
+      "slug": "concrete_floor_worn_001",
+      "file": "concrete_floor_worn_001_diff_1k.jpg"
+    },
+    {
+      "category": "brick",
+      "slug": "red_brick",
+      "file": "red_brick_diff_1k.jpg"
+    },
+    {
+      "category": "brick",
+      "slug": "red_brick_03",
+      "file": "red_brick_03_diff_1k.jpg"
+    },
+    {
+      "category": "brick",
+      "slug": "medieval_blocks_03",
+      "file": "medieval_blocks_03_diff_1k.jpg"
+    },
+    {
+      "category": "brick",
+      "slug": "brick_4",
+      "file": "brick_4_diff_1k.jpg"
+    },
+    {
+      "category": "brick",
+      "slug": "castle_brick_02_red",
+      "file": "castle_brick_02_red_diff_1k.jpg"
+    },
+    {
+      "category": "brick",
+      "slug": "cracked_concrete_wall",
+      "file": "cracked_concrete_wall_diff_1k.jpg"
+    },
+    {
+      "category": "tiles",
+      "slug": "interior_tiles",
+      "file": "interior_tiles_diff_1k.jpg"
+    },
+    {
+      "category": "tiles",
+      "slug": "stone_embedded_tiles",
+      "file": "stone_embedded_tiles_diff_1k.jpg"
+    },
+    {
+      "category": "tiles",
+      "slug": "worn_tile_floor",
+      "file": "worn_tile_floor_diff_1k.jpg"
+    },
+    {
+      "category": "tiles",
+      "slug": "checkered_pavement_tiles",
+      "file": "checkered_pavement_tiles_diff_1k.jpg"
+    },
+    {
+      "category": "tiles",
+      "slug": "concrete_tiles_02",
+      "file": "concrete_tiles_02_diff_1k.jpg"
+    },
+    {
+      "category": "tiles",
+      "slug": "brown_floor_tiles",
+      "file": "brown_floor_tiles_diff_1k.jpg"
+    },
+    {
+      "category": "sand",
+      "slug": "aerial_beach_01",
+      "file": "aerial_beach_01_diff_1k.jpg"
+    },
+    {
+      "category": "sand",
+      "slug": "rocky_trail_02",
+      "file": "rocky_trail_02_diff_1k.jpg"
+    },
+    {
+      "category": "sand",
+      "slug": "sand_01",
+      "file": "sand_01_diff_1k.jpg"
+    },
+    {
+      "category": "sand",
+      "slug": "coast_sand_01",
+      "file": "coast_sand_01_diff_1k.jpg"
+    },
+    {
+      "category": "sand",
+      "slug": "gravelly_sand",
+      "file": "gravelly_sand_diff_1k.jpg"
+    },
+    {
+      "category": "sand",
+      "slug": "red_laterite_soil_stones",
+      "file": "red_laterite_soil_stones_diff_1k.jpg"
+    },
+    {
+      "category": "snow",
+      "slug": "snow_02",
+      "file": "snow_02_diff_1k.jpg"
+    },
+    {
+      "category": "snow",
+      "slug": "snow_01",
+      "file": "snow_01_diff_1k.jpg"
+    },
+    {
+      "category": "snow",
+      "slug": "snow_field_aerial",
+      "file": "snow_field_aerial_col_1k.jpg"
+    },
+    {
+      "category": "snow",
+      "slug": "snow_03",
+      "file": "snow_03_diff_1k.jpg"
+    },
+    {
+      "category": "snow",
+      "slug": "snow_05",
+      "file": "snow_05_diff_1k.jpg"
+    },
+    {
+      "category": "snow",
+      "slug": "snow_04",
+      "file": "snow_04_diff_1k.jpg"
+    },
+    {
+      "category": "sandstone",
+      "slug": "rock_pitted_mossy",
+      "file": "rock_pitted_mossy_diff_1k.jpg"
+    },
+    {
+      "category": "sandstone",
+      "slug": "worn_rock_natural_01",
+      "file": "worn_rock_natural_01_diff_1k.jpg"
+    },
+    {
+      "category": "sandstone",
+      "slug": "seaworn_sandstone_brick",
+      "file": "seaworn_sandstone_brick_diff_1k.jpg"
+    },
+    {
+      "category": "sandstone",
+      "slug": "seaworn_stone_tiles",
+      "file": "seaworn_stone_tiles_diff_1k.jpg"
+    },
+    {
+      "category": "sandstone",
+      "slug": "red_sandstone_pavement",
+      "file": "red_sandstone_pavement_diff_1k.jpg"
+    },
+    {
+      "category": "cobblestone",
+      "slug": "cobblestone_floor_04",
+      "file": "cobblestone_floor_04_diff_1k.jpg"
+    },
+    {
+      "category": "cobblestone",
+      "slug": "grassy_cobblestone",
+      "file": "grassy_cobblestone_diff_1k.jpg"
+    },
+    {
+      "category": "cobblestone",
+      "slug": "cobblestone_floor_08",
+      "file": "cobblestone_floor_08_diff_1k.jpg"
+    },
+    {
+      "category": "cobblestone",
+      "slug": "floor_pattern_02",
+      "file": "floor_pattern_02_diff_1k.jpg"
+    },
+    {
+      "category": "cobblestone",
+      "slug": "cobblestone_color",
+      "file": "cobblestone_color_diff_1k.jpg"
+    },
+    {
+      "category": "cobblestone",
+      "slug": "floor_pattern_01",
+      "file": "floor_pattern_01_diff_1k.jpg"
+    },
+    {
+      "category": "plaster",
+      "slug": "beige_wall_001",
+      "file": "beige_wall_001_diff_1k.jpg"
+    },
+    {
+      "category": "plaster",
+      "slug": "grey_plaster",
+      "file": "grey_plaster_diff_1k.jpg"
+    },
+    {
+      "category": "plaster",
+      "slug": "concrete_wall_003",
+      "file": "concrete_wall_003_diff_1k.jpg"
+    },
+    {
+      "category": "plaster",
+      "slug": "concrete_floor_painted",
+      "file": "concrete_floor_painted_diff_1k.jpg"
+    },
+    {
+      "category": "plaster",
+      "slug": "beige_wall_002",
+      "file": "beige_wall_002_diff_1k.jpg"
+    },
+    {
+      "category": "bark",
+      "slug": "bark_brown_02",
+      "file": "bark_brown_02_diff_1k.jpg"
+    },
+    {
+      "category": "bark",
+      "slug": "bark_brown_01",
+      "file": "bark_brown_01_diff_1k.jpg"
+    },
+    {
+      "category": "bark",
+      "slug": "bark_willow",
+      "file": "bark_willow_diff_1k.jpg"
+    },
+    {
+      "category": "bark",
+      "slug": "bark_willow_02",
+      "file": "bark_willow_02_diff_1k.jpg"
+    },
+    {
+      "category": "bark",
+      "slug": "tree_bark_03",
+      "file": "tree_bark_03_diff_1k.jpg"
+    },
+    {
+      "category": "bark",
+      "slug": "pine_bark",
+      "file": "pine_bark_diff_1k.jpg"
+    },
+    {
+      "category": "denim",
+      "slug": "denim_fabric_06",
+      "file": "denim_fabric_06_diff_1k.jpg"
+    },
+    {
+      "category": "denim",
+      "slug": "denim_fabric_03",
+      "file": "denim_fabric_03_diff_1k.jpg"
+    },
+    {
+      "category": "denim",
+      "slug": "denim_fabric_05",
+      "file": "denim_fabric_05_diff_1k.jpg"
+    },
+    {
+      "category": "denim",
+      "slug": "denim_fabric_04",
+      "file": "denim_fabric_04_diff_1k.jpg"
+    }
+  ]
+}
