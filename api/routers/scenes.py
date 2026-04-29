@@ -179,10 +179,11 @@ async def get_scene_thumbnail(scene_id: str):
     Serve a scene's Video Thumbnail image.
 
     Public endpoint (no auth) — used as <img src> in the Asset Tracker.
-    Downloads from MEGA once, caches on local disk, serves bytes to client.
+    Downloads from MEGA S4 once, caches on local disk, serves bytes to client.
     """
-    import subprocess
     from pathlib import Path as _Path
+    import s4_client
+    from botocore.exceptions import ClientError, BotoCoreError
     from api.config import get_settings
 
     # 1. Look up the scene in the DB
@@ -200,26 +201,29 @@ async def get_scene_thumbnail(scene_id: str):
     settings = get_settings()
     cache_dir = settings.base_dir / "thumb_cache"
     cache_dir.mkdir(exist_ok=True)
-    # Cache file name: <scene_id>-<original_ext>
     ext = _Path(row["thumb_file"]).suffix.lower() or ".jpg"
     cache_path = cache_dir / f"{scene_id}{ext}"
 
     if not cache_path.exists():
-        # 3. Download from MEGA via mega-get
-        mega_path = f"/Grail/{row['grail_tab']}/{scene_id}/Video Thumbnail/{row['thumb_file']}"
-        mega_get = r"C:\Users\andre\AppData\Local\MEGAcmd\mega-get.bat"
+        # 3. Download from MEGA S4. resolve_key() handles the 23 VRH scenes
+        # whose prefixes were migrated as lowercase.
+        canonical_key = s4_client.key_for(
+            scene_id, "Video Thumbnail", row["thumb_file"]
+        )
         try:
-            result = subprocess.run(
-                [mega_get, mega_path, str(cache_path)],
-                capture_output=True, text=True, timeout=60,
-            )
-            if result.returncode != 0 or not cache_path.exists():
-                _log.warning("mega-get failed for %s: %s", scene_id, result.stderr[:200])
-                raise HTTPException(status_code=502, detail="Thumbnail fetch failed")
-        except FileNotFoundError:
-            raise HTTPException(status_code=503, detail="MEGAcmd not available")
-        except subprocess.TimeoutExpired:
-            raise HTTPException(status_code=504, detail="Thumbnail fetch timed out")
+            actual_key = s4_client.resolve_key(row["grail_tab"], canonical_key)
+            if actual_key is None:
+                _log.warning("S4 thumbnail not found for %s at %s", scene_id, canonical_key)
+                raise HTTPException(status_code=404, detail="Thumbnail not in bucket")
+            s4_client.get_object(row["grail_tab"], actual_key, cache_path)
+        except HTTPException:
+            raise
+        except (ClientError, BotoCoreError) as exc:
+            _log.warning("S4 fetch failed for %s: %s", scene_id, exc)
+            raise HTTPException(status_code=502, detail="Thumbnail fetch failed")
+        except RuntimeError as exc:  # missing creds → 503 not 502
+            _log.error("S4 client misconfigured: %s", exc)
+            raise HTTPException(status_code=503, detail="S4 not configured")
 
     # 4. Serve from cache
     media = "image/jpeg" if ext in (".jpg", ".jpeg") else f"image/{ext.lstrip('.')}"
