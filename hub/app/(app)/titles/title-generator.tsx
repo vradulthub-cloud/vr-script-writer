@@ -47,7 +47,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
 
   // Local AI state (FLUX + RMBG via Windows ComfyUI)
   const [fluxUseLora, setFluxUseLora] = useState(true)
-  const [fluxSteps, setFluxSteps] = useState(4)
+  const [fluxSteps, setFluxSteps] = useState(6)
   const [fluxBgRemove, setFluxBgRemove] = useState<"rmbg2" | "none">("rmbg2")
   const [fluxResult, setFluxResult] = useState<FluxLocalResult | null>(null)
   const [fluxLoading, setFluxLoading] = useState(false)

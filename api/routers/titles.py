@@ -266,16 +266,17 @@ _FLUX_TITLE_LORA = "title_card_style_v2-final.safetensors"
 _WORKFLOW_PATH = Path(__file__).resolve().parent.parent / "workflows" / "flux_transparent_title.json"
 
 _FLUX_PROMPT_PREFIX = (
-    "title card text reading {text}, isolated on pure white background, "
-    "bold display typography, dramatic lighting, cinematic, high contrast, "
-    "no other elements, centered composition"
+    "the words \"{text}\" rendered as bold metallic gold typography, "
+    "isolated text only on pure white background, no decorations, no frame, "
+    "no border, no panels, no objects, centered display lettering, "
+    "photographic gold leaf material, sharp clean letterforms, single line of text"
 )
 
 
 class FluxLocalRequest(BaseModel):
     text: str
     use_lora: bool = True                                 # apply trained title_card_style_v2 LoRA
-    steps: int = 4                                        # FLUX Schnell sweet spot
+    steps: int = 6                                        # 4 = fast but drops letters, 6-8 = clean spelling
     seed: int = 0                                         # 0 = random
     width: int = 1024                                     # multiple of 64
     height: int = 512                                     # multiple of 64
