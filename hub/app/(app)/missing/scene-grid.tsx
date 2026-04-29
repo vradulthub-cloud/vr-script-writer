@@ -178,7 +178,7 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
         body: "{}",
       })
       const data = await res.json()
-      setMegaMsg(res.ok ? "Scan requested — results will sync in ~5 min" : (data.detail ?? "Request failed"))
+      setMegaMsg(res.ok ? "Scan running — fresh asset flags in ~30-60s. Reload the page after that." : (data.detail ?? "Request failed"))
       if (res.ok) setMegaLastRefreshed(new Date())
     } catch {
       setMegaMsg("Could not reach API")
