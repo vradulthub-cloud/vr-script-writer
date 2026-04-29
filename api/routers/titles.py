@@ -275,7 +275,12 @@ _FLUX_PROMPT_PREFIX = (
 
 class FluxLocalRequest(BaseModel):
     text: str
-    use_lora: bool = True                                 # apply trained title_card_style_v2 LoRA
+    # Default OFF: the trained title_card_style_v2 LoRA at strength 0.85 +
+    # the current prompt produces FULLY-TRANSPARENT output (RMBG strips
+    # everything because the LoRA pulls FLUX toward outputs RMBG can't
+    # detect as foreground). Empirically: LoRA-on PNGs were ~3.8KB blank,
+    # LoRA-off PNGs were 270-350KB with real photographic gold-leaf text.
+    use_lora: bool = False
     steps: int = 6                                        # 4 = fast but drops letters, 6-8 = clean spelling
     seed: int = 0                                         # 0 = random
     width: int = 1024                                     # multiple of 64
