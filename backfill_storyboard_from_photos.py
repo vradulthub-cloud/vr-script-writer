@@ -169,13 +169,14 @@ def _largest_photos_zip(objects: list[dict]) -> dict | None:
     return max(candidates, key=lambda o: o["size"])
 
 
-def _has_storyboard_already(objects: list[dict]) -> bool:
-    return any(
-        "/Storyboard/" in o["key"]
+def _existing_storyboard_files(objects: list[dict]) -> list[str]:
+    """Existing Storyboard/ image keys (jpg/jpeg/png), in S4 order."""
+    return [
+        o["key"] for o in objects
+        if "/Storyboard/" in o["key"]
         and not o["key"].endswith("/")
         and o["key"].lower().endswith((".jpg", ".jpeg", ".png"))
-        for o in objects
-    )
+    ]
 
 
 def _evenly_spaced(items: list, n: int) -> list:
@@ -224,15 +225,33 @@ def _process_scene(
     picks: int,
     apply: bool,
 ) -> tuple[str, str]:
-    """Return (status, detail) — status ∈ {'ok', 'skip-has-story', 'skip-no-zip', 'error'}."""
+    """Return (status, detail) — status ∈ {'ok', 'skip-has-story', 'skip-no-zip', 'error'}.
+
+    Idempotency: a scene is "complete enough" if it already has at least
+    ceil(picks * 0.8) JPGs in Storyboard/. Below that threshold the
+    existing files are wiped and the scene is re-processed from the
+    photos zip — handles partial uploads from a failed prior run.
+    """
     try:
         bucket = s4_client._studio_to_bucket(studio)
         objs = _list_scene_objects(studio, scene_id)
     except Exception as exc:
         return ("error", f"list failed: {exc}")
 
-    if _has_storyboard_already(objs):
-        return ("skip-has-story", "")
+    existing = _existing_storyboard_files(objs)
+    threshold = max(1, (picks * 4 + 4) // 5)  # ceil(picks * 0.8)
+    if len(existing) >= threshold:
+        return ("skip-has-story", f"{len(existing)} ≥ {threshold}")
+
+    if existing and apply:
+        # Wipe partial uploads so we don't end up with mixed naming or
+        # double-counted frames.
+        client = s4_client._client()
+        for k in existing:
+            try:
+                client.delete_object(Bucket=bucket, Key=k)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("[%s] delete %s failed: %s", scene_id, k, exc)
     zip_obj = _largest_photos_zip(objs)
     if zip_obj is None:
         return ("skip-no-zip", "no Photos/*.zip")
@@ -249,31 +268,39 @@ def _process_scene(
             if not entries:
                 return ("skip-no-zip", "no images inside zip")
 
-            # Streamed extract + upload
+            # Streamed extract + upload. Use a direct put_object (single
+            # PUT) instead of boto3 upload_file — MEGA S4 has a multipart
+            # quirk where retries surface InvalidPart/NoSuchUpload errors.
+            # Storyboard JPGs are 1–10 MB, well under S3's 5 GB single-PUT
+            # cap, so multipart is unnecessary anyway.
+            import time
             uploaded: list[str] = []
+            client = s4_client._client()
             for info in entries:
-                # Flatten the in-zip path so storyboard keys aren't deeply nested.
                 base = os.path.basename(info.filename)
                 out_key = f"{scene_id}/Storyboard/{base}"
                 if not apply:
                     uploaded.append(out_key)
                     continue
-                # Read into a temp file (PIL would let us downsize; skipped
-                # here to preserve fidelity — ~1MB JPEGs already, so no win).
                 with zf.open(info) as src:
                     body = src.read()
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                    tmp.write(body)
-                    tmp_path = tmp.name
-                try:
-                    s4_client.put_object(
-                        studio, out_key, tmp_path,
-                        content_type="image/jpeg",
-                    )
-                    uploaded.append(out_key)
-                finally:
-                    try: os.unlink(tmp_path)
-                    except OSError: pass
+                last_err: Exception | None = None
+                for attempt in range(3):
+                    try:
+                        client.put_object(
+                            Bucket=bucket,
+                            Key=out_key,
+                            Body=body,
+                            ContentType="image/jpeg",
+                        )
+                        last_err = None
+                        break
+                    except Exception as exc:
+                        last_err = exc
+                        time.sleep(2 ** attempt)
+                if last_err:
+                    return ("error", f"put_object {out_key}: {last_err}")
+                uploaded.append(out_key)
 
         return ("ok", f"{len(uploaded)} files")
     except (zipfile.BadZipFile, ClientError) as exc:
