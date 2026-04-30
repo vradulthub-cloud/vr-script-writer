@@ -48,6 +48,16 @@ export function ExistingCompModal({
     description: string
   } | null>(null)
 
+  // Scene-list editing (TKT-0147). Parallel to title/volume/status/desc edit;
+  // textarea-based rather than drag-and-drop because scene IDs come from the
+  // Grail tab and editors usually paste a known list rather than reorder.
+  const [sceneEditing, setSceneEditing] = useState(false)
+  const [sceneIdsText, setSceneIdsText] = useState(
+    comp.scenes.map(s => s.scene_id).join("\n"),
+  )
+  const [sceneSaving, setSceneSaving] = useState(false)
+  const [sceneSaveErr, setSceneSaveErr] = useState<string | null>(null)
+
   const [photosetOpen, setPhotosetOpen] = useState(false)
 
   // Stay in sync if the parent swaps the comp object (e.g. list refresh).
@@ -58,7 +68,55 @@ export function ExistingCompModal({
     setDescription(comp.description)
     setEditing(false)
     setSaveErr(null)
-  }, [comp.comp_id, comp.title, comp.volume, comp.status, comp.description])
+    setSceneIdsText(comp.scenes.map(s => s.scene_id).join("\n"))
+    setSceneEditing(false)
+    setSceneSaveErr(null)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comp.comp_id, comp.title, comp.volume, comp.status, comp.description, comp.scenes.length])
+
+  async function saveScenes() {
+    setSceneSaving(true)
+    setSceneSaveErr(null)
+    const cleaned = sceneIdsText
+      .split(/[\s,]+/)
+      .map(s => s.trim().toUpperCase())
+      .filter(Boolean)
+    const uniq = Array.from(new Set(cleaned))
+    if (uniq.length === 0) {
+      setSceneSaveErr("Need at least one scene ID")
+      setSceneSaving(false)
+      return
+    }
+    if (uniq.length !== cleaned.length) {
+      setSceneSaveErr(`Duplicate IDs removed (${cleaned.length} → ${uniq.length})`)
+    }
+    try {
+      const res = await client.compilations.patchScenes(comp.comp_id, uniq)
+      // Optimistic local mutation so the modal reflects the new order without
+      // a parent refresh round-trip. Title/performers/mega will fill in on
+      // next reload.
+      comp.scenes = res.scene_ids.map((sid, i) => ({
+        scene_id: sid,
+        scene_num: i + 1,
+        title: comp.scenes.find(s => s.scene_id === sid)?.title ?? "",
+        performers: comp.scenes.find(s => s.scene_id === sid)?.performers ?? "",
+        mega_link: comp.scenes.find(s => s.scene_id === sid)?.mega_link ?? "",
+        slr_link: comp.scenes.find(s => s.scene_id === sid)?.slr_link ?? "",
+      }))
+      comp.scene_count = res.scene_count
+      setSceneIdsText(uniq.join("\n"))
+      setSceneEditing(false)
+    } catch (e) {
+      setSceneSaveErr(e instanceof Error ? e.message : "Save failed")
+    } finally {
+      setSceneSaving(false)
+    }
+  }
+  function cancelScenes() {
+    setSceneIdsText(comp.scenes.map(s => s.scene_id).join("\n"))
+    setSceneSaveErr(null)
+    setSceneEditing(false)
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !editing) onClose() }
@@ -436,7 +494,97 @@ export function ExistingCompModal({
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <SectionLabel>Scenes</SectionLabel>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <SectionLabel>Scenes</SectionLabel>
+              {!sceneEditing ? (
+                <button
+                  type="button"
+                  onClick={() => setSceneEditing(true)}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    padding: "4px 10px",
+                    background: "transparent",
+                    color: "var(--color-text-muted)",
+                    border: "1px solid var(--color-border)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Edit list
+                </button>
+              ) : null}
+            </div>
+            {sceneEditing && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <textarea
+                  value={sceneIdsText}
+                  onChange={e => setSceneIdsText(e.target.value)}
+                  rows={Math.max(6, Math.min(20, sceneIdsText.split("\n").length + 1))}
+                  spellCheck={false}
+                  style={{
+                    width: "100%",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 12,
+                    padding: "10px 12px",
+                    background: "var(--color-elevated)",
+                    color: "var(--color-text)",
+                    border: "1px solid var(--color-border)",
+                    outline: "none",
+                    resize: "vertical",
+                  }}
+                  placeholder="One scene ID per line (e.g. FPVR0762)"
+                />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
+                    {sceneSaveErr ? (
+                      <span style={{ color: "var(--color-err, #ef4444)" }}>{sceneSaveErr}</span>
+                    ) : (
+                      "One ID per line. Order = playback order. Saving rewrites the v3 block."
+                    )}
+                  </span>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={cancelScenes}
+                      disabled={sceneSaving}
+                      style={{
+                        padding: "5px 12px",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        background: "transparent",
+                        color: "var(--color-text-muted)",
+                        border: "1px solid var(--color-border)",
+                        cursor: sceneSaving ? "wait" : "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveScenes}
+                      disabled={sceneSaving}
+                      style={{
+                        padding: "5px 14px",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        background: "var(--color-lime)",
+                        color: "var(--color-lime-ink)",
+                        border: "1px solid transparent",
+                        cursor: sceneSaving ? "wait" : "pointer",
+                      }}
+                    >
+                      {sceneSaving ? "Saving…" : "Save scenes"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {comp.scenes.map((sc) => (
                 <div

@@ -807,6 +807,194 @@ def _comp_etag(title: str, volume: str, status: str, description: str) -> str:
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
 
 
+# ---------------------------------------------------------------------------
+# Scene-list edit — replace the scene rows of an existing block (TKT-0147)
+# ---------------------------------------------------------------------------
+
+class CompScenesPatchBody(BaseModel):
+    """Replacement scene list for an existing v3 comp block.
+
+    `scene_ids` is the new ordered list. The block is rewritten in place:
+    rows are inserted/deleted as needed; subsequent comp blocks shift up or
+    down to fit. The meta row's "{n} scenes" tally is recalculated.
+    """
+    scene_ids: list[str]
+
+
+@router.patch("/{comp_id}/scenes")
+async def patch_existing_comp_scenes(
+    comp_id: str, body: CompScenesPatchBody, user: CurrentUser,
+):
+    """Replace the scene list of an existing v3 block.
+
+    Locates the block by col B == comp_id, computes the existing scene-row
+    span, and rewrites it with the new ordered list. If the count changed,
+    extra rows are deleted or inserted so subsequent comps shift cleanly;
+    formatting is re-applied to the new block extent.
+    """
+    from api.sheets_client import with_retry
+
+    m = re.match(r"^([A-Z]+)-C\d{4}$", comp_id)
+    if not m:
+        raise HTTPException(status_code=400, detail=f"Invalid comp_id: {comp_id}")
+    key = m.group(1)
+    if key not in STUDIO_ACCENTS:
+        raise HTTPException(status_code=400, detail=f"Unknown studio key: {key}")
+
+    new_scene_ids = [sid.strip() for sid in body.scene_ids if sid and sid.strip()]
+    if not new_scene_ids:
+        raise HTTPException(status_code=400, detail="scene_ids cannot be empty")
+    if len(new_scene_ids) != len(set(new_scene_ids)):
+        raise HTTPException(status_code=400, detail="scene_ids must be unique")
+
+    # Pull title/performers metadata for the new scene list (DB read, no lock).
+    with get_db() as conn:
+        placeholders = ", ".join("?" * len(new_scene_ids))
+        rows = conn.execute(
+            f"SELECT id, title, performers FROM scenes WHERE id IN ({placeholders})",
+            new_scene_ids,
+        ).fetchall()
+        scene_meta = {dict(r)["id"]: dict(r) for r in rows}
+
+    new_scene_rows_data = []
+    for i, sid in enumerate(new_scene_ids, start=1):
+        meta = scene_meta.get(sid, {})
+        new_scene_rows_data.append({
+            "num": i,
+            "scene_id": sid,
+            "title": meta.get("title", ""),
+            "performers": meta.get("performers", ""),
+            "mega_url": _mega_link_for(sid),
+        })
+    new_n = len(new_scene_rows_data)
+
+    # The whole rewrite is held under the studio lock so a save / metadata
+    # patch can't shift our row indices mid-way.
+    with _STUDIO_LOCKS[key]:
+        try:
+            ws = _open_index_ws(key)
+            col_b = with_retry(lambda: ws.col_values(2))
+        except Exception as exc:
+            _log.error("Could not open Index for %s: %s", key, exc)
+            raise HTTPException(status_code=502, detail="Sheet read failed") from exc
+
+        # Locate title row
+        title_row_idx: Optional[int] = None
+        for i, cell in enumerate(col_b):
+            if cell.strip() == comp_id:
+                title_row_idx = i
+                break
+        if title_row_idx is None:
+            raise HTTPException(status_code=404, detail=f"Comp not found: {comp_id}")
+
+        # Walk forward from first_scene to count existing scene rows. A scene
+        # row's col B is a digit; any other value (empty=spacer, next comp_id)
+        # ends the block.
+        first_scene_idx = title_row_idx + 3
+        old_n = 0
+        i = first_scene_idx
+        while i < len(col_b):
+            v = col_b[i].strip()
+            if v.isdigit():
+                old_n += 1
+                i += 1
+            else:
+                break
+
+        if old_n == 0:
+            raise HTTPException(
+                status_code=409,
+                detail=f"No scene rows found under {comp_id} — block may be malformed",
+            )
+
+        # Read the meta row so we can update the "{n} scenes" tally without
+        # losing the description suffix or created-by fragment.
+        meta_row_n = title_row_idx + 2  # 1-indexed
+        try:
+            meta_window = with_retry(lambda: ws.get(f"D{meta_row_n}"))
+        except Exception as exc:
+            _log.error("Could not read meta row for %s: %s", comp_id, exc)
+            raise HTTPException(status_code=502, detail="Sheet read failed") from exc
+        cur_meta = (list(meta_window) + [[""]])[0]
+        cur_meta_text = (list(cur_meta) + [""])[0]
+        head, _, desc_tail = cur_meta_text.partition("\n")
+        # Replace the "N scene[s]" fragment in the head while preserving
+        # "Created date by user" prefix.
+        new_head = re.sub(
+            r"(\d+)\s+scenes?",
+            f"{new_n} scene{'s' if new_n != 1 else ''}",
+            head,
+            count=1,
+        )
+        if new_head == head and "scene" not in head:
+            # Older blocks without a scene tally — append one.
+            new_head = f"{head.rstrip()}  ·  {new_n} scene{'s' if new_n != 1 else ''}"
+        new_meta_text = f"{new_head}\n{desc_tail}".rstrip("\n") if desc_tail else new_head
+
+        # Build new scene block rows (8 cols A-H) — same shape as save().
+        new_scene_block: list[list] = []
+        for sd in new_scene_rows_data:
+            new_scene_block.append([
+                "", str(sd["num"]), sd["scene_id"], sd["title"],
+                sd["performers"], sd["mega_url"], "", "",
+            ])
+
+        # ── Apply ────────────────────────────────────────────────────────────
+        # 1) Update the meta row's tally + description.
+        # 2) Resize the scene-row span to new_n (delete extra / insert new).
+        # 3) Write the scene-row values.
+        # 4) Re-apply v3 formatting over [title_idx, spacer_idx].
+        first_scene_n = first_scene_idx + 1  # gspread is 1-indexed
+        try:
+            with_retry(lambda: ws.update(
+                f"D{meta_row_n}",
+                [[new_meta_text]],
+                value_input_option="USER_ENTERED",
+            ))
+            if new_n < old_n:
+                # Shrink — delete the extras (gspread delete_rows is 1-indexed,
+                # inclusive at both ends).
+                drop_from = first_scene_n + new_n
+                drop_to = first_scene_n + old_n - 1
+                with_retry(lambda: ws.delete_rows(drop_from, drop_to))
+            elif new_n > old_n:
+                # Grow — insert blanks; we'll fill via update next.
+                blank_rows = [["", "", "", "", "", "", "", ""]] * (new_n - old_n)
+                # insert_rows(values, row=N) inserts BEFORE row N. We want to
+                # insert directly after the last existing scene row, i.e. at
+                # row first_scene_n + old_n.
+                insert_at = first_scene_n + old_n
+                with_retry(lambda: ws.insert_rows(blank_rows, row=insert_at))
+            # Now write all new_n scene values in the now-correctly-sized span.
+            with_retry(lambda: ws.update(
+                f"A{first_scene_n}:H{first_scene_n + new_n - 1}",
+                new_scene_block,
+                value_input_option="USER_ENTERED",
+            ))
+            # Re-apply v3 formatting over the title-thru-spacer band.
+            current_status = "Draft"
+            try:
+                # Cheap re-read of the title row's E cell to recover status.
+                row_e = with_retry(lambda: ws.get(f"E{title_row_idx + 1}"))
+                cur_e = (list(row_e) + [[""]])[0]
+                cur_e_text = (list(cur_e) + [""])[0].strip()
+                _, current_status = _parse_vol_status(cur_e_text)
+            except Exception:
+                pass
+            _format_comp_block(ws, key, current_status or "Draft", title_row_idx, new_n)
+        except Exception as exc:
+            _log.error("Failed to patch scene list for %s: %s", comp_id, exc, exc_info=True)
+            raise HTTPException(status_code=502, detail="Sheet write failed") from exc
+
+    _log.info("Patched scene list for %s by %s — old=%d new=%d", comp_id, user.email, old_n, new_n)
+    return {
+        "status": "ok",
+        "comp_id": comp_id,
+        "scene_count": new_n,
+        "scene_ids": new_scene_ids,
+    }
+
+
 @router.patch("/{comp_id}")
 async def patch_existing_comp(comp_id: str, body: CompPatchBody, user: CurrentUser):
     """Update title / volume / status / description on an existing v3 block.
