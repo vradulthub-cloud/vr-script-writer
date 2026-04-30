@@ -36,12 +36,22 @@ import s4_client  # noqa: E402
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
+# Output path is environment-aware so this script works whether it's invoked
+# from the Mac cron (writes Dropbox + SCP to Windows) or from the FastAPI
+# /mega-refresh endpoint on Windows (writes directly to the file the API
+# reads — no SCP loop, no shelling back to itself). Override with
+# `MEGA_SCAN_OUTPUT=/abs/path/mega_scan.json`.
 DROPBOX_PATH = Path.home() / "Library" / "CloudStorage" / "Dropbox"
-OUTPUT_FILE = DROPBOX_PATH / "mega_scan.json"
+_DEFAULT_OUTPUT = DROPBOX_PATH / "mega_scan.json"
+OUTPUT_FILE = Path(os.environ.get("MEGA_SCAN_OUTPUT") or _DEFAULT_OUTPUT)
 RECENT_DAYS = 30
 
 WIN_DEST = "andre@100.90.90.68:C:/Users/andre/eclatech-hub/mega_scan.json"
 SSH_KEY = str(Path.home() / ".ssh" / "id_ed25519_win")
+# `MEGA_SCAN_NO_DEPLOY=1` skips the trailing SCP-to-Windows step. The Mac
+# cron leaves it unset (still SCPs); the in-process Windows caller sets it
+# to 1 because the file is already on the right machine.
+SKIP_DEPLOY = os.environ.get("MEGA_SCAN_NO_DEPLOY", "").lower() in ("1", "true", "yes")
 
 _DESC_EXTS = (".doc", ".docx", ".txt", ".rtf")
 
@@ -101,27 +111,38 @@ def is_scene_prefix(raw: str, studio: str) -> bool:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Scan MEGA S4 buckets for scene folders missing Description docs."
-    )
-    parser.add_argument("--force", action="store_true",
-                        help="Scan all scenes, ignoring the 30-day recency filter")
-    args = parser.parse_args()
+def run_scan(force: bool = False, output_file: Path | None = None,
+             skip_deploy: bool | None = None) -> dict:
+    """Programmatic entry point.
+
+    Returns a dict summary so a caller (e.g. FastAPI's /mega-refresh) can
+    log/return useful info without parsing stdout. Side effects:
+      - writes the new mega_scan.json to ``output_file`` (or env override,
+        or the Mac Dropbox default)
+      - optionally SCPs to Windows when run from the Mac and not skipped
+
+    Designed to be safe to call in-process from the FastAPI service on
+    Windows: pass ``output_file=settings.base_dir / "mega_scan.json"``
+    and ``skip_deploy=True`` and there's no shell-out, no SCP, no
+    cross-machine round-trip.
+    """
+    out_file = output_file if output_file is not None else OUTPUT_FILE
+    deploy_disabled = SKIP_DEPLOY if skip_deploy is None else skip_deploy
 
     scanned_at = datetime.now().isoformat(timespec="seconds")
     scenes: list[dict] = []
 
     print(f"Scan started at {scanned_at}")
-    print(f"Mode: {'FORCE (all scenes)' if args.force else f'recent only (last {RECENT_DAYS}d)'}")
+    print(f"Mode: {'FORCE (all scenes)' if force else f'recent only (last {RECENT_DAYS}d)'}")
+    print(f"Output: {out_file}")
     print()
 
     # Carry forward older scenes that fall outside the recency window so the
     # output doesn't shrink each non-force run (would wipe has_* flags in DB).
     prior_by_id: dict[str, dict] = {}
-    if not args.force and OUTPUT_FILE.exists():
+    if not force and out_file.exists():
         try:
-            prior = json.loads(OUTPUT_FILE.read_text())
+            prior = json.loads(out_file.read_text())
             for s in prior.get("scenes") or []:
                 if s.get("scene_id"):
                     prior_by_id[s["scene_id"]] = s
@@ -188,7 +209,7 @@ def main() -> None:
             if len(entry["raw_casings"]) > 1:
                 cases = sorted(entry["raw_casings"])
                 print(f"  [WARN] {canon} has multiple casings on disk: {cases}", file=sys.stderr)
-            if args.force or is_recent(mtime, RECENT_DAYS):
+            if force or is_recent(mtime, RECENT_DAYS):
                 seen_canonical[canon] = studio
                 in_scope.append((canon, entry, mtime_str))
 
@@ -253,22 +274,55 @@ def main() -> None:
     scenes.sort(key=lambda s: (s["has_description"], s["scene_id"]))
 
     output = {"scanned_at": scanned_at, "scenes": scenes}
-    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_FILE.write_text(json.dumps(output, indent=2))
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(json.dumps(output, indent=2))
 
     missing = sum(1 for s in scenes if not s["has_description"])
     print(f"Done. {missing}/{len(scenes)} scenes missing descriptions.")
-    print(f"Output: {OUTPUT_FILE}")
+    print(f"Output: {out_file}")
 
     # Deploy to Windows so the API service reads the same scan.
-    result = subprocess.run(
-        ["scp", "-i", SSH_KEY, str(OUTPUT_FILE), WIN_DEST],
-        capture_output=True, text=True,
-    )
-    if result.returncode == 0:
-        print("Deployed to Windows.")
+    # Skipped when called from a Windows-side runner (no shelling back
+    # to itself) or when explicitly disabled.
+    deployed = False
+    deploy_error = None
+    if not deploy_disabled and sys.platform == "darwin":
+        result = subprocess.run(
+            ["scp", "-i", SSH_KEY, str(out_file), WIN_DEST],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            print("Deployed to Windows.")
+            deployed = True
+        else:
+            deploy_error = result.stderr.strip()
+            print(f"SCP to Windows failed: {deploy_error}")
     else:
-        print(f"SCP to Windows failed: {result.stderr.strip()}")
+        print("Skipping SCP to Windows (skip_deploy=True or non-Mac host).")
+
+    return {
+        "scanned_at": scanned_at,
+        "scene_count": len(scenes),
+        "missing_descriptions": missing,
+        "output_path": str(out_file),
+        "deployed": deployed,
+        "deploy_error": deploy_error,
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Scan MEGA S4 buckets for scene folders missing Description docs."
+    )
+    parser.add_argument("--force", action="store_true",
+                        help="Scan all scenes, ignoring the 30-day recency filter")
+    parser.add_argument("--no-deploy", action="store_true",
+                        help="Skip the SCP-to-Windows step (auto-on for non-Mac hosts)")
+    parser.add_argument("--output", type=Path, default=None,
+                        help=f"Output path (default: $MEGA_SCAN_OUTPUT or {OUTPUT_FILE})")
+    args = parser.parse_args()
+    run_scan(force=args.force, output_file=args.output,
+             skip_deploy=args.no_deploy if args.no_deploy else None)
 
 
 if __name__ == "__main__":
