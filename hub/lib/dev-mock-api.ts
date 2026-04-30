@@ -501,6 +501,20 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
       description: body.description ?? "",
     } as unknown as T)
   }
+  // PATCH /compilations/{comp_id}/scenes — echo back the new scene list so the
+  // modal's optimistic mutation has something to confirm against (TKT-0147).
+  const compScenesPatch = base.match(/^\/compilations\/([A-Z]+-C\d{4})\/scenes$/)
+  if (compScenesPatch && (init.method || "").toUpperCase() === "PATCH") {
+    const comp_id = compScenesPatch[1]
+    const body = init.body ? JSON.parse(init.body as string) : {}
+    const scene_ids = Array.isArray(body.scene_ids) ? body.scene_ids : []
+    return wait({
+      status: "ok",
+      comp_id,
+      scene_count: scene_ids.length,
+      scene_ids,
+    } as unknown as T)
+  }
 
   // ── Shoots ────────────────────────────────────────────────────────────
   if (base === "/shoots/") {
