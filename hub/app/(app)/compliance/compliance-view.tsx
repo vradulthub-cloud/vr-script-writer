@@ -1675,6 +1675,8 @@ function TalentPicker({
   signed,
   onStartFemale,
   onStartMale,
+  onAutoSignMale,
+  autoSignMaleStatus,
   onContinueToPhotos,
   onImportFromDrive,
 }: {
@@ -1683,6 +1685,8 @@ function TalentPicker({
   signed: SignedSummary[]
   onStartFemale: () => void
   onStartMale: () => void
+  onAutoSignMale: () => void
+  autoSignMaleStatus: "idle" | "running" | "no-prior" | "error"
   onContinueToPhotos: () => void
   onImportFromDrive: () => void
 }) {
@@ -1733,15 +1737,49 @@ function TalentPicker({
           onStart={onStartFemale}
         />
         {needsMale && (
-          <TalentSignCard
-            role="Male"
-            display={shoot.male_talent}
-            accent={accent}
-            signed={maleSigned}
-            shootId={shoot.shoot_id}
-            slug={shoot.male_talent.replace(/ /g, "")}
-            onStart={onStartMale}
-          />
+          <div>
+            <TalentSignCard
+              role="Male"
+              display={shoot.male_talent}
+              accent={accent}
+              signed={maleSigned}
+              shootId={shoot.shoot_id}
+              slug={shoot.male_talent.replace(/ /g, "")}
+              onStart={onStartMale}
+            />
+            {/* Auto-fill: when the male shoots back-to-back the same paperwork
+                applies. Server clones his most recent compliance_signatures row
+                into this shoot — no iPad round-trip needed. Hidden once signed. */}
+            {!maleSigned && (
+              <button
+                type="button"
+                onClick={onAutoSignMale}
+                disabled={autoSignMaleStatus === "running"}
+                style={{
+                  marginTop: 8,
+                  width: "100%",
+                  background: "transparent",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: 8, padding: "10px 12px",
+                  fontSize: 12, fontWeight: 500,
+                  color: autoSignMaleStatus === "no-prior"
+                    ? "var(--color-text-faint)"
+                    : "var(--color-text-muted)",
+                  cursor: autoSignMaleStatus === "running" ? "wait" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                }}
+                title="Apply the male's most recent paperwork to this shoot. No iPad signature needed."
+              >
+                {autoSignMaleStatus === "running"
+                  ? "Auto-filling…"
+                  : autoSignMaleStatus === "no-prior"
+                  ? `No prior paperwork on file for ${shoot.male_talent} — sign once first`
+                  : autoSignMaleStatus === "error"
+                  ? "Auto-fill failed — try again"
+                  : `Auto-fill from prior paperwork`}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -1975,6 +2013,11 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   const [driveImportSubmitting, setDriveImportSubmitting] = useState(false)
   const [driveImportError, setDriveImportError] = useState<string | null>(null)
 
+  // Auto-fill male paperwork from prior shoots (TKT-0167)
+  const [autoSignMaleStatus, setAutoSignMaleStatus] = useState<
+    "idle" | "running" | "no-prior" | "error"
+  >("idle")
+
   // Photos step state — locally captured (this session, not yet uploaded)
   const [photos, setPhotos] = useState<CapturedPhoto[]>([])
   // Server-persisted photos for the selected shoot. Loaded on entry so the
@@ -2099,6 +2142,28 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
     setSignaturePng(null)
     setSignError(null)
     setDocsPhase("male-sign")
+  }
+
+  // ── Auto-fill male paperwork from prior shoot ─────────────────────────
+  // Cloud lookup of the male's most recent compliance_signatures row +
+  // upsert into this shoot. No iPad signature needed — typical for
+  // back-to-back shoots where the male's W-9/2257 hasn't changed.
+  async function handleAutoSignMale() {
+    if (!selected) return
+    setAutoSignMaleStatus("running")
+    try {
+      const result = await client.compliance.autoSignMale(selected.shoot_id)
+      if (result.skipped_reason) {
+        setAutoSignMaleStatus("no-prior")
+        return
+      }
+      // Refresh the signed summary so the male card flips to "signed"
+      const updated = await client.compliance.signed(selected.shoot_id)
+      setSignedSummary(updated)
+      setAutoSignMaleStatus("idle")
+    } catch {
+      setAutoSignMaleStatus("error")
+    }
   }
 
   // ── Sign handler — collects form + drawn PNG, POSTs to /sign ──────────
@@ -2675,6 +2740,8 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               signed={signedSummary}
               onStartFemale={() => { setSignError(null); setFemaleError(null); setDocsPhase("female-form") }}
               onStartMale={() => { setSignError(null); setMaleError(null); setDocsPhase("male-form") }}
+              onAutoSignMale={handleAutoSignMale}
+              autoSignMaleStatus={autoSignMaleStatus}
               onContinueToPhotos={() => setStep("photos")}
               onImportFromDrive={() => {
                 setDriveImportError(null)

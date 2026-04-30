@@ -1746,6 +1746,118 @@ async def get_signature_as_of(
     return SignatureRow(**dict(row))
 
 
+# ─── Auto-sign for males whose paperwork is already on file (TKT-0167) ──────
+# Males in MALE_TPLS shoot back-to-back with the same pre-filled paperwork
+# (W-9 + 2257 stay constant per talent for years). The team shouldn't have
+# to re-collect a signature each time. This endpoint clones the male's most
+# recent compliance_signatures row into the target shoot, so the UI sees
+# them as "signed" without an iPad round trip.
+
+
+class AutoSignMaleResult(BaseModel):
+    shoot_id: str
+    talent_slug: str
+    source_shoot_id: str = ""    # the prior record we cloned, if any
+    created_signature_id: int = 0
+    skipped_reason: str = ""     # set if no prior record exists
+
+
+@router.post("/shoots/{shoot_id}/auto-sign-male", response_model=AutoSignMaleResult)
+async def auto_sign_male(shoot_id: str, user: CurrentUser):
+    """Clone the male's most recent compliance_signatures row into this shoot.
+
+    Use case: same male shoots Mon/Tue/Wed back-to-back with the same female
+    or different females. His paperwork is identical (W-9, 2257) every day —
+    no point re-signing. Operator clicks "Auto-fill from prior" in the
+    compliance UI, this endpoint does the rest.
+
+    Idempotent — UNIQUE(shoot_id, talent_role, talent_slug) means re-calling
+    overwrites the existing row, capturing the prior state in the history
+    trigger.
+    """
+    from_d, to_d = _window()
+    shoots = _load_shoots_window(from_d, to_d, include_cancelled=False)
+    shoot = next((s for s in shoots if s.shoot_id == shoot_id), None)
+    if not shoot:
+        raise HTTPException(status_code=404, detail="shoot not found")
+    if not shoot.male_talent:
+        raise HTTPException(status_code=400, detail="shoot has no male talent")
+
+    male_slug = shoot.male_talent.replace(" ", "")
+    bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in ("BG", "BGCP")]
+    primary = bg_scenes[0] if bg_scenes else None
+    scene_id = primary.scene_id if primary else ""
+    studio = primary.studio if primary else ""
+
+    # Find the male's most recent prior signature (any shoot). Prefer rows
+    # populated with PII (legal_name + dob set) — placeholders without
+    # extracted fields shouldn't propagate.
+    with get_db() as conn:
+        prior = conn.execute(
+            "SELECT * FROM compliance_signatures "
+            "WHERE talent_role='male' AND talent_slug=? "
+            "  AND legal_name != '' AND legal_name IS NOT NULL "
+            "  AND shoot_id != ? "
+            "ORDER BY signed_at DESC LIMIT 1",
+            (male_slug, shoot_id),
+        ).fetchone()
+
+    if not prior:
+        return AutoSignMaleResult(
+            shoot_id=shoot_id,
+            talent_slug=male_slug,
+            skipped_reason=f"No prior signature on file for {male_slug}. "
+                           "Run /admin/bulk-import-from-drive or have the "
+                           "talent sign once in-person.",
+        )
+
+    # Clone — preserves the male's PII; updates only the shoot anchor.
+    sig_id = upsert_signature(
+        shoot_id=shoot_id,
+        shoot_date=shoot.shoot_date,
+        scene_id=scene_id,
+        studio=studio,
+        talent_role="male",
+        talent_slug=male_slug,
+        talent_display=shoot.male_talent,
+        legal_name=prior["legal_name"],
+        business_name=prior["business_name"] or "",
+        tax_classification=prior["tax_classification"] or "individual",
+        llc_class=prior["llc_class"] or "",
+        other_classification=prior["other_classification"] or "",
+        exempt_payee_code=prior["exempt_payee_code"] or "",
+        fatca_code=prior["fatca_code"] or "",
+        tin_type=prior["tin_type"] or "ssn",
+        tin=prior["tin"] or "",
+        dob=prior["dob"] or "",
+        place_of_birth=prior["place_of_birth"] or "",
+        street_address=prior["street_address"] or "",
+        city_state_zip=prior["city_state_zip"] or "",
+        phone=prior["phone"] or "",
+        email=prior["email"] or "",
+        id1_type=prior["id1_type"] or "",
+        id1_number=prior["id1_number"] or "",
+        id2_type=prior["id2_type"] or "",
+        id2_number=prior["id2_number"] or "",
+        stage_names=prior["stage_names"] or shoot.male_talent,
+        professional_names=prior["professional_names"] or "",
+        nicknames_aliases=prior["nicknames_aliases"] or "",
+        previous_legal_names=prior["previous_legal_names"] or "",
+        signature_image_path=prior["signature_image_path"] or "auto-fill-from-prior",
+        signed_ip="",
+        signed_user_agent="auto-sign-male",
+        signed_by_user=f"auto-fill:from-{prior['shoot_id']}",
+        pdf_local_path="",
+        pdf_mega_path="",
+    )
+    return AutoSignMaleResult(
+        shoot_id=shoot_id,
+        talent_slug=male_slug,
+        source_shoot_id=prior["shoot_id"],
+        created_signature_id=sig_id,
+    )
+
+
 # ─── Legacy Drive paperwork import (TKT-0152) ────────────────────────────────
 # Wires already-signed Drive PDFs into compliance_signatures so a shoot whose
 # talent finished paperwork in the legacy Drive flow shows complete in the Hub
