@@ -11,6 +11,13 @@ import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
 import { WritingEmptyState } from "@/components/ui/writing-empty"
+import {
+  WritingHero,
+  ThemeBlockquote,
+  PlotProse,
+  MetaStrip,
+  ValidationStrip,
+} from "@/components/ui/writing-output"
 import { PageHeader } from "@/components/ui/page-header"
 import { SheetRowModal } from "@/components/ui/sheet-row-modal"
 import { TodayBriefing, type Briefing } from "@/components/ui/today-briefing"
@@ -732,35 +739,36 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
 
         {(stream.output || stream.streaming) && (
           <>
-            {/* Beats counter when sections parsed — rest of the stat strip
-                lives in the ec-block header now. */}
-            {stream.output && Object.keys(sections).length > 0 && (
-              <div className="flex items-center gap-3 mb-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-                <span className="tabular-nums">{Object.keys(sections).length} beat{Object.keys(sections).length === 1 ? "" : "s"}</span>
-              </div>
-            )}
-
-            {/* Raw streaming output — paper-themed writing surface (Writing
-                Room v3). Serif body face + warm bg makes long-form reading
-                comfortable. Falls back to var(--font-sans) if the browser
-                hasn't loaded Newsreader yet. */}
+            {/* v3 paper output — hero + (raw stream | parsed article).
+                Streaming: hero + raw text with cursor.
+                After streaming + sections parsed: hero + theme blockquote +
+                plot prose + metadata strip. Fallback to raw text inside the
+                same paper surface if parsing yields nothing. */}
             <div
               className="writing-paper rounded mb-4 overflow-auto"
-              style={{
-                padding: "20px 26px",
-                maxHeight: 480,
-              }}
+              style={{ padding: "32px 36px", maxHeight: 720 }}
             >
-              <pre
-                className="writing-body"
-                style={{
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  margin: 0,
-                }}
-              >
-                {stream.output}
-                {stream.streaming && (
+              <WritingHero
+                studioAbbr={studioAbbr(studio)}
+                studioColor={studioColor}
+                meta={sceneType}
+                title={
+                  genTitleText ||
+                  [female, male].filter(Boolean).join(" & ") ||
+                  "Untitled"
+                }
+              />
+
+              {stream.streaming && (
+                <pre
+                  className="writing-body"
+                  style={{
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    margin: 0,
+                  }}
+                >
+                  {stream.output}
                   <span
                     style={{
                       display: "inline-block",
@@ -772,8 +780,33 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
                       animation: "streamCursorPulse 1s ease-in-out infinite",
                     }}
                   />
-                )}
-              </pre>
+                </pre>
+              )}
+
+              {!stream.streaming && Object.keys(sections).length > 0 && (
+                <>
+                  {sections["THEME"] && (
+                    <ThemeBlockquote text={sections["THEME"]} studioColor={studioColor} />
+                  )}
+                  {sections["PLOT"] && <PlotProse text={sections["PLOT"]} />}
+                  <MetaStrip
+                    rows={[
+                      { label: "Location",      value: sections["SHOOT LOCATION"] ?? "" },
+                      { label: "Her Wardrobe",  value: sections["WARDROBE - FEMALE"] ?? "" },
+                      { label: "His Wardrobe",  value: sections["WARDROBE - MALE"]   ?? "" },
+                    ]}
+                  />
+                </>
+              )}
+
+              {!stream.streaming && stream.output && Object.keys(sections).length === 0 && (
+                <pre
+                  className="writing-body"
+                  style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0 }}
+                >
+                  {stream.output}
+                </pre>
+              )}
             </div>
 
             {/* Primary actions — immediately after output so user doesn't need to scroll */}
@@ -852,34 +885,8 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
               </div>
             )}
 
-            {/* Parsed sections */}
-            {!stream.streaming && Object.keys(sections).length > 0 && (
-              <div
-                className="rounded mb-4"
-                style={{
-                  background: "var(--color-surface)",
-                  border: "1px solid var(--color-border)",
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  className="px-3 py-2"
-                  style={{ borderBottom: "1px solid var(--color-border)", fontSize: 11, color: "var(--color-text-muted)", fontWeight: 500 }}
-                >
-                  Parsed sections
-                </div>
-                <div className="px-3 py-2 flex flex-col gap-3">
-                  {Object.entries(sections).map(([key, val]) => (
-                    <div key={key}>
-                      <p style={{ fontSize: 10, color: "var(--color-text-faint)", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 3 }}>
-                        {key}
-                      </p>
-                      <p style={{ fontSize: 12, color: "var(--color-text)", lineHeight: 1.6 }}>{val}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Parsed sections — replaced by v3 hero + ThemeBlockquote +
+                PlotProse + MetaStrip inside the writing-paper above. */}
 
             {/* Secondary controls */}
             {!stream.streaming && stream.output && (

@@ -11,6 +11,7 @@ import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
 import { WritingEmptyState } from "@/components/ui/writing-empty"
+import { WritingHero } from "@/components/ui/writing-output"
 import { PageHeader } from "@/components/ui/page-header"
 import { studioAbbr } from "@/lib/studio-colors"
 import { ApprovedTagsReference } from "@/components/ui/approved-tags-reference"
@@ -941,8 +942,15 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                 Newsreader serif body face for long-form reading. */}
             <div
               className="writing-paper rounded mb-4"
-              style={{ padding: "20px 26px" }}
+              style={{ padding: "32px 36px" }}
             >
+              <WritingHero
+                studioAbbr={studioAbbr(studio)}
+                studioColor={studioColor}
+                meta={selectedScene?.id ?? null}
+                title={selectedScene?.title || performers || "Untitled"}
+                byline={performers ? `by ${performers}` : null}
+              />
               {stream.streaming ? (
                 /* While streaming — show serif body with pulsing cursor */
                 <p className="writing-body" style={{ whiteSpace: "pre-wrap" }}>
