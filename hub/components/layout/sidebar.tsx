@@ -16,6 +16,7 @@ import {
   Ticket,
   Shield,
   ClipboardCheck,
+  UploadCloud,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -47,6 +48,7 @@ const NAV_SECTIONS = [
     label: "Operations",
     items: [
       { href: "/missing", label: "Grail Assets", shortLabel: "Grail",   icon: AlertCircle, tabKey: "Tickets" },
+      { href: "/uploads", label: "Uploads",      shortLabel: "Upload",  icon: UploadCloud },
       { href: "/titles",  label: "Titles",       shortLabel: "Titles",  icon: ImageIcon,   tabKey: "Titles" },
       { href: "/tickets", label: "Tickets",      shortLabel: "Tickets", icon: Ticket,      tabKey: "Tickets" },
     ],
@@ -151,7 +153,10 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
         {/* Sectioned nav */}
         {NAV_SECTIONS.map(section => {
           const visible = section.items.filter(
-            item => allowed === null || allowed.has(item.tabKey),
+            // No tabKey = visible to everyone (e.g. Uploads, intentionally
+            // ungated). Otherwise: admins always see it; editors only if
+            // their allowed_tabs include the key.
+            item => !("tabKey" in item) || allowed === null || allowed.has((item as { tabKey: string }).tabKey),
           )
           if (visible.length === 0) return null
           return (

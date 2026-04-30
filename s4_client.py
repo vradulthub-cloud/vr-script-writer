@@ -267,6 +267,92 @@ def presign(studio: str, key: str, ttl: int = PRESIGN_DEFAULT_TTL) -> str:
     )
 
 
+# ── Multipart upload (browser-direct uploads from the hub Uploads dashboard) ──
+#
+# MEGA S4 has a permissive default CORS policy — `Etag` is exposed on every
+# response, so the browser can do the entire multipart dance with presigned
+# part URLs and we never have to stream multi-GB bodies through FastAPI.
+#
+# Standard multipart shape:
+#   1. create_multipart_upload   — get an UploadId
+#   2. for each part 1..N:       — upload_part with bytes; capture ETag
+#   3. complete_multipart_upload — pass the {PartNumber, ETag} list
+#   xx. abort_multipart_upload   — on failure / cancel; orphans cost storage
+#
+# 64 MB part size, max 10_000 parts → 640 GB ceiling, well above our ~3 GB max.
+
+PART_SIZE = 64 * 1024 * 1024  # 64 MB; matches migrate_drive_to_s4.py.
+PRESIGN_PART_TTL = 6 * 60 * 60  # 6 h. SigV4 caps at 7 days.
+
+
+def create_multipart_upload(studio: str, key: str,
+                            content_type: str | None = None) -> str:
+    bucket = _studio_to_bucket(studio)
+    kwargs: dict = {"Bucket": bucket, "Key": key}
+    if content_type:
+        kwargs["ContentType"] = content_type
+    resp = _client().create_multipart_upload(**kwargs)
+    return resp["UploadId"]
+
+
+def presign_part(studio: str, key: str, upload_id: str, part_number: int,
+                 ttl: int = PRESIGN_PART_TTL) -> str:
+    """Presigned PUT URL for a single part. Browser PUTs the chunk bytes here
+    and reads ETag from the response."""
+    bucket = _studio_to_bucket(studio)
+    return _client().generate_presigned_url(
+        "upload_part",
+        Params={
+            "Bucket":     bucket,
+            "Key":        key,
+            "UploadId":   upload_id,
+            "PartNumber": part_number,
+        },
+        ExpiresIn=ttl,
+    )
+
+
+def complete_multipart_upload(studio: str, key: str, upload_id: str,
+                              parts: list[dict]) -> dict:
+    """``parts`` = ``[{'PartNumber': int, 'ETag': str}, ...]`` in part-number
+    order. Returns the boto3 response dict (contains the final object ETag)."""
+    bucket = _studio_to_bucket(studio)
+    return _client().complete_multipart_upload(
+        Bucket=bucket,
+        Key=key,
+        UploadId=upload_id,
+        MultipartUpload={"Parts": parts},
+    )
+
+
+def abort_multipart_upload(studio: str, key: str, upload_id: str) -> None:
+    bucket = _studio_to_bucket(studio)
+    _client().abort_multipart_upload(
+        Bucket=bucket, Key=key, UploadId=upload_id,
+    )
+
+
+def abort_lingering_multipart(studio: str, key: str) -> int:
+    """Cancel every in-progress multipart upload for ``key`` so a retry can
+    create a fresh UploadId. Mirrors migrate_drive_to_s4.py's
+    ``_abort_lingering_multipart`` so behaviour stays consistent. Returns the
+    number of uploads aborted."""
+    bucket = _studio_to_bucket(studio)
+    client = _client()
+    aborted = 0
+    try:
+        resp = client.list_multipart_uploads(Bucket=bucket, Prefix=key)
+        for u in resp.get("Uploads", []) or []:
+            if u["Key"] == key:
+                client.abort_multipart_upload(
+                    Bucket=bucket, Key=key, UploadId=u["UploadId"],
+                )
+                aborted += 1
+    except ClientError:
+        pass
+    return aborted
+
+
 # ── Probe CLI ─────────────────────────────────────────────────────────────────
 
 def _probe() -> int:
