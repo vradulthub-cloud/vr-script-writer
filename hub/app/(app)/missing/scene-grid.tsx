@@ -330,21 +330,8 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
         <RetryError message={error} onRetry={() => { setError(null); window.location.reload() }} className="mb-4" />
       )}
 
-      {/* Grid + slide-in detail panel.
-          Animating grid-template-columns (instead of width) lets the browser
-          coordinate both tracks in one layout pass rather than re-flowing
-          per frame on a width transition. */}
-      <div
-        className="asset-tracker-shell"
-        style={{
-          display: "grid",
-          gridTemplateColumns: selectedScene ? "minmax(0, 1fr) 480px" : "minmax(0, 1fr) 0px",
-          columnGap: selectedScene ? 12 : 0,
-          alignItems: "flex-start",
-          transition: "grid-template-columns 260ms cubic-bezier(0.16, 1, 0.3, 1), column-gap 260ms cubic-bezier(0.16, 1, 0.3, 1)",
-        }}
-      >
-        {/* Grid zone — shrinks when panel is open */}
+      {/* Full-width grid; scene detail opens as a centered modal overlay. */}
+      <div className="asset-tracker-shell">
         <div style={{ minWidth: 0 }}>
           {STUDIO_ORDER
             .filter(s => studio === "All" || s === studio)
@@ -405,34 +392,108 @@ export function SceneGrid({ scenes: initialScenes, stats, error: initialError, i
           )}
         </div>
 
-        {/* Side panel wrapper — GPU-accelerated transform+opacity only */}
-        <div
-          className="asset-tracker-panel"
-          style={{
-            minWidth: 0,
-            position: "sticky",
-            top: 12,
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              transform: selectedScene ? "translateX(0)" : "translateX(calc(100% + 12px))",
-              opacity: selectedScene ? 1 : 0,
-              transition: "transform 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease-out",
-              pointerEvents: selectedScene ? "auto" : "none",
-            }}
-          >
-            {selectedScene && (
-              <SceneDetail
-                key={selectedScene.id}
-                scene={selectedScene}
-                idToken={idToken}
-                onClose={() => morphTo(() => setSelectedScene(null))}
-                onSceneUpdate={handleSceneUpdate}
-              />
-            )}
-          </div>
+      </div>
+
+      {/* Scene detail — centered modal overlay. Backdrop click + ESC close. */}
+      <SceneDetailModal
+        scene={selectedScene}
+        idToken={idToken}
+        onClose={() => morphTo(() => setSelectedScene(null))}
+        onSceneUpdate={handleSceneUpdate}
+      />
+    </div>
+  )
+}
+
+// ─── Scene detail modal: replaces the legacy sticky side panel ───────────────
+
+function SceneDetailModal({
+  scene,
+  idToken,
+  onClose,
+  onSceneUpdate,
+}: {
+  scene: Scene | null
+  idToken?: string
+  onClose: () => void
+  onSceneUpdate: (updated: Scene) => void
+}) {
+  // ESC closes the modal — matches the rest of the app's modal pattern
+  // (compilations, generated-title, etc.).
+  useEffect(() => {
+    if (!scene) return
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose()
+    }
+    window.addEventListener("keydown", handleKey)
+    return () => window.removeEventListener("keydown", handleKey)
+  }, [scene, onClose])
+
+  // Lock body scroll while the modal is open so the backdrop doesn't
+  // scroll the underlying grid when the user uses arrow keys / wheel.
+  useEffect(() => {
+    if (!scene) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => { document.body.style.overflow = prev }
+  }, [scene])
+
+  if (!scene) return null
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Scene ${scene.id} details`}
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 60,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "min(5vh, 32px)",
+        background: "color-mix(in srgb, var(--color-base) 70%, transparent)",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
+        animation: "scene-modal-fade 180ms ease-out",
+      }}
+    >
+      <style jsx>{`
+        @keyframes scene-modal-fade {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        @keyframes scene-modal-rise {
+          from { opacity: 0; transform: translateY(8px) scale(0.985); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+      `}</style>
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: "min(720px, 92vw)",
+          maxWidth: 720,
+          maxHeight: "calc(100vh - min(10vh, 64px))",
+          display: "flex",
+          flexDirection: "column",
+          background: "var(--color-surface)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 10,
+          boxShadow: "0 24px 60px -12px rgba(0,0,0,0.55), 0 8px 16px -8px rgba(0,0,0,0.4)",
+          animation: "scene-modal-rise 220ms cubic-bezier(0.16, 1, 0.3, 1)",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
+          <SceneDetail
+            key={scene.id}
+            scene={scene}
+            idToken={idToken}
+            onClose={onClose}
+            onSceneUpdate={onSceneUpdate}
+          />
         </div>
       </div>
     </div>

@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { X, Wand2, FolderPlus, ImageOff } from "lucide-react"
+import { createPortal } from "react-dom"
+import { X, Wand2, FolderPlus, ImageOff, Maximize2 } from "lucide-react"
 import { api, thumbnailUrl, type Scene, type NamingIssue } from "@/lib/api"
 import { completionPct } from "@/lib/scene-utils"
 import { formatApiError } from "@/lib/errors"
@@ -668,6 +669,8 @@ function SceneThumbnail({
   onError: () => void
   onRetry: () => void
 }) {
+  const [expanded, setExpanded] = useState(false)
+
   const frameStyle: React.CSSProperties = {
     width: THUMB_WIDTH,
     aspectRatio: "16 / 9",
@@ -723,15 +726,163 @@ function SceneThumbnail({
   }
 
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={thumbnailUrl(sceneId)}
-      alt={`${sceneId} thumbnail`}
-      loading="lazy"
-      decoding="async"
-      onError={onError}
-      style={{ ...frameStyle, objectFit: "cover", display: "block" }}
-    />
+    <>
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        aria-label={`Expand ${sceneId} thumbnail`}
+        title="Click to expand"
+        style={{
+          ...frameStyle,
+          padding: 0,
+          cursor: "zoom-in",
+          position: "relative",
+        }}
+        className="scene-thumbnail-trigger"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={thumbnailUrl(sceneId)}
+          alt={`${sceneId} thumbnail`}
+          loading="lazy"
+          decoding="async"
+          onError={onError}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
+        <span
+          aria-hidden="true"
+          className="scene-thumbnail-zoom"
+          style={{
+            position: "absolute",
+            top: 4, right: 4,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 20, height: 20,
+            borderRadius: 3,
+            background: "rgba(0,0,0,0.55)",
+            color: "#fff",
+            opacity: 0,
+            transition: "opacity 140ms ease-out",
+            pointerEvents: "none",
+          }}
+        >
+          <Maximize2 size={11} />
+        </span>
+        <style jsx>{`
+          .scene-thumbnail-trigger:hover .scene-thumbnail-zoom,
+          .scene-thumbnail-trigger:focus-visible .scene-thumbnail-zoom { opacity: 1; }
+        `}</style>
+      </button>
+      {expanded && (
+        <ThumbnailLightbox
+          src={thumbnailUrl(sceneId, { full: true })}
+          alt={`${sceneId} thumbnail (full size)`}
+          onClose={() => setExpanded(false)}
+        />
+      )}
+    </>
+  )
+}
+
+// ─── Lightbox: click thumbnail anywhere to view full size ───────────────────
+
+function ThumbnailLightbox({
+  src,
+  alt,
+  onClose,
+}: {
+  src: string
+  alt: string
+  onClose: () => void
+}) {
+  // Portal to <body> so the lightbox escapes the parent modal's
+  // backdrop-filter containing block — otherwise position:fixed gets
+  // re-anchored to the modal and the dark overlay only covers the modal,
+  // not the full viewport.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return
+      // Capture-phase + stopImmediatePropagation so the parent modal's
+      // own ESC handler doesn't also fire — otherwise one Escape closes
+      // both the lightbox and the underlying scene modal.
+      e.stopImmediatePropagation()
+      onClose()
+    }
+    window.addEventListener("keydown", handleKey, { capture: true })
+    return () => window.removeEventListener("keydown", handleKey, { capture: true })
+  }, [onClose])
+
+  if (!mounted || typeof document === "undefined") return null
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={alt}
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 200,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "4vh 4vw",
+        background: "rgba(0, 0, 0, 0.86)",
+        backdropFilter: "blur(10px)",
+        WebkitBackdropFilter: "blur(10px)",
+        cursor: "zoom-out",
+        animation: "thumbnail-lightbox-fade 160ms ease-out",
+      }}
+    >
+      <style>{`
+        @keyframes thumbnail-lightbox-fade {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+      `}</style>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt}
+        onClick={e => e.stopPropagation()}
+        style={{
+          maxWidth: "100%",
+          maxHeight: "100%",
+          objectFit: "contain",
+          borderRadius: 4,
+          boxShadow: "0 24px 60px -12px rgba(0,0,0,0.7)",
+          cursor: "default",
+        }}
+      />
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        style={{
+          position: "absolute",
+          top: 16,
+          right: 16,
+          width: 36,
+          height: 36,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: "50%",
+          background: "rgba(255,255,255,0.08)",
+          color: "#fff",
+          border: "1px solid rgba(255,255,255,0.18)",
+          cursor: "pointer",
+        }}
+      >
+        <X size={16} />
+      </button>
+    </div>,
+    document.body,
   )
 }
 
