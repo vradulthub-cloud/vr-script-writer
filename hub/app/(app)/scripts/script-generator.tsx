@@ -10,6 +10,7 @@ import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
+import { WritingEmptyState } from "@/components/ui/writing-empty"
 import { PageHeader } from "@/components/ui/page-header"
 import { SheetRowModal } from "@/components/ui/sheet-row-modal"
 import { TodayBriefing, type Briefing } from "@/components/ui/today-briefing"
@@ -722,21 +723,11 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
         {stream.error && <ErrorAlert className="mb-3">{stream.error}</ErrorAlert>}
 
         {!stream.output && !stream.streaming && (
-          <div
-            className="rounded flex flex-col items-center justify-center gap-2"
-            style={{
-              height: 200,
-              border: "1px dashed var(--color-border)",
-              color: "var(--color-text-faint)",
-              fontSize: 12,
-              textAlign: "center",
-              padding: "0 24px",
-            }}
-          >
-            <span style={{ fontSize: 18, opacity: 0.4 }}>◈</span>
-            <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>Waiting on talent</span>
-            <span>Name the cast and hit Generate — the script streams in real time.</span>
-          </div>
+          <WritingEmptyState
+            icon="✎"
+            primary="Name the cast, then generate — the script streams here in real time."
+            helper="Pick a row from the queue or type talent names directly."
+          />
         )}
 
         {(stream.output || stream.streaming) && (
