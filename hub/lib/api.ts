@@ -48,6 +48,26 @@ export function thumbnailUrl(
   return `${API_BASE}/api/scenes/${encodeURIComponent(sceneId)}/thumbnail`
 }
 
+/**
+ * URL for a single storyboard image. Mirrors {@link thumbnailUrl} — the
+ * `full` flag swaps to a higher-res seed in dev mock; in production the
+ * same endpoint serves whatever bytes are in S4.
+ */
+export function storyboardImageUrl(
+  sceneId: string,
+  filename: string,
+  opts: { full?: boolean } = {},
+): string {
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_DEV_AUTH_MOCK === "1"
+  ) {
+    const dims = opts.full ? "1600/900" : "240/135"
+    return `https://picsum.photos/seed/${encodeURIComponent(sceneId + "-" + filename)}/${dims}`
+  }
+  return `${API_BASE}/api/scenes/${encodeURIComponent(sceneId)}/storyboard/${encodeURIComponent(filename)}`
+}
+
 // ─── Low-level fetch ────────────────────────────────────────────────────────
 
 // Dev-only guard: dead-code-eliminated in production because Next.js inlines
@@ -955,6 +975,10 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<{ title: string }>(`/scenes/${id}/generate-title`, body),
       namingIssues: (id: string) =>
         get<{ scene_id: string; issues: NamingIssue[]; ok: boolean }>(`/scenes/${id}/naming-issues`),
+      storyboard: (id: string) =>
+        get<{ scene_id: string; files: Array<{ filename: string; size: number }> }>(
+          `/scenes/${id}/storyboard`,
+        ),
       createFolder: (sceneId: string) =>
         post<{ status: string; scene_id: string }>("/scenes/create-folder", { scene_id: sceneId }),
     },

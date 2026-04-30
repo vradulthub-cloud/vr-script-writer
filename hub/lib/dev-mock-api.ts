@@ -185,6 +185,20 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
   if (namingMatch) {
     return wait({ scene_id: namingMatch[1], issues: [], ok: true } as unknown as T)
   }
+  const storyboardMatch = base.match(/^\/scenes\/([^/]+)\/storyboard$/)
+  if (storyboardMatch) {
+    // Realistic mock: deterministic count keyed off the scene id so the
+    // strip shows a consistent number of frames across reloads.
+    const sid = storyboardMatch[1]
+    let h = 0
+    for (const ch of sid) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+    const count = (h % 12) + 4 // 4..15 frames
+    const files = Array.from({ length: count }, (_, i) => ({
+      filename: `${sid}-Photos_${String(i + 1).padStart(3, "0")}.jpg`,
+      size: 1_000_000 + (h % 500_000),
+    }))
+    return wait({ scene_id: sid, files } as unknown as T)
+  }
   const generateTitleMatch = base.match(/^\/scenes\/([^/]+)\/generate-title$/)
   if (generateTitleMatch) {
     // Deterministic-feeling mock — the point is to exercise the UI flow, not
