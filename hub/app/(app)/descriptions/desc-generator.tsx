@@ -10,6 +10,7 @@ import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioSelector } from "@/components/ui/studio-selector"
 import { CopyButton } from "@/components/ui/copy-button"
+import { WritingEmptyState } from "@/components/ui/writing-empty"
 import { PageHeader } from "@/components/ui/page-header"
 import { studioAbbr } from "@/lib/studio-colors"
 import { ApprovedTagsReference } from "@/components/ui/approved-tags-reference"
@@ -915,21 +916,11 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
         {stream.error && <ErrorAlert className="mb-3">{stream.error}</ErrorAlert>}
 
         {!stream.output && !stream.streaming && (
-          <div
-            className="rounded flex flex-col items-center justify-center gap-2"
-            style={{
-              height: 200,
-              border: "1px dashed var(--color-border)",
-              color: "var(--color-text-faint)",
-              fontSize: 12,
-              textAlign: "center",
-              padding: "0 24px",
-            }}
-          >
-            <span style={{ fontSize: 18, opacity: 0.4 }}>◈</span>
-            <span style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 13 }}>Nothing in the queue</span>
-            <span>Pick a scene from the panel — autofill populates the form, then Generate.</span>
-          </div>
+          <WritingEmptyState
+            icon="≡"
+            primary="Select a scene, configure the form, and generate — the description flows here like an article being written."
+            helper="Pick a row from the Missing queue on the left."
+          />
         )}
 
         {(stream.output || stream.streaming) && (
