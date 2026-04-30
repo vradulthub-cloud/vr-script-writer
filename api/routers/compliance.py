@@ -39,6 +39,7 @@ from pydantic import BaseModel, Field
 from api.auth import CurrentUser
 from api.config import get_settings
 from api.auth import require_admin
+from api.database import get_db
 from api.compliance_db import (
     SignedTalent,
     W9Record,
@@ -1548,6 +1549,203 @@ async def get_signed_summary(shoot_id: str, user: CurrentUser):
     ]
 
 
+# ─── Edit + history (TKT-0167) ───────────────────────────────────────────────
+# Lets the team correct a paperwork field after the fact (e.g. fix a typo in
+# an address) without re-signing. Every edit is captured as a row in
+# compliance_signatures_history via the AFTER UPDATE trigger, so paperwork
+# can be viewed "as of date X".
+
+
+# Editable fields. Identifiers (id, shoot_id, talent_role, talent_slug,
+# scene_id, studio, signed_at, contract_version, signature_image_path,
+# pdf_*) are intentionally NOT editable — they're the audit anchor.
+_EDITABLE_FIELDS: set[str] = {
+    "talent_display",
+    "legal_name", "business_name",
+    "tax_classification", "llc_class", "other_classification",
+    "exempt_payee_code", "fatca_code",
+    "tin_type", "tin",
+    "dob", "place_of_birth",
+    "street_address", "city_state_zip", "phone", "email",
+    "id1_type", "id1_number", "id2_type", "id2_number",
+    "stage_names", "professional_names",
+    "nicknames_aliases", "previous_legal_names",
+}
+
+
+class SignatureEditRequest(BaseModel):
+    """Partial update — only fields included in `changes` are written.
+
+    Fields not in `_EDITABLE_FIELDS` are ignored server-side. Pass an
+    optional `reason` to surface in the history audit trail.
+    """
+    changes: dict[str, str]
+    reason: str = ""
+
+
+class SignatureRow(BaseModel):
+    id: int
+    shoot_id: str
+    shoot_date: str
+    scene_id: str = ""
+    studio: str = ""
+    talent_role: str
+    talent_slug: str
+    talent_display: str
+    legal_name: str
+    business_name: str = ""
+    tax_classification: str
+    llc_class: str = ""
+    other_classification: str = ""
+    exempt_payee_code: str = ""
+    fatca_code: str = ""
+    tin_type: str
+    tin: str
+    dob: str
+    place_of_birth: str
+    street_address: str
+    city_state_zip: str
+    phone: str
+    email: str
+    id1_type: str
+    id1_number: str
+    id2_type: str = ""
+    id2_number: str = ""
+    stage_names: str = ""
+    professional_names: str = ""
+    nicknames_aliases: str = ""
+    previous_legal_names: str = ""
+    signed_at: str
+    contract_version: str
+    pdf_mega_path: str = ""
+    created_at: str = ""
+
+
+class SignatureHistoryEntry(SignatureRow):
+    history_id: int
+    snapshot_at: str
+    edited_by: str = ""
+    edit_reason: str = ""
+
+
+@router.get("/signatures/{signature_id}", response_model=SignatureRow)
+async def get_signature(signature_id: int, user: CurrentUser):
+    """Return one signature row for editing."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM compliance_signatures WHERE id=?",
+            (signature_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="signature not found")
+    return SignatureRow(**dict(row))
+
+
+@router.patch("/signatures/{signature_id}", response_model=SignatureRow)
+async def edit_signature(
+    signature_id: int,
+    body: SignatureEditRequest,
+    user: CurrentUser,
+):
+    """Patch one or more editable fields. Trigger writes the prior state
+    to `compliance_signatures_history`. Identifiers are protected — any
+    non-editable key is silently dropped."""
+    safe = {k: v for k, v in body.changes.items() if k in _EDITABLE_FIELDS}
+    if not safe:
+        raise HTTPException(status_code=400, detail="no editable fields in changes")
+    set_clause = ", ".join(f"{k}=?" for k in safe)
+    params = [*safe.values(), signature_id]
+
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM compliance_signatures WHERE id=?",
+            (signature_id,),
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="signature not found")
+        # Capture the editor + reason for the history row by stuffing them
+        # into a temp table the trigger doesn't touch — but SQLite has no
+        # session vars, so we just write a follow-up UPDATE on the most
+        # recent history row right after the edit. Race-free because we
+        # serialize within this connection.
+        conn.execute(
+            f"UPDATE compliance_signatures SET {set_clause} WHERE id=?",
+            params,
+        )
+        editor = (user or {}).get("email", "") if isinstance(user, dict) else ""
+        if editor or body.reason:
+            conn.execute(
+                "UPDATE compliance_signatures_history "
+                "SET edited_by=?, edit_reason=? "
+                "WHERE history_id=(SELECT MAX(history_id) FROM compliance_signatures_history "
+                "                  WHERE signature_id=?)",
+                (editor, body.reason, signature_id),
+            )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM compliance_signatures WHERE id=?",
+            (signature_id,),
+        ).fetchone()
+    return SignatureRow(**dict(row))
+
+
+@router.get("/signatures/{signature_id}/history",
+            response_model=list[SignatureHistoryEntry])
+async def get_signature_history(signature_id: int, user: CurrentUser):
+    """Return every prior state of this signature, newest first.
+    Each row reflects the state BEFORE the edit at `snapshot_at`."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM compliance_signatures_history "
+            "WHERE signature_id=? ORDER BY history_id DESC",
+            (signature_id,),
+        ).fetchall()
+    return [SignatureHistoryEntry(**dict(r)) for r in rows]
+
+
+@router.get("/signatures/{signature_id}/as-of",
+            response_model=SignatureRow)
+async def get_signature_as_of(
+    signature_id: int,
+    at: str,            # ISO timestamp — return state at this moment
+    user: CurrentUser,
+):
+    """Return the signature as it existed at a specific moment.
+
+    Strategy:
+      * If a history row was snapshotted AFTER `at`, the OLDEST such row's
+        BEFORE-state IS the answer (it captures the state at that moment).
+      * Otherwise the current row is the answer (no edits since `at`).
+
+    Lets the audit / paperwork-correction UI show "this is what we had
+    on file when X happened."
+    """
+    with get_db() as conn:
+        # find the oldest history row with snapshot_at >= at
+        hist = conn.execute(
+            "SELECT * FROM compliance_signatures_history "
+            "WHERE signature_id=? AND snapshot_at >= ? "
+            "ORDER BY snapshot_at ASC LIMIT 1",
+            (signature_id, at),
+        ).fetchone()
+        if hist:
+            d = dict(hist)
+            # SignatureRow expects id, not signature_id
+            d["id"] = d.pop("signature_id")
+            d.pop("history_id", None)
+            d.pop("snapshot_at", None)
+            d.pop("edited_by", None)
+            d.pop("edit_reason", None)
+            return SignatureRow(**d)
+        row = conn.execute(
+            "SELECT * FROM compliance_signatures WHERE id=?",
+            (signature_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="signature not found")
+    return SignatureRow(**dict(row))
+
+
 # ─── Legacy Drive paperwork import (TKT-0152) ────────────────────────────────
 # Wires already-signed Drive PDFs into compliance_signatures so a shoot whose
 # talent finished paperwork in the legacy Drive flow shows complete in the Hub
@@ -2196,6 +2394,95 @@ class BulkDriveImportResult(BaseModel):
 
 _SHOOT_FOLDER_RE = re.compile(r"^(\d{2})(\d{2})(\d{2})-(.+?)(?:-(.+))?$")
 
+# Reverse map of _map_form_to_pdf — used by the bulk importer to pull the
+# actual filled values out of historical PDFs instead of saving empty
+# placeholders. The existing template fills the same value into multiple
+# Custom Field slots (e.g. legal_name appears in 1, 14, 16, 18, 23, 24);
+# we coalesce them in `_extract_pdf_fields_for_import`.
+_PDF_FIELD_TO_COL: dict[str, str] = {
+    "Custom Field 1":  "legal_name",
+    "Custom Field 2":  "business_name",
+    "Custom Field 7":  "street_address",
+    "Custom Field 9":  "city_state_zip",
+    "Custom Field 17": "stage_names",
+    "Custom Field 25": "dob",
+    "Custom Field 26": "place_of_birth",
+    "Custom Field 27": "_full_address",
+    "Custom Field 28": "id1_type",
+    "Custom Field 29": "id1_number",
+    "Custom Field 30": "id2_type",
+    "Custom Field 31": "id2_number",
+    "Custom Field 32": "phone",
+    "Custom Field 33": "email",
+    "Custom Field 34": "stage_names",
+    "Custom Field 14": "_legal_name_alt",
+    "Custom Field 16": "_legal_name_alt",
+    "Custom Field 18": "_legal_name_alt",
+    "Custom Field 23": "_legal_name_alt",
+    "Custom Field 24": "_legal_name_alt",
+}
+
+
+def _extract_pdf_fields_for_import(pdf_bytes: bytes) -> dict[str, str]:
+    """Pull AcroForm field values out of a historical PDF.
+
+    Returns ``{column_name: value}`` for fields recognized via
+    ``_PDF_FIELD_TO_COL``. Empty dict for flattened or scanned PDFs —
+    caller should fall back to the prior behavior (placeholder record).
+    Errors are swallowed so a single corrupt PDF can't abort a bulk run.
+    """
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+    except Exception as exc:
+        _log.warning("pypdf reader failed during import: %s", exc)
+        return {}
+
+    out: dict[str, str] = {}
+    try:
+        fields = reader.get_fields() or {}
+        for name, field in fields.items():
+            value = field.get("/V") if isinstance(field, dict) else None
+            if value is None:
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            col = _PDF_FIELD_TO_COL.get(name)
+            if col:
+                out[col] = text
+    except Exception as exc:
+        _log.debug("get_fields() failed during import: %s", exc)
+
+    # Annotation walk fallback — some templates expose /T directly on annots
+    if not out:
+        for page in reader.pages:
+            if "/Annots" not in page:
+                continue
+            for annot in page["/Annots"]:
+                try:
+                    obj = annot.get_object()
+                except Exception:
+                    continue
+                t = str(obj.get("/T", "")).strip()
+                v = obj.get("/V")
+                if not t or v is None:
+                    continue
+                text = str(v).strip()
+                if not text:
+                    continue
+                col = _PDF_FIELD_TO_COL.get(t)
+                if col and col not in out:
+                    out[col] = text
+
+    if "_legal_name_alt" in out:
+        out.setdefault("legal_name", out["_legal_name_alt"])
+        del out["_legal_name_alt"]
+    if "_full_address" in out:
+        out.setdefault("street_address", out["_full_address"])
+        del out["_full_address"]
+    return out
+
 
 def _list_subfolders(parent_id: str, token: str) -> list[dict]:
     q = (
@@ -2350,6 +2637,27 @@ async def bulk_import_from_drive(
                     if mega_err:
                         _log.warning("S4 push failed for %s: %s", pdf_name, mega_err)
 
+                # Extract AcroForm fields from the PDF — this turns the
+                # bulk import from "placeholder records" into "fully
+                # populated records that can be edited after the fact"
+                # (the user's actual ask). Falls back to display name +
+                # empty fields for flattened/scanned PDFs that don't
+                # expose AcroForm.
+                extracted = _extract_pdf_fields_for_import(pdf_bytes)
+                f_legal   = extracted.get("legal_name", display)
+                f_biz     = extracted.get("business_name", "")
+                f_dob     = extracted.get("dob", "")
+                f_pob     = extracted.get("place_of_birth", "")
+                f_street  = extracted.get("street_address", "")
+                f_city    = extracted.get("city_state_zip", "")
+                f_phone   = extracted.get("phone", "")
+                f_email   = extracted.get("email", "")
+                f_id1t    = extracted.get("id1_type", "")
+                f_id1n    = extracted.get("id1_number", "")
+                f_id2t    = extracted.get("id2_type", "")
+                f_id2n    = extracted.get("id2_number", "")
+                f_stage   = extracted.get("stage_names", display)
+
                 upsert_signature(
                     shoot_id=shoot.shoot_id,
                     shoot_date=shoot.shoot_date,
@@ -2358,8 +2666,8 @@ async def bulk_import_from_drive(
                     talent_role=role,
                     talent_slug=slug,
                     talent_display=display,
-                    legal_name=display,
-                    business_name="",
+                    legal_name=f_legal,
+                    business_name=f_biz,
                     tax_classification="individual",
                     llc_class="",
                     other_classification="",
@@ -2367,17 +2675,17 @@ async def bulk_import_from_drive(
                     fatca_code="",
                     tin_type="ssn",
                     tin="",
-                    dob="",
-                    place_of_birth="",
-                    street_address="",
-                    city_state_zip="",
-                    phone="",
-                    email="",
-                    id1_type="",
-                    id1_number="",
-                    id2_type="",
-                    id2_number="",
-                    stage_names=display,
+                    dob=f_dob,
+                    place_of_birth=f_pob,
+                    street_address=f_street,
+                    city_state_zip=f_city,
+                    phone=f_phone,
+                    email=f_email,
+                    id1_type=f_id1t,
+                    id1_number=f_id1n,
+                    id2_type=f_id2t,
+                    id2_number=f_id2n,
+                    stage_names=f_stage,
                     professional_names="",
                     nicknames_aliases="",
                     previous_legal_names="",
