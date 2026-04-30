@@ -25,12 +25,25 @@ export const API_BASE_URL = API_BASE
  * exist, so we point at picsum.photos with a seed for deterministic but varied
  * placeholder images. Production path goes straight to the MEGA proxy.
  */
-export function thumbnailUrl(sceneId: string): string {
+/**
+ * URL for a scene's thumbnail. The small grid+modal thumb uses the default
+ * size; the lightbox passes `full: true` for the highest available resolution.
+ *
+ * In production both variants resolve to the same /api/scenes/:id/thumbnail
+ * endpoint — S4 only stores one Video Thumbnail per scene and it's already
+ * native res (~2K). In dev mock we swap picsum dimensions so the lightbox
+ * doesn't look upscaled when you click in.
+ */
+export function thumbnailUrl(
+  sceneId: string,
+  opts: { full?: boolean } = {},
+): string {
   if (
     process.env.NODE_ENV !== "production" &&
     process.env.NEXT_PUBLIC_DEV_AUTH_MOCK === "1"
   ) {
-    return `https://picsum.photos/seed/${encodeURIComponent(sceneId)}/320/180`
+    const dims = opts.full ? "1600/900" : "320/180"
+    return `https://picsum.photos/seed/${encodeURIComponent(sceneId)}/${dims}`
   }
   return `${API_BASE}/api/scenes/${encodeURIComponent(sceneId)}/thumbnail`
 }
