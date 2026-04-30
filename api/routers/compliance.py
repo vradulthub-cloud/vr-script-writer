@@ -301,6 +301,7 @@ class SignedSummary(BaseModel):
     legal_name: str
     signed_at: str
     pdf_mega_path: str
+    id: int = 0   # compliance_signatures.id — needed for the edit modal
 
 
 # ─── Drive helpers ────────────────────────────────────────────────────────────
@@ -1538,6 +1539,7 @@ async def get_signed_summary(shoot_id: str, user: CurrentUser):
     talents = by_shoot.get(shoot_id, [])
     return [
         SignedSummary(
+            id=t.id,
             talent_role=t.talent_role,
             talent_slug=t.talent_slug,
             talent_display=t.talent_display,
@@ -1744,6 +1746,95 @@ async def get_signature_as_of(
     if not row:
         raise HTTPException(status_code=404, detail="signature not found")
     return SignatureRow(**dict(row))
+
+
+# ─── Pre-fill for returning female talent (TKT-0167) ────────────────────────
+# Different from male auto-sign — females review + sign each visit, but if
+# the same female has signed within the last 12 months we surface her prior
+# answers as form defaults so she only has to confirm/correct, not retype.
+
+
+class TalentPrefill(BaseModel):
+    """Returned by /talent/{slug}/recent-prefill. None of these are PII the
+    UI hadn't already seen — they're echoed back for a returning talent."""
+    found: bool
+    source_shoot_id: str = ""
+    source_signed_at: str = ""
+    legal_name: str = ""
+    business_name: str = ""
+    tax_classification: str = ""
+    llc_class: str = ""
+    other_classification: str = ""
+    exempt_payee_code: str = ""
+    fatca_code: str = ""
+    tin_type: str = ""
+    tin: str = ""
+    dob: str = ""
+    place_of_birth: str = ""
+    street_address: str = ""
+    city_state_zip: str = ""
+    phone: str = ""
+    email: str = ""
+    id1_type: str = ""
+    id1_number: str = ""
+    id2_type: str = ""
+    id2_number: str = ""
+    stage_names: str = ""
+
+
+@router.get("/talent/{talent_slug}/recent-prefill", response_model=TalentPrefill)
+async def talent_recent_prefill(
+    talent_slug: str,
+    user: CurrentUser,
+    role: str = "female",
+    within_days: int = 365,
+):
+    """Return the most recent compliance_signatures row for a talent, if it
+    falls inside the lookback window. Used by the UI to pre-populate the
+    form on return shoots — the talent still reviews + signs.
+
+    ``within_days`` defaults to 365 (12 months). The talent can update any
+    field before signing; their answers go into a fresh row, leaving the
+    prior one untouched.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=within_days)).date().isoformat()
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM compliance_signatures "
+            "WHERE talent_role=? AND talent_slug=? "
+            "  AND legal_name != '' AND legal_name IS NOT NULL "
+            "  AND signed_at >= ? "
+            "ORDER BY signed_at DESC LIMIT 1",
+            (role, talent_slug, cutoff),
+        ).fetchone()
+    if not row:
+        return TalentPrefill(found=False)
+    d = dict(row)
+    return TalentPrefill(
+        found=True,
+        source_shoot_id=d.get("shoot_id", ""),
+        source_signed_at=d.get("signed_at", ""),
+        legal_name=d.get("legal_name", ""),
+        business_name=d.get("business_name", ""),
+        tax_classification=d.get("tax_classification", ""),
+        llc_class=d.get("llc_class", ""),
+        other_classification=d.get("other_classification", ""),
+        exempt_payee_code=d.get("exempt_payee_code", ""),
+        fatca_code=d.get("fatca_code", ""),
+        tin_type=d.get("tin_type", ""),
+        tin=d.get("tin", ""),
+        dob=d.get("dob", ""),
+        place_of_birth=d.get("place_of_birth", ""),
+        street_address=d.get("street_address", ""),
+        city_state_zip=d.get("city_state_zip", ""),
+        phone=d.get("phone", ""),
+        email=d.get("email", ""),
+        id1_type=d.get("id1_type", ""),
+        id1_number=d.get("id1_number", ""),
+        id2_type=d.get("id2_type", ""),
+        id2_number=d.get("id2_number", ""),
+        stage_names=d.get("stage_names", ""),
+    )
 
 
 # ─── Auto-sign for males whose paperwork is already on file (TKT-0167) ──────

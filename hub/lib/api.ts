@@ -690,6 +690,55 @@ export interface SignedSummary {
   business_name?: string
   signed_at: string
   pdf_mega_path: string
+  /** Database id, surfaced so the edit modal can call signatures/{id}. */
+  id?: number
+}
+
+/** Full row from compliance_signatures, used by the edit modal + time-travel. */
+export interface SignatureRow {
+  id: number
+  shoot_id: string
+  shoot_date: string
+  scene_id?: string
+  studio?: string
+  talent_role: string
+  talent_slug: string
+  talent_display: string
+  legal_name: string
+  business_name?: string
+  tax_classification: string
+  llc_class?: string
+  other_classification?: string
+  exempt_payee_code?: string
+  fatca_code?: string
+  tin_type: string
+  tin: string
+  dob: string
+  place_of_birth: string
+  street_address: string
+  city_state_zip: string
+  phone: string
+  email: string
+  id1_type: string
+  id1_number: string
+  id2_type?: string
+  id2_number?: string
+  stage_names?: string
+  professional_names?: string
+  nicknames_aliases?: string
+  previous_legal_names?: string
+  signed_at: string
+  contract_version: string
+  pdf_mega_path?: string
+  created_at?: string
+}
+
+/** One row of compliance_signatures_history. Same shape + audit fields. */
+export interface SignatureHistoryEntry extends SignatureRow {
+  history_id: number
+  snapshot_at: string
+  edited_by?: string
+  edit_reason?: string
 }
 
 /**
@@ -1358,6 +1407,30 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         }>(
           `/compliance/shoots/${encodeURIComponent(shootId)}/auto-sign-male`,
           {},
+        ),
+
+      /** Read one signature row by its DB id (for the edit modal). */
+      getSignature: (signatureId: number) =>
+        get<SignatureRow>(`/compliance/signatures/${signatureId}`),
+
+      /** Patch editable fields. Server silently drops non-editable keys. */
+      editSignature: (
+        signatureId: number,
+        changes: Partial<SignatureRow>,
+        reason?: string,
+      ) =>
+        patch<SignatureRow>(`/compliance/signatures/${signatureId}`, {
+          changes, reason: reason ?? "",
+        }),
+
+      /** Every prior state, newest first. */
+      signatureHistory: (signatureId: number) =>
+        get<SignatureHistoryEntry[]>(`/compliance/signatures/${signatureId}/history`),
+
+      /** Point-in-time view: state as of `at` (ISO timestamp). */
+      signatureAsOf: (signatureId: number, at: string) =>
+        get<SignatureRow>(
+          `/compliance/signatures/${signatureId}/as-of?at=${encodeURIComponent(at)}`,
         ),
 
       // ─── Server-persisted photos (TKT-0151) ──────────────────────────────

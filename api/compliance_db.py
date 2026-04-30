@@ -33,6 +33,7 @@ class SignedTalent:
     legal_name: str
     signed_at: str
     pdf_mega_path: str
+    id: int = 0   # compliance_signatures.id — needed by the edit modal
 
 
 # ─── Contract version ────────────────────────────────────────────────────────
@@ -224,7 +225,7 @@ def list_signed_talents(shoot_ids: list[str]) -> dict[str, list[SignedTalent]]:
     out: dict[str, list[SignedTalent]] = {}
     with get_db() as conn:
         rows = conn.execute(
-            f"""SELECT shoot_id, talent_role, talent_slug, talent_display,
+            f"""SELECT id, shoot_id, talent_role, talent_slug, talent_display,
                        legal_name, signed_at, pdf_mega_path
                   FROM compliance_signatures
                  WHERE shoot_id IN ({placeholders})""",
@@ -233,6 +234,7 @@ def list_signed_talents(shoot_ids: list[str]) -> dict[str, list[SignedTalent]]:
     for r in rows:
         d = dict(r)
         out.setdefault(d["shoot_id"], []).append(SignedTalent(
+            id=d["id"],
             shoot_id=d["shoot_id"],
             talent_role=d["talent_role"],
             talent_slug=d["talent_slug"],
