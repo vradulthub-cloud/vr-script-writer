@@ -236,6 +236,90 @@ async def get_scene_thumbnail(scene_id: str):
     )
 
 
+@router.get("/{scene_id}/storyboard")
+async def list_scene_storyboard(scene_id: str):
+    """List the storyboard image filenames for a scene.
+
+    Returns ``{files: [{filename, size}, ...]}``. Used by the Asset
+    Tracker modal to render a strip of thumbs the user can validate at
+    a glance. Public — same security stance as the thumbnail proxy.
+    """
+    import s4_client
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, grail_tab FROM scenes WHERE id = ?", (scene_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    out = []
+    try:
+        for obj in s4_client.list_objects(
+            row["grail_tab"], prefix=f"{scene_id}/Storyboard/",
+        ):
+            if obj["key"].endswith("/"):
+                continue
+            name = obj["key"].rsplit("/", 1)[-1]
+            if not name.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                continue
+            out.append({"filename": name, "size": obj["size"]})
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f"S4 not configured: {exc}")
+
+    out.sort(key=lambda x: x["filename"])
+    return {"scene_id": scene_id, "files": out}
+
+
+@router.get("/{scene_id}/storyboard/{filename:path}")
+async def get_scene_storyboard_image(scene_id: str, filename: str):
+    """Serve a single storyboard image with the same disk-cache pattern
+    as the thumbnail proxy."""
+    from pathlib import Path as _Path
+    import s4_client
+    from botocore.exceptions import ClientError, BotoCoreError
+    from api.config import get_settings
+
+    # Reject path traversal — filenames can't contain slashes.
+    if "/" in filename or filename.startswith("."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, grail_tab FROM scenes WHERE id = ?", (scene_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    settings = get_settings()
+    cache_dir = settings.base_dir / "thumb_cache" / "storyboard" / scene_id
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / filename
+
+    if not cache_path.exists():
+        canonical_key = s4_client.key_for(scene_id, "Storyboard", filename)
+        try:
+            actual_key = s4_client.resolve_key(row["grail_tab"], canonical_key)
+            if actual_key is None:
+                raise HTTPException(status_code=404, detail="Storyboard image not in bucket")
+            s4_client.get_object(row["grail_tab"], actual_key, cache_path)
+        except HTTPException:
+            raise
+        except (ClientError, BotoCoreError) as exc:
+            _log.warning("S4 fetch failed for %s/%s: %s", scene_id, filename, exc)
+            raise HTTPException(status_code=502, detail="Storyboard fetch failed")
+        except RuntimeError as exc:
+            _log.error("S4 client misconfigured: %s", exc)
+            raise HTTPException(status_code=503, detail="S4 not configured")
+
+    ext = _Path(filename).suffix.lower()
+    media = "image/jpeg" if ext in (".jpg", ".jpeg") else f"image/{ext.lstrip('.')}"
+    return FileResponse(
+        cache_path,
+        media_type=media,
+        headers={"Cache-Control": "public, max-age=604800"},  # 7 days
+    )
+
+
 @router.get("/", response_model=list[SceneResponse])
 async def list_scenes(
     user: CurrentUser,

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { X, Wand2, FolderPlus, ImageOff, Maximize2 } from "lucide-react"
-import { api, thumbnailUrl, type Scene, type NamingIssue } from "@/lib/api"
+import { api, thumbnailUrl, storyboardImageUrl, type Scene, type NamingIssue } from "@/lib/api"
 import { completionPct } from "@/lib/scene-utils"
 import { formatApiError } from "@/lib/errors"
 import { useIdToken } from "@/hooks/use-id-token"
@@ -484,6 +484,16 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
           )}
         </div>
 
+        {/* ── Zone: Storyboard preview strip ─────────────────────────── */}
+        {scene.has_storyboard && (
+          <>
+            <SectionLabel>Storyboard</SectionLabel>
+            <div style={{ marginBottom: 18 }}>
+              <StoryboardStrip sceneId={scene.id} idToken={idToken} />
+            </div>
+          </>
+        )}
+
         {/* ── Zone: Naming & Folder ──────────────────────────────────── */}
         <SectionLabel>Naming &amp; Folder</SectionLabel>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
@@ -647,6 +657,114 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
 // ---------------------------------------------------------------------------
 
 const THUMB_WIDTH = 120
+
+// ─── Storyboard preview strip ────────────────────────────────────────────────
+// Compact horizontal row of every storyboard JPG for the scene. Click any
+// frame to open it in the same lightbox the main thumbnail uses.
+
+function StoryboardStrip({
+  sceneId,
+  idToken,
+}: {
+  sceneId: string
+  idToken: string | undefined
+}) {
+  const [files, setFiles] = useState<Array<{ filename: string; size: number }> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [openFile, setOpenFile] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    api(idToken ?? null).scenes.storyboard(sceneId)
+      .then(res => {
+        if (!cancelled) setFiles(res.files)
+      })
+      .catch(e => {
+        if (!cancelled) setError(formatApiError(e, "Load storyboard"))
+      })
+    return () => { cancelled = true }
+  }, [sceneId, idToken])
+
+  if (error) {
+    return (
+      <div style={{
+        padding: "7px 10px", fontSize: 11, color: "var(--color-err)",
+        background: "color-mix(in srgb, var(--color-err) 8%, transparent)",
+        border: "1px solid color-mix(in srgb, var(--color-err) 20%, transparent)",
+        borderRadius: 4,
+      }}>
+        {error}
+      </div>
+    )
+  }
+
+  if (files === null) {
+    return (
+      <div style={{ fontSize: 11, color: "var(--color-text-faint)" }}>Loading storyboard…</div>
+    )
+  }
+
+  if (files.length === 0) {
+    return (
+      <div style={{ fontSize: 11, color: "var(--color-text-faint)" }}>No storyboard frames found in S4.</div>
+    )
+  }
+
+  return (
+    <>
+      <div
+        style={{
+          display: "grid",
+          gridAutoFlow: "column",
+          gridAutoColumns: "minmax(96px, 1fr)",
+          gap: 4,
+          overflowX: "auto",
+          paddingBottom: 4,
+          // Smushed: every frame visible at a glance, fixed 16:9 ratio.
+        }}
+      >
+        {files.map(f => (
+          <button
+            key={f.filename}
+            type="button"
+            onClick={() => setOpenFile(f.filename)}
+            aria-label={`Open ${f.filename}`}
+            title={f.filename}
+            style={{
+              padding: 0,
+              border: "1px solid var(--color-border)",
+              background: "var(--color-base)",
+              borderRadius: 3,
+              aspectRatio: "16 / 9",
+              overflow: "hidden",
+              cursor: "zoom-in",
+              position: "relative",
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={storyboardImageUrl(sceneId, f.filename)}
+              alt={f.filename}
+              loading="lazy"
+              decoding="async"
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            />
+          </button>
+        ))}
+      </div>
+      <div style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 4, fontVariantNumeric: "tabular-nums" }}>
+        {files.length} frame{files.length === 1 ? "" : "s"} · click to expand
+      </div>
+      {openFile && (
+        <ThumbnailLightbox
+          src={storyboardImageUrl(sceneId, openFile, { full: true })}
+          alt={`${sceneId} ${openFile}`}
+          onClose={() => setOpenFile(null)}
+        />
+      )}
+    </>
+  )
+}
 
 function SceneThumbnail({
   sceneId,
