@@ -66,6 +66,44 @@ S4_SECRET_ACCESS_KEY=...
 S4_REGION=us-east-1
 ```
 
+## Destructive-op protection (no versioning, no undo)
+MEGA S4 does **not** support bucket versioning — verified 2026-04-30 via
+boto3 (`get_bucket_versioning` returns `NotImplemented`). Once an object
+is deleted, it's gone. To compensate:
+
+1. **Code-level guard** — `s4_client._client()` registers a boto3 event
+   hook that blocks `DeleteObject` / `DeleteObjects` / `DeleteBucket`
+   unless `S4_ALLOW_DESTRUCTIVE=1` is set in the calling process's env.
+   Both the convenience `s4_client.delete_object()` and direct
+   `_client().delete_object()` calls go through this guard.
+
+   To delete intentionally:
+   ```bash
+   S4_ALLOW_DESTRUCTIVE=1 python3 your_ops_script.py
+   ```
+   Never put this in any persistent env file, dotenv, shell rc, or CI
+   secret. It must be set per-invocation, in plain sight.
+
+2. **Read-only credential pattern (recommended)** — create a separate
+   read-only access key in the MEGA S4 console, save its env to
+   `~/.config/eclatech/s4.env.readonly`, and use it for ad-hoc / agent /
+   review work:
+   ```bash
+   S4_ENV_FILE=~/.config/eclatech/s4.env.readonly python3 -c "..."
+   ```
+   The full-access key stays the default for the FastAPI service and
+   Mac cron. Combined with the guard above, even a leaked or
+   misused full-access key needs an explicit env opt-in to delete.
+
+3. **Daily snapshot tripwire** — `snapshot_s4.py` writes a gzipped key
+   listing for every bucket to `~/Scripts/logs/s4_snapshots/`. Cron it
+   for 5 AM:
+   ```
+   0 5 * * *  /opt/homebrew/bin/python3 ~/Scripts/snapshot_s4.py >> ~/Scripts/logs/s4_snapshots.log 2>&1
+   ```
+   Diff yesterday vs today: `python3 snapshot_s4.py --diff`. Catches
+   unauthorized deletes within 24 h even if they slip past #1.
+
 ## Shareable links (compilation index)
 Presigned URLs cap at 7 days (SigV4 max). `comp_tools.mega_export_link`
 presigns the scene's primary video (largest .mp4 in `Videos/`, falls back

@@ -143,6 +143,54 @@ def key_for(scene_id: str, *parts: str) -> str:
 
 # ── boto3 client ──────────────────────────────────────────────────────────────
 
+class DestructiveOpDenied(RuntimeError):
+    """Raised when a delete is attempted without ``S4_ALLOW_DESTRUCTIVE``.
+
+    MEGA S4 doesn't support bucket versioning (verified 2026-04-30 — the
+    ``GetBucketVersioning`` op returns NotImplemented), so a delete is
+    permanent. ``s4_client.delete_object`` and a boto3 event hook on
+    ``_client()`` both check the env to refuse silent wipes.
+
+    Set the env, perform the delete, then unset it. Never set it globally
+    or in any env file checked into source control.
+    """
+
+
+def _destructive_guard(event_name, params, **_):
+    """boto3 event hook that blocks delete API calls unless explicitly allowed.
+
+    MEGA S4 has no versioning, so a DELETE is permanent. The hook fires
+    before any of these get sent on the wire:
+      - DeleteObject
+      - DeleteObjects (batch)
+      - DeleteBucket
+      - DeleteBucketCors / -Lifecycle / -Policy / -Tagging / -Website
+      - AbortMultipartUpload (DOES NOT delete completed objects, but blocks
+        in-progress uploads — left allowed since it's resume-safe)
+
+    Set ``S4_ALLOW_DESTRUCTIVE=1`` in the calling process to opt in.
+    Catches the case where someone calls ``s4_client._client().delete_object()``
+    directly, bypassing the convenience wrapper.
+    """
+    op = event_name.split(".")[-1]
+    if op in ("DeleteObject", "DeleteObjects", "DeleteBucket"):
+        if os.environ.get("S4_ALLOW_DESTRUCTIVE", "").strip() not in ("1", "true", "yes", "TRUE", "True"):
+            target = params.get("Bucket", "?")
+            if "Key" in params:
+                target = f"{target}/{params['Key']}"
+            elif "Delete" in params and isinstance(params["Delete"], dict):
+                ks = params["Delete"].get("Objects") or []
+                target = f"{target} ({len(ks)} objects)"
+            raise DestructiveOpDenied(
+                f"Blocked {op} on s3://{target}. MEGA S4 has no versioning "
+                "(verified — get_bucket_versioning returns NotImplemented), "
+                "so this delete would be permanent. To proceed: set "
+                "S4_ALLOW_DESTRUCTIVE=1 in the env for THIS process only "
+                "(e.g. `S4_ALLOW_DESTRUCTIVE=1 python3 your_script.py`). "
+                "Never set it globally or in any persisted env file."
+            )
+
+
 @lru_cache(maxsize=1)
 def _client():
     endpoint = os.environ.get("S4_ENDPOINT_URL", "https://s3.g.s4.mega.io")
@@ -154,7 +202,7 @@ def _client():
             "S4 credentials missing. Set S4_ACCESS_KEY_ID and "
             "S4_SECRET_ACCESS_KEY in the environment."
         )
-    return boto3.client(
+    client = boto3.client(
         "s3",
         endpoint_url=endpoint,
         aws_access_key_id=access,
@@ -165,6 +213,10 @@ def _client():
             s3={"addressing_style": "virtual"},
         ),
     )
+    # Register the guard on every API call. boto3 fires `before-parameter-build`
+    # before the request goes out — raising here aborts the call cleanly.
+    client.meta.events.register("before-parameter-build.s3.*", _destructive_guard)
+    return client
 
 
 def reset_client() -> None:
@@ -249,6 +301,12 @@ def put_object(studio: str, key: str, src_path: str | Path,
 
 
 def delete_object(studio: str, key: str) -> None:
+    """Delete one object from S4. Guarded by the boto3 hook on ``_client()``;
+    this convenience wrapper just raises a friendlier error message.
+
+    Set ``S4_ALLOW_DESTRUCTIVE=1`` in the calling process's environment to
+    opt in (e.g. for ``rename_lowercase_vrh.py`` after the COPY succeeded).
+    """
     bucket = _studio_to_bucket(studio)
     _client().delete_object(Bucket=bucket, Key=key)
 
