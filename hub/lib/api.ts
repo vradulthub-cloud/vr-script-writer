@@ -431,6 +431,71 @@ export type AssetType =
   | "title_done" | "encoded_uploaded"
   | "photoset_uploaded" | "storyboard_uploaded" | "legal_docs_uploaded"
 
+// ── Uploads dashboard ─────────────────────────────────────────────────────
+export interface UploadInitRequest {
+  studio: string
+  scene_id: string
+  subfolder: string
+  filename: string
+  size: number
+  content_type?: string
+}
+
+export interface UploadInitResponse {
+  upload_id: string
+  bucket: string
+  key: string
+  part_size: number
+  part_count: number
+}
+
+export interface PartUrl {
+  part_number: number
+  url: string
+}
+
+export interface PartTag {
+  part_number: number
+  etag: string
+}
+
+export interface UploadCompleteRequest {
+  studio: string
+  key: string
+  upload_id: string
+  parts: PartTag[]
+  size: number
+  subfolder: string
+}
+
+export interface UploadCompleteResponse {
+  ok: boolean
+  bucket: string
+  key: string
+  etag: string
+  presigned_url: string
+}
+
+export interface UploadHeadResponse {
+  exists: boolean
+  size?: number
+  etag?: string
+  canonical_key?: string
+}
+
+export interface UploadHistoryRow {
+  ts: number
+  user_email: string
+  user_name: string
+  studio: string
+  scene_id: string
+  subfolder: string
+  filename: string
+  key: string
+  size: number
+  mode: string
+}
+
 export type AssetStatus = "not_present" | "available" | "validated" | "stuck"
 
 export interface SceneAssetState {
@@ -1130,6 +1195,16 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
           comp_status: string
           description: string
         }>(`/compilations/${encodeURIComponent(compId)}`, body),
+
+      // Replace the scene list of an existing comp block (TKT-0147).
+      // The block grows or shrinks in-place; subsequent comp blocks shift.
+      patchScenes: (compId: string, sceneIds: string[]) =>
+        patch<{
+          status: string
+          comp_id: string
+          scene_count: number
+          scene_ids: string[]
+        }>(`/compilations/${encodeURIComponent(compId)}/scenes`, { scene_ids: sceneIds }),
     },
 
     users: {
@@ -1327,6 +1402,28 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         const qStr = qs.toString()
         return `${API_BASE}/api/compliance/admin/w9-export.xlsx${qStr ? `?${qStr}` : ""}`
       },
+    },
+
+    // Uploads dashboard — broker presigned multipart URLs against MEGA S4.
+    // The browser PUTs each chunk straight to s3.g.s4.mega.io; this client
+    // only talks to FastAPI for init / sign / complete / abort / head /
+    // history. Idempotency uses /head with resolve_key so the 23 lowercase
+    // VRH scenes also match.
+    uploads: {
+      head: (studio: string, key: string) =>
+        get<UploadHeadResponse>(
+          `/uploads/head?studio=${encodeURIComponent(studio)}&key=${encodeURIComponent(key)}`,
+        ),
+      initMultipart: (body: UploadInitRequest) =>
+        post<UploadInitResponse>("/uploads/multipart/init", body),
+      signParts: (body: { studio: string; key: string; upload_id: string; part_numbers: number[] }) =>
+        post<{ urls: PartUrl[] }>("/uploads/multipart/sign-parts", body),
+      complete: (body: UploadCompleteRequest) =>
+        post<UploadCompleteResponse>("/uploads/multipart/complete", body),
+      abort: (body: { studio: string; key: string; upload_id: string }) =>
+        post<{ ok: boolean; aborted_lingering: number }>("/uploads/multipart/abort", body),
+      history: (limit = 50) =>
+        get<UploadHistoryRow[]>(`/uploads/history?limit=${limit}`),
     },
   }
 }

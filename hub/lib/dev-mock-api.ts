@@ -778,6 +778,79 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
     }
   }
 
+  // ── Uploads ────────────────────────────────────────────────────────────
+  // Dev mock simulates the FastAPI broker — but presigned URLs point at
+  // /__dev_upload_sink so the orchestrator's PUT loop stays exercised
+  // without hitting MEGA. The sink is a Next.js route that returns 200 +
+  // a fake ETag.
+  if (base === "/uploads/head") {
+    return wait({ exists: false } as unknown as T)
+  }
+  if (base === "/uploads/multipart/init" && init?.method === "POST") {
+    const body = init.body ? JSON.parse(init.body as string) : {}
+    const partSize = 64 * 1024 * 1024
+    const partCount = Math.max(1, Math.ceil((body.size ?? 0) / partSize))
+    const sceneId = body.scene_id ?? "DEV0001"
+    const subfolder = body.subfolder ?? "Description"
+    const filename = body.filename ?? "file.bin"
+    return wait({
+      upload_id: `dev-mock-${Date.now()}`,
+      bucket: `dev-${(body.studio ?? "vrh").toLowerCase()}`,
+      key: `${sceneId}/${subfolder}/${filename}`,
+      part_size: partSize,
+      part_count: partCount,
+    } as unknown as T)
+  }
+  if (base === "/uploads/multipart/sign-parts" && init?.method === "POST") {
+    const body = init.body ? JSON.parse(init.body as string) : {}
+    const urls = (body.part_numbers ?? []).map((n: number) => ({
+      part_number: n,
+      url: `/__dev_upload_sink?upload_id=${encodeURIComponent(body.upload_id ?? "")}&part=${n}`,
+    }))
+    return wait({ urls } as unknown as T)
+  }
+  if (base === "/uploads/multipart/complete" && init?.method === "POST") {
+    const body = init.body ? JSON.parse(init.body as string) : {}
+    return wait({
+      ok: true,
+      bucket: `dev-${(body.studio ?? "vrh").toLowerCase()}`,
+      key: body.key ?? "DEV0001/Description/file.bin",
+      etag: "mock-final-etag",
+      presigned_url: `https://dev-mock.example/${encodeURIComponent(body.key ?? "")}`,
+    } as unknown as T)
+  }
+  if (base === "/uploads/multipart/abort" && init?.method === "POST") {
+    return wait({ ok: true, aborted_lingering: 0 } as unknown as T)
+  }
+  if (base === "/uploads/history") {
+    return wait([
+      {
+        ts: Date.now() / 1000 - 120,
+        user_email: "drew@eclatech.studio",
+        user_name: "Drew",
+        studio: "VRH",
+        scene_id: "VRH0762",
+        subfolder: "Videos",
+        filename: "VRH0762_Final.mp4",
+        key: "VRH0762/Videos/VRH0762_Final.mp4",
+        size: 2_800_000_000,
+        mode: "direct",
+      },
+      {
+        ts: Date.now() / 1000 - 14 * 60,
+        user_email: "david@eclatech.studio",
+        user_name: "David",
+        studio: "FPVR",
+        scene_id: "FPVR0010",
+        subfolder: "Description",
+        filename: "FPVR0010-MayThai-JasonX.docx",
+        key: "FPVR0010/Description/FPVR0010-MayThai-JasonX.docx",
+        size: 42_000,
+        mode: "direct",
+      },
+    ] as unknown as T)
+  }
+
   // eslint-disable-next-line no-console
   console.warn(`[dev-mock-api] Unmapped path: ${path}`)
   return wait(null as unknown as T, 60)
