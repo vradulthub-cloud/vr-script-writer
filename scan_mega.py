@@ -212,6 +212,12 @@ def main() -> None:
             scenes.append({
                 "scene_id":        canon,
                 "studio":          studio,
+                # S4 URI for this scene's prefix. Sync engine writes this to
+                # the DB's mega_path column; the hub uses Boolean(mega_path)
+                # to gate the thumbnail fetch and the "No folder" naming
+                # warning. Empty here would falsely flag every scene as
+                # missing its S4 folder.
+                "path":            f"s3://{bucket}/{canon}/",
                 "has_description": has_desc,
                 "has_videos":      has_videos,
                 "has_thumbnail":   has_thumbnail,
