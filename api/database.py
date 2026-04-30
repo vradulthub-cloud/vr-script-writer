@@ -342,6 +342,93 @@ CREATE INDEX IF NOT EXISTS idx_compliance_shoot     ON compliance_signatures(sho
 CREATE INDEX IF NOT EXISTS idx_compliance_scene     ON compliance_signatures(scene_id);
 CREATE INDEX IF NOT EXISTS idx_compliance_date      ON compliance_signatures(shoot_date);
 
+-- Compliance signatures history — one row written every time a
+-- compliance_signatures row is updated. Lets the hub show "what did
+-- the paperwork look like on date X?" and "who edited what when?".
+-- Created lazily by a trigger; the row stores the *prior* state plus
+-- the change metadata.
+CREATE TABLE IF NOT EXISTS compliance_signatures_history (
+    history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Mirror of the signatures schema (the values BEFORE the change)
+    signature_id INTEGER NOT NULL,        -- compliance_signatures.id
+    shoot_id TEXT NOT NULL,
+    shoot_date TEXT NOT NULL,
+    scene_id TEXT DEFAULT '',
+    studio TEXT DEFAULT '',
+    talent_role TEXT NOT NULL,
+    talent_slug TEXT NOT NULL,
+    talent_display TEXT NOT NULL,
+    legal_name TEXT NOT NULL,
+    business_name TEXT DEFAULT '',
+    tax_classification TEXT NOT NULL,
+    llc_class TEXT DEFAULT '',
+    other_classification TEXT DEFAULT '',
+    exempt_payee_code TEXT DEFAULT '',
+    fatca_code TEXT DEFAULT '',
+    tin_type TEXT NOT NULL,
+    tin TEXT NOT NULL,
+    dob TEXT NOT NULL,
+    place_of_birth TEXT NOT NULL,
+    street_address TEXT NOT NULL,
+    city_state_zip TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    email TEXT NOT NULL,
+    id1_type TEXT NOT NULL,
+    id1_number TEXT NOT NULL,
+    id2_type TEXT DEFAULT '',
+    id2_number TEXT DEFAULT '',
+    stage_names TEXT DEFAULT '',
+    professional_names TEXT DEFAULT '',
+    nicknames_aliases TEXT DEFAULT '',
+    previous_legal_names TEXT DEFAULT '',
+    signature_image_path TEXT NOT NULL,
+    signed_at TEXT NOT NULL,
+    signed_ip TEXT DEFAULT '',
+    signed_user_agent TEXT DEFAULT '',
+    signed_by_user TEXT DEFAULT '',
+    contract_version TEXT NOT NULL,
+    pdf_local_path TEXT DEFAULT '',
+    pdf_mega_path TEXT DEFAULT '',
+    -- History-specific
+    snapshot_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    edited_by TEXT DEFAULT '',            -- staff email of who triggered the edit
+    edit_reason TEXT DEFAULT ''           -- optional free-text "why" supplied by editor
+);
+CREATE INDEX IF NOT EXISTS idx_compliance_hist_sig ON compliance_signatures_history(signature_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_hist_at  ON compliance_signatures_history(snapshot_at);
+
+-- Trigger: snapshot the prior state on every UPDATE to compliance_signatures.
+-- AFTER UPDATE so excluded fields (PK, created_at) are stable. We deliberately
+-- do NOT snapshot on initial INSERT — the row IS the initial state.
+CREATE TRIGGER IF NOT EXISTS trg_compliance_history
+AFTER UPDATE ON compliance_signatures
+FOR EACH ROW
+BEGIN
+    INSERT INTO compliance_signatures_history (
+        signature_id, shoot_id, shoot_date, scene_id, studio,
+        talent_role, talent_slug, talent_display,
+        legal_name, business_name, tax_classification, llc_class,
+        other_classification, exempt_payee_code, fatca_code,
+        tin_type, tin, dob, place_of_birth, street_address,
+        city_state_zip, phone, email, id1_type, id1_number,
+        id2_type, id2_number, stage_names, professional_names,
+        nicknames_aliases, previous_legal_names,
+        signature_image_path, signed_at, signed_ip, signed_user_agent,
+        signed_by_user, contract_version, pdf_local_path, pdf_mega_path
+    ) VALUES (
+        OLD.id, OLD.shoot_id, OLD.shoot_date, OLD.scene_id, OLD.studio,
+        OLD.talent_role, OLD.talent_slug, OLD.talent_display,
+        OLD.legal_name, OLD.business_name, OLD.tax_classification, OLD.llc_class,
+        OLD.other_classification, OLD.exempt_payee_code, OLD.fatca_code,
+        OLD.tin_type, OLD.tin, OLD.dob, OLD.place_of_birth, OLD.street_address,
+        OLD.city_state_zip, OLD.phone, OLD.email, OLD.id1_type, OLD.id1_number,
+        OLD.id2_type, OLD.id2_number, OLD.stage_names, OLD.professional_names,
+        OLD.nicknames_aliases, OLD.previous_legal_names,
+        OLD.signature_image_path, OLD.signed_at, OLD.signed_ip, OLD.signed_user_agent,
+        OLD.signed_by_user, OLD.contract_version, OLD.pdf_local_path, OLD.pdf_mega_path
+    );
+END;
+
 -- Compliance photos — independent of Drive and signatures. Photos can be
 -- captured for a shoot at any time (e.g. before talent has signed paperwork)
 -- and persist server-side so they reappear on next visit. Each row is one
