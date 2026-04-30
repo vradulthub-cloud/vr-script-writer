@@ -25,6 +25,8 @@ import threading
 import time
 from datetime import datetime, timezone
 
+import s4_client
+
 from api.config import get_settings
 from api.database import get_db, update_sync_meta, init_db
 from api.sheets_client import (
@@ -512,6 +514,19 @@ def sync_scenes() -> int:
                 first = thumb_files[0]
                 thumb_file = first.split("/", 1)[1] if "/" in first else first
 
+            # Derive the canonical S4 URI from studio + scene_id so we
+            # don't depend on whether scan_mega.py emitted a "path" field.
+            # Older scans pre-S4 didn't, and the DB column was filling with
+            # "" for every scene — which the hub interprets as "no folder"
+            # and uses to suppress thumbnails + raise naming warnings.
+            try:
+                _bucket = s4_client.STUDIO_BUCKETS[
+                    s4_client._STUDIO_ALIASES.get(grail["studio"], grail["studio"]).upper()
+                ]
+                derived_mega_path = f"s3://{_bucket}/{scene_id}/"
+            except (KeyError, AttributeError):
+                derived_mega_path = ""
+
             if prior is not None:
                 # Scene is in Grail but missing from this scan's mega_data —
                 # preserve the last-known flags instead of resetting to 0.
@@ -522,7 +537,7 @@ def sync_scenes() -> int:
                 has_photos_v   = prior.get("has_photos") or 0
                 has_story_v    = prior.get("has_storyboard") or 0
                 story_count_v  = prior.get("storyboard_count") or 0
-                mega_path_v    = prior.get("mega_path") or ""
+                mega_path_v    = prior.get("mega_path") or derived_mega_path
                 thumb_file_v   = prior.get("thumb_file") or ""
             else:
                 has_desc_v     = 1 if mega.get("has_description") else 0
@@ -532,7 +547,7 @@ def sync_scenes() -> int:
                 has_photos_v   = 1 if mega.get("has_photos") else 0
                 has_story_v    = 1 if mega.get("has_storyboard") else 0
                 story_count_v  = mega.get("storyboard_count", 0)
-                mega_path_v    = mega.get("path", "")
+                mega_path_v    = mega.get("path") or derived_mega_path
                 thumb_file_v   = thumb_file
 
             conn.execute(

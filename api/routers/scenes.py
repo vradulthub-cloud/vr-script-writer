@@ -527,9 +527,12 @@ async def get_scene_script(scene_id: str, user: CurrentUser):
 # Naming validation
 # ---------------------------------------------------------------------------
 
-# Expected prefixes by studio
+# Expected prefixes by studio.
+# NaughtyJOI maps to "NJOI" because that's what scene IDs in the DB use
+# (and what the S4 bucket key prefix is). The "NNJOI" form lives only in
+# the Grail-tab name convention and is not present anywhere else.
 _STUDIO_PREFIXES = {
-    "FuckPassVR": "FPVR", "VRHush": "VRH", "VRAllure": "VRA", "NaughtyJOI": "NNJOI",
+    "FuckPassVR": "FPVR", "VRHush": "VRH", "VRAllure": "VRA", "NaughtyJOI": "NJOI",
 }
 
 
