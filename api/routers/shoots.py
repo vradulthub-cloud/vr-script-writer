@@ -564,12 +564,15 @@ def _validate_legal_files(
     # ── legal_docs_uploaded: IDs + video ─────────────────────────────
     doc_checks: list[ValidityCheck] = []
 
-    # Male ID .jpg — must contain the male's name
+    # Male ID — must contain the male's name. Accept the common image formats
+    # used by the team (jpg from scanners, jpeg, heic from iPhone exports —
+    # the IDS/ folder under Legal Docs 2026 uses HEIC for several talent).
+    _ID_EXTS = (".jpg", ".jpeg", ".heic", ".heif", ".png")
     has_male_id = False
     if male_nosp:
         male_id_matches = [
             n for n in folder_files
-            if n.lower().endswith(".jpg") and male_nosp.lower() in n.lower().replace(" ", "")
+            if n.lower().endswith(_ID_EXTS) and male_nosp.lower() in n.lower().replace(" ", "")
         ]
         has_male_id = bool(male_id_matches)
         if has_male_id:
@@ -577,12 +580,12 @@ def _validate_legal_files(
                                             message=f"{male_id_matches[0]} present"))
         else:
             doc_checks.append(ValidityCheck(check="male_id", status="fail",
-                                            message=f"Missing {male_nosp} ID photo (.jpg)"))
+                                            message=f"Missing {male_nosp} ID photo"))
 
-    # Female ID .jpg — any .jpg that doesn't match the male's name
+    # Female ID — any image that doesn't match the male's name
     female_id_candidates = [
         n for n in folder_files
-        if n.lower().endswith(".jpg")
+        if n.lower().endswith(_ID_EXTS)
         and (not male_nosp or male_nosp.lower() not in n.lower().replace(" ", ""))
     ]
     has_female_id = bool(female_id_candidates)
@@ -593,7 +596,7 @@ def _validate_legal_files(
         ))
     else:
         doc_checks.append(ValidityCheck(check="female_id", status="fail",
-                                        message="No female ID photos (.jpg)"))
+                                        message="No female ID photos"))
 
     # Video sign-out (.mov) — any one video
     movs = [n for n in folder_files if n.lower().endswith(".mov")]

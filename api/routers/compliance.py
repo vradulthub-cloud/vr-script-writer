@@ -80,6 +80,86 @@ MALE_TPLS: dict[str, str] = {
 }
 DATE_FIELDS = {"Date 1", "Date 2", "Custom Field 13"}
 
+# Drive folder ID for /Legal Docs 2026/IDS/. Holds the canonical male
+# ID photos (front, back, bunny-ear verification). prepare_compliance
+# copies the right slugs into each shoot folder so the human doesn't
+# have to dig them up every shoot. Filenames in this folder are
+# inconsistent (HEIC vs jpeg, hyphenated vs camel-cased, plural vs
+# singular), so we register the exact source name per (talent, kind).
+MALE_IDS_FOLDER = "1-TOsGQGGb3Klc38k_i4BFfUYb9jsYhC-"
+MALE_IDS: dict[str, dict[str, str]] = {
+    "DannySteele": {
+        "front": "DannyFronts.HEIC",
+        "back":  "DannyBacks.HEIC",
+        "bunny": "DannyBunnyEars.HEIC",
+    },
+    "JaydenMarcos": {
+        "front": "Jayden Fronts.HEIC",
+        "back":  "Jayden Backs.HEIC",
+        "bunny": "JaydenBunnyEars.HEIC",
+    },
+    "MikeMancini": {
+        "front": "MikeMancini-IDs-Front.jpeg",
+        # Mike's back is a PDF rather than an image — keep verbatim.
+        "back":  "MikeMancini-ID-Back.pdf",
+        "bunny": "MikeMancini-BunnyEars.jpeg",
+    },
+    "PierceParis": {
+        # Pierce has multiple front/back exposures; default to the first.
+        "front": "Pierce-Front1.jpeg",
+        "back":  "Pierce-Back1.jpeg",
+        "bunny": "PierceParis-BunnyEars.jpeg",
+    },
+}
+
+
+def _ext_from_name(name: str) -> str:
+    """Lowercase extension including the leading dot, or empty string."""
+    if "." not in name:
+        return ""
+    return "." + name.rsplit(".", 1)[-1].lower()
+
+
+def _copy_male_ids_to_shoot_folder(
+    male_slug: str, dest_folder_id: str, existing_names: set[str], token: str,
+) -> list[str]:
+    """Copy each kind (front/back/bunny) of a male's IDs into the shoot folder.
+
+    Renames the source to the conventional ``<MaleSlug>-id-front.<ext>``
+    pattern so the validation in ``shoots.py`` picks it up automatically.
+    Skips kinds already present (idempotent on re-prepare).
+
+    Returns the list of newly-copied destination filenames.
+    """
+    spec = MALE_IDS.get(male_slug)
+    if not spec:
+        return []
+    copied: list[str] = []
+    DEST_FOR_KIND = {
+        "front": "id-front",
+        "back":  "id-back",
+        "bunny": "bunny-ear",
+    }
+    # List the IDS folder once and index by name (lowercase) for fast lookup.
+    ids_files = {f.get("name", "").lower(): f for f in _list_folder_files(MALE_IDS_FOLDER, token)}
+    for kind, src_name in spec.items():
+        src = ids_files.get(src_name.lower())
+        if not src:
+            _log.warning("MALE_IDS: %s/%s missing in /IDS/ (looked for %r)",
+                         male_slug, kind, src_name)
+            continue
+        ext = _ext_from_name(src_name)
+        dst_label = DEST_FOR_KIND.get(kind, kind)
+        dst_name = f"{male_slug}-{dst_label}{ext}"
+        if dst_name.lower() in existing_names:
+            continue
+        try:
+            _copy_file(src["id"], dest_folder_id, dst_name, token)
+            copied.append(dst_name)
+        except Exception as exc:
+            _log.warning("MALE_IDS copy %s -> %s failed: %s", src_name, dst_name, exc)
+    return copied
+
 # S4 mapping is centralized in s4_client._STUDIO_ALIASES — accept the legacy
 # UI/Grail-tab names and resolve at upload time.
 import s4_client
@@ -788,6 +868,17 @@ async def prepare_compliance(shoot_id: str, user: CurrentUser):
         except Exception as exc:
             _log.warning("male date fill failed: %s", exc)
 
+    # 7. Auto-copy male IDs from /Legal Docs 2026/IDS/ into the shoot folder.
+    # Idempotent — skips any kind whose dest filename is already present.
+    male_ids_copied: list[str] = []
+    if male_slug and male_known:
+        try:
+            male_ids_copied = _copy_male_ids_to_shoot_folder(
+                male_slug, folder_id, existing_lower, token,
+            )
+        except Exception as exc:
+            _log.warning("male ID auto-copy failed: %s", exc)
+
     parts = []
     if female_pdf_id:
         parts.append(f"{female_slug} PDF ready")
@@ -795,6 +886,8 @@ async def prepare_compliance(shoot_id: str, user: CurrentUser):
         parts.append(f"{male_slug} PDF {'+ dates ' if dates_filled else ''}ready")
     elif male_slug and not male_known:
         parts.append(f"⚠ {male_slug} not on file — upload manually")
+    if male_ids_copied:
+        parts.append(f"{male_slug} IDs ({len(male_ids_copied)}) copied")
 
     return PrepareResult(
         folder_id=folder_id,
