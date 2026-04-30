@@ -272,6 +272,7 @@ function TalentForm({
   onSubmit,
   onBack,
   draftKey,
+  prefillSource,
 }: {
   talentLabel: string
   accent: string
@@ -286,9 +287,31 @@ function TalentForm({
    * Parent should clear localStorage[draftKey] after a successful sign.
    */
   draftKey?: string
+  /**
+   * When provided, the form fetches the talent's most recent paperwork
+   * (within `withinDays`, default 365) on mount and seeds any fields that
+   * are still empty. Skipped if a localStorage draft exists for `draftKey`
+   * — we don't want prefill to clobber a partial typing session.
+   */
+  prefillSource?: {
+    talentSlug: string
+    role: "female" | "male"
+    idToken?: string
+    withinDays?: number
+  }
 }) {
   // Lazy init reads localStorage once on first render to seed form state.
   // SSR-safe: window check, JSON.parse guarded, falls back to empty form.
+  // Also tracks whether a draft was found so we know to skip prefill.
+  const [hadDraft] = useState(() => {
+    if (typeof window === "undefined" || !draftKey) return false
+    try {
+      const raw = window.localStorage.getItem(draftKey)
+      return !!raw
+    } catch {
+      return false
+    }
+  })
   const [form, setForm] = useState<TalentFormData>(() => {
     if (typeof window === "undefined" || !draftKey) return emptyForm()
     try {
@@ -302,6 +325,77 @@ function TalentForm({
   })
   const [reviewing, setReviewing] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  // Prefill banner state — surfaces "Pre-filled from your last shoot"
+  // so the talent (and the operator) know to review before submit.
+  const [prefilledFrom, setPrefilledFrom] = useState<{
+    signed_at: string
+  } | null>(null)
+
+  // Prefill effect: runs once on mount if no localStorage draft and we have
+  // a prefill source. Seeds only fields that are currently empty so any
+  // partial typing the talent did before the effect resolves wins.
+  useEffect(() => {
+    if (!prefillSource || hadDraft) return
+    let cancelled = false
+    const client = api(prefillSource.idToken ?? null)
+    client.compliance
+      .talentPrefill(prefillSource.talentSlug, prefillSource.role, prefillSource.withinDays ?? 365)
+      .then((p) => {
+        if (cancelled || !p?.found) return
+        setForm((prev) => {
+          const next = { ...prev }
+          // Map server fields → form fields. Only fill currently-empty
+          // ones so anything the talent already typed wins. Form keys
+          // mirror TalentFormData exactly; the W-9 prefill mapping below
+          // mirrors the field-name mismatches between server and form.
+          const map: Array<[keyof TalentFormData, keyof typeof p]> = [
+            ["legal_name",          "legal_name"],
+            ["business_name",       "business_name"],
+            ["dob",                 "dob"],
+            ["place_of_birth",      "place_of_birth"],
+            ["street_address",      "street_address"],
+            ["city_state_zip",      "city_state_zip"],
+            ["phone",               "phone"],
+            ["email",               "email"],
+            ["id1_type",            "id1_type"],
+            ["id1_number",          "id1_number"],
+            ["id2_type",            "id2_type"],
+            ["id2_number",          "id2_number"],
+            ["stage_name",          "stage_names"],
+            ["llc_class",           "llc_class"],
+            ["other_classification","other_classification"],
+            ["exempt_payee_code",   "exempt_payee_code"],
+            ["fatca_code",          "fatca_code"],
+            ["tin",                 "tin"],
+          ]
+          for (const [formKey, prefillKey] of map) {
+            if (!next[formKey] && p[prefillKey]) {
+              ;(next as Record<string, unknown>)[formKey] = String(p[prefillKey] ?? "")
+            }
+          }
+          // tax_classification + tin_type are typed unions — only override
+          // when the prior value matches a known enum.
+          if (p.tax_classification && next.tax_classification === "individual") {
+            const v = p.tax_classification as TalentFormData["tax_classification"]
+            if (
+              v === "individual" || v === "c_corp" || v === "s_corp" ||
+              v === "partnership" || v === "trust_estate" || v === "llc" ||
+              v === "other"
+            ) {
+              next.tax_classification = v
+            }
+          }
+          if (p.tin_type && (p.tin_type === "ssn" || p.tin_type === "ein")) {
+            next.tin_type = p.tin_type
+          }
+          return next
+        })
+        setPrefilledFrom({ signed_at: p.source_signed_at ?? "" })
+      })
+      .catch(() => { /* prefill is best-effort */ })
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const set = (k: keyof TalentFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }))
 
@@ -434,6 +528,31 @@ function TalentForm({
       <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text)", marginBottom: 4 }}>
         {talentLabel}
       </div>
+
+      {/* Returning-talent prefill banner — surfaces the source shoot date so
+          the talent (and operator) know to review every field before signing
+          rather than blindly accepting prior info. Hidden when nothing was
+          prefilled (new talent or window expired). */}
+      {prefilledFrom && (
+        <div style={{
+          marginBottom: 14,
+          padding: "10px 12px",
+          background: "color-mix(in srgb, var(--color-lime) 8%, transparent)",
+          border: "1px solid color-mix(in srgb, var(--color-lime) 28%, transparent)",
+          borderRadius: 8,
+          fontSize: 12, color: "var(--color-text)",
+        }}>
+          <strong style={{ color: "var(--color-lime)" }}>Pre-filled</strong>
+          {" "}from your last paperwork
+          {prefilledFrom.signed_at && (
+            <> on {new Date(prefilledFrom.signed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</>
+          )}
+          .{" "}
+          <span style={{ color: "var(--color-text-muted)" }}>
+            Please review every field — anything that has changed, update before signing.
+          </span>
+        </div>
+      )}
 
       {/* What you're signing — disclosure up top */}
       <div style={{
@@ -2838,6 +2957,12 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               onSubmit={submitFemaleForm}
               onBack={() => setDocsPhase("picker")}
               draftKey={`compliance-draft-${selected.shoot_id}-female`}
+              prefillSource={{
+                talentSlug: selected.female_talent.replace(/ /g, ""),
+                role: "female",
+                idToken,
+                withinDays: 365,
+              }}
             />
           )}
           {docsPhase === "female-sign" && femaleFormData && (
