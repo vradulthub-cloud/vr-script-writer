@@ -1130,6 +1130,10 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
           comp_status: string
           description: string
         }>(`/compilations/${encodeURIComponent(compId)}`, body),
+      remove: (compId: string) =>
+        del<{ status: string; comp_id: string; rows_removed: number }>(
+          `/compilations/${encodeURIComponent(compId)}`,
+        ),
     },
 
     users: {

@@ -740,6 +740,9 @@ export function CompBuilder({ idToken: serverIdToken }: Props) {
             comp={comp}
             studioColor={studioColor}
             onClose={() => setExpandedComp(null)}
+            onDeleted={(deletedId) =>
+              setExistingComps(prev => prev.filter(c => c.comp_id !== deletedId))
+            }
             serverIdToken={serverIdToken}
           />
         )
