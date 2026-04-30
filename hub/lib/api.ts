@@ -1342,6 +1342,24 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       signed: (shootId: string) =>
         get<SignedSummary[]>(`/compliance/shoots/${encodeURIComponent(shootId)}/signed`),
 
+      /**
+       * Auto-sign the male role by cloning his most recent prior
+       * compliance_signatures row into this shoot. Use when the same
+       * male shoots back-to-back — his W-9/2257 don't change between days.
+       * Returns `skipped_reason` when no prior record exists yet.
+       */
+      autoSignMale: (shootId: string) =>
+        post<{
+          shoot_id: string
+          talent_slug: string
+          source_shoot_id?: string
+          created_signature_id?: number
+          skipped_reason?: string
+        }>(
+          `/compliance/shoots/${encodeURIComponent(shootId)}/auto-sign-male`,
+          {},
+        ),
+
       // ─── Server-persisted photos (TKT-0151) ──────────────────────────────
       // Photos saved here are independent of signing and the legacy Drive
       // folder. They reappear on the next visit and push to MEGA when the
