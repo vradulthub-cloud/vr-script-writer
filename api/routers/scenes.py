@@ -651,46 +651,51 @@ async def naming_issues(scene_id: str, user: CurrentUser):
 @router.post("/mega-refresh")
 async def trigger_mega_refresh(user: CurrentUser):
     """
-    Refresh `mega_scan.json` directly from S4 AND push the result into the
-    scenes table.
+    Refresh ``mega_scan.json`` directly from S4 AND push the result into
+    the scenes table.
 
     The chain is:
-      1. scan_mega.py --force → rewrites mega_scan.json (~50–60s)
-      2. sync_scenes() → reads mega_scan.json + sheets, updates SQLite
+      1. scan_mega.run_scan(force=True) → rewrites mega_scan.json (~50–60s)
+      2. sync_engine.sync_scenes() → reads mega_scan.json + sheets,
+         updates SQLite
 
-    Without step 2 the dashboard would still see the old SQLite snapshot —
-    that's the bug behind "I clicked Refresh but VRH-0767 still shows
-    missing photos." Step 1 alone only updates a JSON file on disk.
+    The scan runs **in-process**, not via subprocess. Earlier versions
+    shelled out to ``python scan_mega.py --force``, but on Windows that
+    chain hit the SCP-to-itself dead-end and timed out at 300s — the
+    Refresh button silently did nothing. In-process avoids the shell
+    entirely: same boto3 client, no SSH, no machine-to-machine hop.
     """
-    import subprocess
+    import sys
     import threading
     from pathlib import Path
+    from api.config import get_settings
 
-    scan_script = Path(__file__).resolve().parent.parent.parent / "scan_mega.py"
-    if not scan_script.exists():
-        raise HTTPException(status_code=503, detail=f"scan_mega.py not found at {scan_script}")
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+
+    try:
+        import scan_mega
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"scan_mega import failed: {exc}")
+
+    settings = get_settings()
+    output_file = settings.base_dir / "mega_scan.json"
 
     def run() -> None:
         try:
-            result = subprocess.run(
-                ["python", str(scan_script), "--force"],
-                capture_output=True, text=True, timeout=300,
+            summary = scan_mega.run_scan(
+                force=True, output_file=output_file, skip_deploy=True,
             )
-            if result.returncode != 0:
-                _log.warning("scan_mega.py --force exit %d: %s",
-                             result.returncode, result.stderr[:500])
-                return
-            # Scan succeeded — push the new mega_scan.json into SQLite so
-            # /scenes/recent and friends serve fresh flags. Imported lazily
-            # to avoid pulling sync_engine into module import time.
+            _log.info("mega-refresh: scan complete — %s", summary)
             try:
-                from sync_engine import sync_scenes
+                from api.sync_engine import sync_scenes
                 count = sync_scenes()
-                _log.info("mega-refresh: scan + sync_scenes complete, %d rows", count)
+                _log.info("mega-refresh: sync_scenes wrote %d rows", count)
             except Exception:
                 _log.exception("mega-refresh: sync_scenes after scan failed")
         except Exception:
-            _log.exception("mega-refresh background scan failed")
+            _log.exception("mega-refresh in-process scan failed")
 
     threading.Thread(target=run, daemon=True).start()
     return {"status": "triggered", "message": "MEGA S4 scan + sync started — refresh in ~60s"}
