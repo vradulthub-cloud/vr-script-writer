@@ -20,10 +20,20 @@ export default async function MissingPage() {
   let sceneSyncedAt: string | null = null
 
   try {
+    // Use the per-studio fan-out endpoint instead of `list({ limit: 20 })`.
+    // VRH currently has 474 of the 538 missing scenes (88%), so a flat
+    // global LIMIT 20 returns ~all VRH and the FuckPassVR/VRAllure/NJOI
+    // tabs render as "all clear" even when each has missing scenes too.
+    // /scenes/recent does a UNION ALL of per-studio LIMIT subqueries so
+    // every studio's top-N is represented.
     const [statsResult, syncResult, scenesResult] = await Promise.allSettled([
       client.scenes.stats(),
       client.sync.status(),
-      client.scenes.list({ limit: 20, missing_only: true }),
+      client.scenes.recent({
+        studios: ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"],
+        per_studio: 5,
+        missing_only: true,
+      }),
     ])
     if (statsResult.status === "fulfilled") stats = statsResult.value
     else error = "Failed to load scenes"
