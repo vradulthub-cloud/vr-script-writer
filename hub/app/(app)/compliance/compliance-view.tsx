@@ -32,6 +32,7 @@ import {
   WITNESS_STATEMENT,
 } from "@/lib/compliance-contract"
 import { SignaturePad } from "@/components/ui/signature-pad"
+import { Letterhead, LockBanner } from "./paper-primitives"
 
 // ─── Studio colors ────────────────────────────────────────────────────────────
 
@@ -2325,14 +2326,24 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   ]
   const stepIdx = STEPS.findIndex(s => s.key === step)
 
+  // Paperwork flow — talent has the iPad and is filling out / signing.
+  // The wizard hides crew chrome (header, "All Shoots" link, step dots) and
+  // surfaces a LockBanner with a crew-PIN escape instead. Renders the form
+  // and signing UI on a cream document surface.
+  const inPaperFlow = step === "docs" && (
+    docsPhase === "female-form" || docsPhase === "female-sign" ||
+    docsPhase === "male-form"   || docsPhase === "male-sign"
+  )
+
   return (
     <div style={{
-      minHeight: "100vh", background: "var(--color-bg)",
+      minHeight: "100vh", background: inPaperFlow ? "var(--color-doc-paper)" : "var(--color-bg)",
       padding: "0 0 80px",
-      maxWidth: 720, margin: "0 auto",
+      maxWidth: inPaperFlow ? "100%" : 720, margin: "0 auto",
     }}>
 
-      {/* ── Header ── */}
+      {/* ── Header (hidden while talent is in paperwork flow) ── */}
+      {!inPaperFlow && (
       <div style={{
         position: "sticky", top: 0, zIndex: 20,
         background: "var(--color-surface)",
@@ -2381,6 +2392,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
           </div>
         )}
       </div>
+      )}
 
       {/* ── Step: Select ── */}
       {step === "select" && (
@@ -2609,8 +2621,50 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
       )}
 
       {/* ── Step: Docs ── */}
-      {step === "docs" && selected && (
-        <div style={{ padding: 16 }}>
+      {step === "docs" && selected && (() => {
+        const paperRole =
+          docsPhase === "female-form" || docsPhase === "female-sign" ? "female" :
+          docsPhase === "male-form"   || docsPhase === "male-sign"   ? "male" : null
+        const paperTalentName = paperRole === "female"
+          ? selected.female_talent
+          : paperRole === "male" ? (selected.male_talent || "") : ""
+        const paperRoleLabel = paperRole === "female" ? "Female Talent" : paperRole === "male" ? "Male Talent" : ""
+        const paperTitle =
+          docsPhase === "female-form" || docsPhase === "male-form" ? "Talent Information" :
+          docsPhase === "female-sign" || docsPhase === "male-sign" ? "Read & Sign Agreement" : ""
+        return (
+          <>
+            {inPaperFlow && (
+              <LockBanner
+                onUnlock={() => { setDocsPhase("picker"); setSignError(null) }}
+              />
+            )}
+            <div
+              className={inPaperFlow ? "compliance-paper" : ""}
+              style={inPaperFlow ? {
+                padding: "0 0 60px",
+                minHeight: "calc(100vh - 36px)",
+                // Variable remap — Next/Turbopack drops `--var: ...` declarations
+                // from non-:root selectors during the CSS pipeline, so we set
+                // them inline here to override the dark-theme defaults for
+                // every descendant inline `var(--color-*)` reference.
+                ["--color-bg" as string]:            "var(--color-doc-paper)",
+                ["--color-base" as string]:          "var(--color-doc-paper)",
+                ["--color-surface" as string]:       "#ffffff",
+                ["--color-elevated" as string]:      "#ffffff",
+                ["--color-border" as string]:        "var(--color-doc-rule)",
+                ["--color-border-subtle" as string]: "var(--color-doc-rule-faint)",
+                ["--color-text" as string]:          "var(--color-doc-ink)",
+                ["--color-text-muted" as string]:    "var(--color-doc-soft)",
+                ["--color-text-faint" as string]:    "var(--color-doc-faint)",
+              } : { padding: 16 }}
+            >
+              {inPaperFlow && paperTitle && (
+                <div style={{ maxWidth: 580, margin: "0 auto", padding: "0 20px" }} className="doc-fadeup">
+                  <Letterhead title={paperTitle} subtitle={paperTalentName ? `${paperTalentName} · ${paperRoleLabel}` : null} />
+                </div>
+              )}
+              <div style={inPaperFlow ? { maxWidth: 580, margin: "0 auto", padding: "0 20px" } : undefined}>
 
           {/* Phase: talent picker — entry point. Each talent's flow is fully
               independent; the staff picks who to handle right now. */}
@@ -2809,8 +2863,11 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
             </div>
           )}
 
-        </div>
-      )}
+              </div>
+            </div>
+          </>
+        )
+      })()}
 
       {/* ── Step: Photos ── */}
       {step === "photos" && selected && (() => {
