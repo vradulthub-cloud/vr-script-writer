@@ -114,6 +114,9 @@ export async function TriageSection({ idToken }: { idToken: string | undefined }
     getScripts(idToken),
     getSceneStats(idToken),
   ])
+  // Captured at section render time so the client can show "updated Ns ago"
+  // off the actual fetch boundary, not the moment React hydrated.
+  const generatedAt = Date.now()
   return (
     <>
       <TriageFeed
@@ -121,6 +124,7 @@ export async function TriageSection({ idToken }: { idToken: string | undefined }
         missingTotal={sceneStats?.missing_any ?? 0}
         scripts={scripts}
         idToken={idToken}
+        generatedAt={generatedAt}
       />
       <div
         style={{

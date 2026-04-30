@@ -44,6 +44,10 @@ export interface DashboardData {
 const REV_FAST = 30   // notifications, health
 const REV_MED  = 60   // shoots, scenes, scripts, stats — also revalidatable on write
 const REV_SLOW = 120  // scene stats — global aggregate, changes slowly
+// Triage feed is the user's first signal that an upload landed, so it gets
+// a tighter floor than other scene reads. Manual Refresh + revalidateTag
+// (see actions.ts / Phase 2) collapse the gap further on writes.
+const REV_TRIAGE = 20
 
 // Cache tags — exported as constants so mutation handlers can import and
 // revalidate the right surface without typo risk.
@@ -120,7 +124,7 @@ export const getRecentScenes = cache(
       }
     },
     ["dashboard:recent-scenes"],
-    { tags: [TAG_SCENES], revalidate: REV_MED },
+    { tags: [TAG_SCENES], revalidate: REV_TRIAGE },
   ),
 )
 

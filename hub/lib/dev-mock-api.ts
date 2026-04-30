@@ -162,6 +162,11 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
   }
 
   // ── Scenes ────────────────────────────────────────────────────────────
+  if (base === "/scenes/mega-refresh" && (init.method || "").toUpperCase() === "POST") {
+    // Real backend kicks off a ~50–60s scan. Mock returns instantly so the
+    // dashboard's Refresh button can be exercised without a real backend.
+    return wait({ status: "triggered", message: "Mock MEGA scan started" } as unknown as T)
+  }
   if (base === "/scenes/stats") return wait(MOCK_SCENE_STATS as unknown as T)
   if (base === "/scenes/recent") {
     const studios = (params.get("studios") ?? "").split(",").map(s => s.trim()).filter(Boolean)
