@@ -1,8 +1,20 @@
 import type { Metadata } from "next"
-import { Geist, Geist_Mono, Anton } from "next/font/google"
+import { Geist, Geist_Mono, Anton, Newsreader } from "next/font/google"
 import localFont from "next/font/local"
 import { Providers } from "@/components/providers"
 import "./globals.css"
+
+// Newsreader — humanist serif used by the Writing Room redesign for hero
+// titles + body paragraphs in script/description output. Matches EB Garamond
+// in feel but is broader optical-size aware (the variable axis is on by
+// default), so it scales cleanly from 14px form labels to 36px hero titles.
+const newsreader = Newsreader({
+  variable: "--font-newsreader",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
+  display: "swap",
+})
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -50,7 +62,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${generalSans.variable} ${anton.variable} h-full`}
+      className={`${geistSans.variable} ${geistMono.variable} ${generalSans.variable} ${anton.variable} ${newsreader.variable} h-full`}
     >
       <body className="h-full antialiased">
         <Providers>{children}</Providers>

@@ -47,6 +47,26 @@
   --font-display: var(--font-general-sans), var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-display-hero: var(--font-anton), Impact, "Arial Narrow", var(--font-general-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-serif: var(--font-newsreader), "EB Garamond", Georgia, serif;
+
+  /* Paper / writing surface — used by Writing Room and Compliance redesigns
+     for the output panel and legal letterhead. Warm, slightly desaturated so
+     it sits next to the dark chrome without competing with the studio
+     accents. Inverted: pages that opt in to the paper surface flip to
+     dark-on-paper text. */
+  --color-paper:        #13120f;   /* writing-surface bg (dark) */
+  --color-paper-text:   #d8d4c8;   /* primary on paper */
+  --color-paper-sub:    #8a8578;   /* secondary on paper */
+  --color-paper-rule:   rgba(255, 255, 255, 0.06);
+
+  /* Light paper for Compliance step screens (talent-facing iPad UI). */
+  --color-doc-paper:      #f5f3ee;
+  --color-doc-cream:      #faf8f3;
+  --color-doc-ink:        #1a1816;
+  --color-doc-soft:       #4a4640;
+  --color-doc-faint:      #8a857d;
+  --color-doc-rule:       #ddd9d0;
+  --color-doc-rule-faint: #ebe8e2;
 
   /* Type scale — amplified for drama.
      Two bands:
@@ -952,4 +972,52 @@ header[class*="fixed"][class*="top-0"] {
   grid-template-columns: minmax(0, 1fr) !important;
   padding-bottom: 14px;
   margin-bottom: 16px;
+}
+
+/* ─── Writing Room — paper surface ─────────────────────────────────────────
+   Output panel for /scripts and /descriptions. Warm dark paper with light
+   text and Newsreader serif body. The intent is a quiet "writing studio"
+   feel — distinct from the chrome around it without recoloring everything.
+   Apply by adding `class="writing-paper"` to any container; nested elements
+   inherit the serif font and paper text color. */
+.writing-paper {
+  background: var(--color-paper);
+  color: var(--color-paper-text);
+  border-radius: 6px;
+  border: 1px solid var(--color-paper-rule);
+}
+.writing-paper .writing-body,
+.writing-paper .writing-title {
+  font-family: var(--font-serif);
+  color: var(--color-paper-text);
+}
+.writing-paper .writing-title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+.writing-paper .writing-body {
+  font-size: 1.0625rem;   /* 17px — comfortable for long-form reading */
+  line-height: 1.9;
+}
+.writing-paper .writing-body p { margin-bottom: 1.2em; }
+.writing-paper .writing-meta {
+  color: var(--color-paper-sub);
+  font-family: var(--font-sans);
+}
+/* Pulsing caret used during streaming generation. Don't apply globally —
+   only when the writer signals "we're streaming right now". */
+@keyframes writing-cursor-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.2; }
+}
+.writing-paper .writing-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  background: var(--color-lime);
+  animation: writing-cursor-pulse 0.7s ease-in-out infinite;
+  border-radius: 1px;
 }

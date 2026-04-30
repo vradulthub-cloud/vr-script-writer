@@ -749,22 +749,20 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
               </div>
             )}
 
-            {/* Raw streaming output */}
+            {/* Raw streaming output — paper-themed writing surface (Writing
+                Room v3). Serif body face + warm bg makes long-form reading
+                comfortable. Falls back to var(--font-sans) if the browser
+                hasn't loaded Newsreader yet. */}
             <div
-              className="rounded mb-4 overflow-auto"
+              className="writing-paper rounded mb-4 overflow-auto"
               style={{
-                background: "var(--color-base)",
-                border: "1px solid var(--color-border-subtle)",
-                padding: "12px 14px",
-                maxHeight: 400,
+                padding: "20px 26px",
+                maxHeight: 480,
               }}
             >
               <pre
+                className="writing-body"
                 style={{
-                  fontFamily: "var(--font-sans)",
-                  fontSize: 12,
-                  lineHeight: 1.7,
-                  color: "var(--color-text)",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
                   margin: 0,
