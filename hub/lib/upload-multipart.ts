@@ -15,6 +15,8 @@
  */
 import { api, type UploadInitResponse, type PartUrl } from "@/lib/api"
 import { fingerprint, load, save, remove, type UploadState } from "@/lib/upload-storage"
+import { revalidateAfterWrite } from "@/lib/cache-actions"
+import { TAG_SCENES, TAG_SCENE_STATS } from "@/lib/cache-tags"
 
 export type UploadProgress = {
   /** Upload phase. */
@@ -275,6 +277,9 @@ export async function uploadFile(args: StartArgs): Promise<StartResult> {
       subfolder: args.subfolder,
     })
     await remove(state.id)
+    // Bust the dashboard's scene caches so the new asset's `has_*` flag
+    // reflects on the next render instead of waiting out the 20s TTL.
+    void revalidateAfterWrite([TAG_SCENES, TAG_SCENE_STATS])
     onProgress?.({
       phase: "done",
       bytesUploaded: file.size,

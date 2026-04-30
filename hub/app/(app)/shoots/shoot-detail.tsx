@@ -5,6 +5,8 @@ import { createPortal } from "react-dom"
 import { X, RefreshCcw, Wand2, Check } from "lucide-react"
 import { statusColor, STATUS_LABEL, cellApplies, formatShootDate } from "./shoot-utils"
 import { api, SHOOT_ASSET_LABELS, type Shoot, type BoardShootScene, type AssetType } from "@/lib/api"
+import { revalidateAfterWrite } from "@/lib/cache-actions"
+import { TAG_SCENES, TAG_SHOOTS } from "@/lib/cache-tags"
 import { studioColor } from "@/lib/studio-colors"
 import { formatApiError } from "@/lib/errors"
 
@@ -46,6 +48,7 @@ function SceneAssetTable({
     setGenBusy("saving")
     try {
       await api(idToken ?? null).scenes.updateTitle(scene.scene_id, genTitle)
+      void revalidateAfterWrite([TAG_SCENES])
       setTitle(genTitle)
       setGenTitle("")
     } catch (e) {

@@ -5,6 +5,8 @@ import { Download, Wand2, Link2, RotateCcw } from "lucide-react"
 import { formatApiError } from "@/lib/errors"
 import { useStream } from "@/lib/sse"
 import { api, API_BASE_URL, type Script, type Ticket } from "@/lib/api"
+import { revalidateAfterWrite } from "@/lib/cache-actions"
+import { TAG_SCRIPTS } from "@/lib/cache-tags"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
@@ -225,6 +227,9 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
         shoot_location: sections["SHOOT LOCATION"] ?? "",
         props: sections["PROPS"] ?? "",
       })
+      // The dashboard's "Scripts queued" feed reads from /scripts?needs_script=true.
+      // A successful save flips that flag, so bust the cache.
+      void revalidateAfterWrite([TAG_SCRIPTS])
       setSaveMsg("Saved to sheet.")
       setSavedAt(new Date())
     } catch (e) {

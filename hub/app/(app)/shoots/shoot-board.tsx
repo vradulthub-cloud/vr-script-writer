@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Film, RefreshCcw } from "lucide-react"
 import { api, type Shoot, type AssetType } from "@/lib/api"
+import { revalidateAfterWrite } from "@/lib/cache-actions"
+import { TAG_SHOOTS, TAG_SCENES } from "@/lib/cache-tags"
 import { studioColor } from "@/lib/studio-colors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
@@ -134,6 +136,9 @@ export function ShootBoard({
     inFlightRef.current.add(key)
     try {
       const newState = await client.shoots.revalidate(shootId, position, assetType)
+      // Revalidating an asset flips a flag on the underlying scene too, so
+      // bust both surfaces.
+      void revalidateAfterWrite([TAG_SHOOTS, TAG_SCENES])
       setShoots(prev => prev.map(s => {
         if (s.shoot_id !== shootId) return s
         return {

@@ -651,12 +651,16 @@ async def naming_issues(scene_id: str, user: CurrentUser):
 @router.post("/mega-refresh")
 async def trigger_mega_refresh(user: CurrentUser):
     """
-    Refresh `mega_scan.json` directly from S4.
+    Refresh `mega_scan.json` directly from S4 AND push the result into the
+    scenes table.
 
-    Pre-S4 this wrote a trigger file watched by mega_scan_worker.py on
-    Windows (which used MEGAcmd). With S4 the listing runs from anywhere
-    via boto3 — we just shell out to scan_mega.py in a background thread
-    and return immediately so the request doesn't block on the ~50s scan.
+    The chain is:
+      1. scan_mega.py --force → rewrites mega_scan.json (~50–60s)
+      2. sync_scenes() → reads mega_scan.json + sheets, updates SQLite
+
+    Without step 2 the dashboard would still see the old SQLite snapshot —
+    that's the bug behind "I clicked Refresh but VRH-0767 still shows
+    missing photos." Step 1 alone only updates a JSON file on disk.
     """
     import subprocess
     import threading
@@ -668,15 +672,28 @@ async def trigger_mega_refresh(user: CurrentUser):
 
     def run() -> None:
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["python", str(scan_script), "--force"],
                 capture_output=True, text=True, timeout=300,
             )
+            if result.returncode != 0:
+                _log.warning("scan_mega.py --force exit %d: %s",
+                             result.returncode, result.stderr[:500])
+                return
+            # Scan succeeded — push the new mega_scan.json into SQLite so
+            # /scenes/recent and friends serve fresh flags. Imported lazily
+            # to avoid pulling sync_engine into module import time.
+            try:
+                from sync_engine import sync_scenes
+                count = sync_scenes()
+                _log.info("mega-refresh: scan + sync_scenes complete, %d rows", count)
+            except Exception:
+                _log.exception("mega-refresh: sync_scenes after scan failed")
         except Exception:
             _log.exception("mega-refresh background scan failed")
 
     threading.Thread(target=run, daemon=True).start()
-    return {"status": "triggered", "message": "MEGA S4 scan started — refresh in ~60s"}
+    return {"status": "triggered", "message": "MEGA S4 scan + sync started — refresh in ~60s"}
 
 
 class FolderCreateBody(BaseModel):

@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import { api, API_BASE_URL, type Script } from "@/lib/api"
+import { revalidateAfterWrite } from "@/lib/cache-actions"
+import { TAG_SCRIPTS } from "@/lib/cache-tags"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { formatApiError } from "@/lib/errors"
 
@@ -164,6 +166,7 @@ export function BatchPanel({ rows, idToken, isAdmin, onGenerated }: Props) {
           shoot_location: r.fields["SHOOT LOCATION"],
           props: "",
         })
+        void revalidateAfterWrite([TAG_SCRIPTS])
       } else {
         await client.approvals.create({
           scene_id: String(r.rowId),

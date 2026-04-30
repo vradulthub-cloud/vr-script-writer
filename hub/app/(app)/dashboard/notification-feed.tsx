@@ -5,6 +5,8 @@ import Link from "next/link"
 import { Bell, Check, Ticket } from "lucide-react"
 import type { Notification } from "@/lib/api"
 import { API_BASE_URL } from "@/lib/api"
+import { revalidateAfterWrite } from "@/lib/cache-actions"
+import { TAG_NOTIFICATIONS } from "@/lib/cache-tags"
 import { showToast } from "@/components/ui/toast"
 import { relativeTime } from "@/lib/utils"
 
@@ -91,6 +93,7 @@ export function NotificationFeed({
         body: JSON.stringify({}),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      void revalidateAfterWrite([TAG_NOTIFICATIONS])
       setNotifications((prev) => prev.map((n) => ({ ...n, read: 1 as const })))
       setUnreadCount(0)
     } catch (err) {

@@ -49,14 +49,26 @@ const REV_SLOW = 120  // scene stats — global aggregate, changes slowly
 // (see actions.ts / Phase 2) collapse the gap further on writes.
 const REV_TRIAGE = 20
 
-// Cache tags — exported as constants so mutation handlers can import and
-// revalidate the right surface without typo risk.
-export const TAG_SHOOTS        = "shoots"
-export const TAG_SCENES        = "scenes"
-export const TAG_SCENE_STATS   = "scene-stats"
-export const TAG_SCRIPTS       = "scripts"
-export const TAG_NOTIFICATIONS = "notifications"
-export const TAG_HEALTH        = "health"
+// Cache tags now live in `@/lib/cache-tags` so mutation handlers — both
+// server actions and the helper in `lib/cache-actions.ts` — can pull them
+// without taking a dep on this server-only module. Re-exported below for
+// back-compat with existing imports of `./data`.
+import {
+  TAG_HEALTH,
+  TAG_NOTIFICATIONS,
+  TAG_SCENES,
+  TAG_SCENE_STATS,
+  TAG_SCRIPTS,
+  TAG_SHOOTS,
+} from "@/lib/cache-tags"
+export {
+  TAG_HEALTH,
+  TAG_NOTIFICATIONS,
+  TAG_SCENES,
+  TAG_SCENE_STATS,
+  TAG_SCRIPTS,
+  TAG_SHOOTS,
+}
 
 export const getSceneStats = cache(
   unstable_cache(

@@ -4,6 +4,8 @@ import { useState, useMemo, useRef, useEffect } from "react"
 import { Wand2 } from "lucide-react"
 import { useStream } from "@/lib/sse"
 import { api, API_BASE_URL, type Scene } from "@/lib/api"
+import { revalidateAfterWrite } from "@/lib/cache-actions"
+import { TAG_SCENES } from "@/lib/cache-tags"
 import { formatApiError } from "@/lib/errors"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
@@ -209,6 +211,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
     setGenTitleErr(null)
     try {
       await client.scenes.updateTitle(selectedScene.id, genTitle)
+      void revalidateAfterWrite([TAG_SCENES])
       setGenTitle("")
       setSaveMsg("Title saved.")
       setTimeout(() => setSaveMsg(null), 1500)

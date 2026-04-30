@@ -1,9 +1,9 @@
 "use server"
 
-import { updateTag } from "next/cache"
 import { auth } from "@/auth"
 import { api } from "@/lib/api"
-import { TAG_SCENES, TAG_SCENE_STATS } from "./data"
+import { revalidateAfterWrite } from "@/lib/cache-actions"
+import { TAG_SCENES, TAG_SCENE_STATS } from "@/lib/cache-tags"
 
 /**
  * Two-step refresh because a single server action would have to sleep ~60s
@@ -37,6 +37,5 @@ export async function triggerMegaRefresh(): Promise<{
 }
 
 export async function revalidateRecentActivity(): Promise<void> {
-  updateTag(TAG_SCENES)
-  updateTag(TAG_SCENE_STATS)
+  await revalidateAfterWrite([TAG_SCENES, TAG_SCENE_STATS])
 }

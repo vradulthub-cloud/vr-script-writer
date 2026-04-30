@@ -12,6 +12,8 @@ import { GeneratedTitleModal } from "@/components/ui/generated-title-modal"
 import { useIdToken } from "@/hooks/use-id-token"
 import { api, type Scene, type SceneStats } from "@/lib/api"
 import { API_BASE_URL } from "@/lib/api"
+import { revalidateAfterWrite } from "@/lib/cache-actions"
+import { TAG_SCENES } from "@/lib/cache-tags"
 import { studioColor } from "@/lib/studio-colors"
 import { completionPct } from "@/lib/scene-utils"
 import { SceneDetail } from "./scene-detail"
@@ -501,6 +503,7 @@ const SceneCard = memo(function SceneCard({
     setGenBusy("saving")
     try {
       await api(idToken ?? null).scenes.updateTitle(scene.id, genTitle)
+      void revalidateAfterWrite([TAG_SCENES])
       onSceneUpdate({ ...scene, title: genTitle })
       setGenTitle("")
     } catch {
