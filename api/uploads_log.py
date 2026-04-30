@@ -51,21 +51,50 @@ def append(entry: dict) -> None:
             _log.warning("uploads_log append failed: %s", exc)
 
 
+_TAIL_CHUNK = 4096
+
+
+def _tail_lines(path: Path, n: int) -> list[str]:
+    """Return up to ``n`` last lines of ``path`` without loading the whole file.
+
+    Reads from the end in 4 KB chunks until enough newlines are collected.
+    For a JSONL log that grows unboundedly this bounds read cost to O(n)
+    instead of O(file size).
+    """
+    with path.open("rb") as fh:
+        fh.seek(0, 2)
+        size = fh.tell()
+        if size == 0:
+            return []
+        buf = b""
+        # +1 because the last newline terminates the final record; we want one
+        # more boundary to be sure we captured a full line, not a tail fragment.
+        needed = n + 1
+        pos = size
+        while pos > 0 and buf.count(b"\n") < needed:
+            step = min(_TAIL_CHUNK, pos)
+            pos -= step
+            fh.seek(pos)
+            buf = fh.read(step) + buf
+    text = buf.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    return lines[-n:]
+
+
 def read_recent(limit: int = 50) -> list[dict]:
     """Return the most recent ``limit`` rows, newest first. Tolerant of a
     missing file (returns ``[]``) and of malformed lines (skips them)."""
     path = _log_path()
     if not path.exists():
         return []
-    rows: list[dict] = []
     with _lock:
         try:
-            with path.open("r", encoding="utf-8") as fh:
-                lines = fh.readlines()
+            tail = _tail_lines(path, limit)
         except OSError as exc:
             _log.warning("uploads_log read failed: %s", exc)
             return []
-    for line in reversed(lines):
+    rows: list[dict] = []
+    for line in reversed(tail):
         if not line.strip():
             continue
         try:

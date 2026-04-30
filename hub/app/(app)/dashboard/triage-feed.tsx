@@ -1,12 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, useTransition } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, RotateCw } from "lucide-react"
 import { type Scene, type Script } from "@/lib/api"
 import { STUDIO_COLOR, STUDIO_ABBR } from "@/lib/studio-colors"
 import { AssetCells, type AssetCell } from "@/components/ui/asset-cells"
 import { SceneDetailModal } from "@/components/ui/scene-detail-modal"
+import { triggerMegaRefresh, revalidateRecentActivity } from "./actions"
 
 const ASSET_COLS = [
   { key: "has_description" as const, label: "Desc" },
@@ -33,9 +35,17 @@ interface Props {
   missingTotal: number
   scripts: Script[]
   idToken?: string | undefined
+  /** Server-side timestamp captured when this page was rendered. Drives the
+   *  "updated Ns ago" indicator on the Refresh button. */
+  generatedAt: number
 }
 
-export function TriageFeed({ recentScenes, scripts, idToken }: Props) {
+// scan_mega.py takes ~50s to walk all four buckets; round up so we don't
+// revalidate before the SQLite snapshot is rewritten.
+const REFRESH_WAIT_MS = 60_000
+
+export function TriageFeed({ recentScenes, scripts, idToken, generatedAt }: Props) {
+  const router = useRouter()
   const [openScene, setOpenScene] = useState<Scene | null>(null)
   // Local cache of edits so optimistic updates from the modal show in
   // the dashboard list without requiring a re-fetch round-trip.
@@ -44,6 +54,50 @@ export function TriageFeed({ recentScenes, scripts, idToken }: Props) {
     setOverlayById(prev => ({ ...prev, [updated.id]: updated }))
     setOpenScene(updated)
   }, [])
+
+  // ─── Refresh state ─────────────────────────────────────────────────────
+  const [isPending, startTransition] = useTransition()
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+
+  // Tick once per second so the "updated Ns ago" label counts up live and
+  // the in-flight countdown ticks down. Cheap — no network, no re-fetch.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const handleRefresh = useCallback(() => {
+    setRefreshError(null)
+    setSecondsLeft(Math.ceil(REFRESH_WAIT_MS / 1000))
+    startTransition(async () => {
+      const trigger = await triggerMegaRefresh()
+      if (!trigger.ok) {
+        setRefreshError(trigger.message)
+        setSecondsLeft(null)
+        return
+      }
+      // Tick the local countdown so the user sees progress while the
+      // background scan runs on the server.
+      const start = Date.now()
+      await new Promise<void>(resolve => {
+        const id = setInterval(() => {
+          const remain = Math.max(0, REFRESH_WAIT_MS - (Date.now() - start))
+          setSecondsLeft(Math.ceil(remain / 1000))
+          if (remain <= 0) {
+            clearInterval(id)
+            resolve()
+          }
+        }, 1000)
+      })
+      await revalidateRecentActivity()
+      router.refresh()
+      setSecondsLeft(null)
+    })
+  }, [router])
+
+  const ageSec = Math.max(0, Math.floor((now - generatedAt) / 1000))
 
   const merged = recentScenes.map(s => overlayById[s.id] ?? s)
   const byStudio = STUDIOS
@@ -85,11 +139,56 @@ export function TriageFeed({ recentScenes, scripts, idToken }: Props) {
     return () => document.removeEventListener("keydown", onKey)
   }, [])
 
+  const refreshLabel =
+    secondsLeft !== null
+      ? `Scanning S4… ${secondsLeft}s`
+      : refreshError
+      ? "Retry"
+      : ageSec < 5
+      ? "Refresh"
+      : ageSec < 60
+      ? `Refresh · ${ageSec}s ago`
+      : `Refresh · ${Math.floor(ageSec / 60)}m ago`
+
   return (
     <div ref={feedRef}>
     <Section
       title="Recent activity"
       subtitle={hasAnything ? "Latest scenes per studio and scripts waiting on a writer. Use j/k or ↑/↓ to step through rows." : "No recent scenes found."}
+      actions={
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={isPending}
+          aria-label="Refresh from MEGA S4"
+          title={refreshError ?? "Force a fresh MEGA S4 scan and rebuild the snapshot"}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "3px 8px",
+            borderRadius: 3,
+            fontSize: 11,
+            fontVariantNumeric: "tabular-nums",
+            background: "transparent",
+            color: refreshError ? "var(--color-err)" : "var(--color-text-muted)",
+            border: `1px solid ${refreshError ? "color-mix(in srgb, var(--color-err) 40%, transparent)" : "var(--color-border)"}`,
+            cursor: isPending ? "wait" : "pointer",
+            opacity: isPending ? 0.85 : 1,
+            transition: "background-color 120ms",
+          }}
+          className="hover:bg-[--color-elevated]"
+        >
+          <RotateCw
+            size={11}
+            aria-hidden="true"
+            style={{
+              animation: isPending ? "spin 1s linear infinite" : undefined,
+            }}
+          />
+          {refreshLabel}
+        </button>
+      }
     >
       {byStudio.map(group => (
         <div key={group.studio}>
@@ -273,7 +372,17 @@ export function TriageFeed({ recentScenes, scripts, idToken }: Props) {
   )
 }
 
-function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Section({
+  title,
+  subtitle,
+  actions,
+  children,
+}: {
+  title: string
+  subtitle?: string
+  actions?: React.ReactNode
+  children: React.ReactNode
+}) {
   return (
     <div
       style={{
@@ -283,23 +392,34 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
         overflow: "hidden",
       }}
     >
-      <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--color-border)" }}>
-        <h2
-          style={{
-            margin: 0,
-            fontSize: "0.8125rem",
-            fontWeight: 600,
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-            color: "var(--color-text-muted)",
-            lineHeight: 1.2,
-          }}
-        >
-          {title}
-        </h2>
-        {subtitle && (
-          <p style={{ margin: "3px 0 0", fontSize: 12, color: "var(--color-text-faint)", lineHeight: 1.4, maxWidth: "65ch" }}>{subtitle}</p>
-        )}
+      <div
+        style={{
+          padding: "9px 14px",
+          borderBottom: "1px solid var(--color-border)",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 12,
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: "0.8125rem",
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: "var(--color-text-muted)",
+              lineHeight: 1.2,
+            }}
+          >
+            {title}
+          </h2>
+          {subtitle && (
+            <p style={{ margin: "3px 0 0", fontSize: 12, color: "var(--color-text-faint)", lineHeight: 1.4, maxWidth: "65ch" }}>{subtitle}</p>
+          )}
+        </div>
+        {actions && <div style={{ flexShrink: 0 }}>{actions}</div>}
       </div>
       {children}
     </div>

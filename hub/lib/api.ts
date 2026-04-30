@@ -1046,6 +1046,14 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         ),
       createFolder: (sceneId: string) =>
         post<{ status: string; scene_id: string }>("/scenes/create-folder", { scene_id: sceneId }),
+      /**
+       * Trigger a fresh MEGA S4 listing on the backend. Returns immediately;
+       * the scan runs ~50–60s in a background thread and updates the SQLite
+       * snapshot the dashboard reads from. Pair with revalidateTag(TAG_SCENES)
+       * after a short wait to bust the Next.js cache.
+       */
+      megaRefresh: () =>
+        post<{ status: string; message: string }>("/scenes/mega-refresh", {}),
     },
 
     scripts: {

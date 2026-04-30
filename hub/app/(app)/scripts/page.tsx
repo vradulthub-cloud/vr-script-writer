@@ -15,22 +15,23 @@ export default async function ScriptsPage() {
   const userProfile = await requireTab("Scripts", idToken)
   const client = api(session)
 
-  let tabs: string[] = []
-  let error: string | null = null
-  let queued: Script[] = []
-  let queueFetchFailed = false
+  // Parallelize: tabs() and list() are independent. Sequential await cost
+  // both round-trips back-to-back; allSettled fires them together and lets
+  // each fail in isolation.
+  const [tabsResult, queuedResult] = await Promise.allSettled([
+    client.scripts.tabs(),
+    client.scripts.list({ needs_script: true }),
+  ])
 
-  try {
-    tabs = await client.scripts.tabs()
-  } catch (e) {
-    error = e instanceof Error ? e.message : "Failed to load script tabs"
-  }
-
-  try {
-    queued = await client.scripts.list({ needs_script: true })
-  } catch {
-    queueFetchFailed = true
-  }
+  const tabs: string[] = tabsResult.status === "fulfilled" ? tabsResult.value : []
+  const error: string | null =
+    tabsResult.status === "rejected"
+      ? tabsResult.reason instanceof Error
+        ? tabsResult.reason.message
+        : "Failed to load script tabs"
+      : null
+  const queued: Script[] = queuedResult.status === "fulfilled" ? queuedResult.value : []
+  const queueFetchFailed = queuedResult.status === "rejected"
 
   const briefing = computeScriptsBriefing({ queued, queueFetchFailed })
 
