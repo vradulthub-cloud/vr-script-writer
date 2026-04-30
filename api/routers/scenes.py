@@ -156,6 +156,10 @@ async def list_recent_scenes(
         if missing_only else ""
     )
 
+    # SQLite parses ORDER BY / LIMIT as belonging to the *compound* SELECT,
+    # so applying them inline to each branch of a UNION ALL is a syntax error.
+    # Wrap each branch in a sub-select so the per-studio cap is enforced
+    # before the union.
     sub_selects: list[str] = []
     params: list = []
     for studio in studio_list:
