@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { ChevronRight } from "lucide-react"
 import { type Scene, type Script } from "@/lib/api"
 import { STUDIO_COLOR, STUDIO_ABBR } from "@/lib/studio-colors"
 import { AssetCells, type AssetCell } from "@/components/ui/asset-cells"
+import { SceneDetailModal } from "@/components/ui/scene-detail-modal"
 
 const ASSET_COLS = [
   { key: "has_description" as const, label: "Desc" },
@@ -34,21 +35,31 @@ interface Props {
   idToken?: string | undefined
 }
 
-export function TriageFeed({ recentScenes, scripts }: Props) {
+export function TriageFeed({ recentScenes, scripts, idToken }: Props) {
+  const [openScene, setOpenScene] = useState<Scene | null>(null)
+  // Local cache of edits so optimistic updates from the modal show in
+  // the dashboard list without requiring a re-fetch round-trip.
+  const [overlayById, setOverlayById] = useState<Record<string, Scene>>({})
+  const handleSceneUpdate = useCallback((updated: Scene) => {
+    setOverlayById(prev => ({ ...prev, [updated.id]: updated }))
+    setOpenScene(updated)
+  }, [])
+
+  const merged = recentScenes.map(s => overlayById[s.id] ?? s)
   const byStudio = STUDIOS
     .map(s => ({
       studio: s,
       abbr: STUDIO_ABBR[s] ?? s,
       color: STUDIO_COLOR[s] ?? "var(--color-text-muted)",
-      scenes: recentScenes.filter(sc => sc.studio === s).slice(0, 5),
+      scenes: merged.filter(sc => sc.studio === s).slice(0, 5),
     }))
     .filter(g => g.scenes.length > 0)
 
   const hasAnything = byStudio.length > 0 || scripts.length > 0
 
   // j/k + ↑/↓ row navigation. Activates when focus is already inside the feed
-  // so it doesn't hijack keys on unrelated pages. Enter still works via the
-  // native Link activation — we don't need to handle it explicitly.
+  // so it doesn't hijack keys on unrelated pages. Enter activates via the
+  // native button click — no explicit handler needed.
   const feedRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     const root = feedRef.current
@@ -58,11 +69,11 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
       if (!["j", "k", "ArrowDown", "ArrowUp"].includes(e.key)) return
       const target = e.target as HTMLElement | null
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return
-      const rows = root!.querySelectorAll<HTMLAnchorElement>("a[data-triage-row='true']")
+      const rows = root!.querySelectorAll<HTMLButtonElement>("button[data-triage-row='true']")
       if (rows.length === 0) return
       const active = document.activeElement as HTMLElement | null
       const activeInFeed = active && root!.contains(active)
-      const idx = activeInFeed ? Array.from(rows).indexOf(active as HTMLAnchorElement) : -1
+      const idx = activeInFeed ? Array.from(rows).indexOf(active as HTMLButtonElement) : -1
       let next = idx
       if (e.key === "j" || e.key === "ArrowDown") next = idx < 0 ? 0 : Math.min(rows.length - 1, idx + 1)
       if (e.key === "k" || e.key === "ArrowUp")   next = idx < 0 ? 0 : Math.max(0, idx - 1)
@@ -104,15 +115,20 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
             const cells = sceneAssetCells(scene)
             const dateStr = (scene.release_date ?? "").slice(0, 10)
             return (
-              <Link
+              <button
                 key={scene.id}
-                href={`/missing?scene=${encodeURIComponent(scene.id)}`}
+                type="button"
+                onClick={() => setOpenScene(scene)}
                 data-triage-row="true"
                 style={{
                   padding: "8px 14px",
                   borderBottom: i < group.scenes.length - 1 ? "1px solid var(--color-border-subtle)" : "none",
                   display: "flex", alignItems: "center", gap: 10,
                   textDecoration: "none", color: "inherit",
+                  width: "100%", textAlign: "left",
+                  background: "transparent", border: "none",
+                  cursor: "pointer",
+                  font: "inherit",
                 }}
                 className="hover:bg-[--color-elevated]"
               >
@@ -158,7 +174,7 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
                     marginLeft: -2,
                   }}
                 />
-              </Link>
+              </button>
             )
           })}
         </div>
@@ -247,6 +263,12 @@ export function TriageFeed({ recentScenes, scripts }: Props) {
         </div>
       )}
     </Section>
+    <SceneDetailModal
+      scene={openScene}
+      idToken={idToken}
+      onClose={() => setOpenScene(null)}
+      onSceneUpdate={handleSceneUpdate}
+    />
     </div>
   )
 }
