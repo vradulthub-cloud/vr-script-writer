@@ -1409,6 +1409,46 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
           {},
         ),
 
+      /**
+       * Returning-talent prefill: if the talent has a signed paperwork row
+       * within `withinDays`, return their last answers so the form can
+       * pre-populate. Talent still reviews + signs (a new row gets written).
+       * `found:false` means no qualifying record — render a blank form.
+       */
+      talentPrefill: (
+        talentSlug: string,
+        role: "female" | "male" = "female",
+        withinDays = 365,
+      ) =>
+        get<{
+          found: boolean
+          source_shoot_id?: string
+          source_signed_at?: string
+          legal_name?: string
+          business_name?: string
+          tax_classification?: string
+          llc_class?: string
+          other_classification?: string
+          exempt_payee_code?: string
+          fatca_code?: string
+          tin_type?: string
+          tin?: string
+          dob?: string
+          place_of_birth?: string
+          street_address?: string
+          city_state_zip?: string
+          phone?: string
+          email?: string
+          id1_type?: string
+          id1_number?: string
+          id2_type?: string
+          id2_number?: string
+          stage_names?: string
+        }>(
+          `/compliance/talent/${encodeURIComponent(talentSlug)}/recent-prefill` +
+          `?role=${encodeURIComponent(role)}&within_days=${withinDays}`,
+        ),
+
       /** Read one signature row by its DB id (for the edit modal). */
       getSignature: (signatureId: number) =>
         get<SignatureRow>(`/compliance/signatures/${signatureId}`),
