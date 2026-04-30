@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { X, Wand2, FolderPlus, ImageOff, Maximize2 } from "lucide-react"
 import { api, thumbnailUrl, storyboardImageUrl, type Scene, type NamingIssue } from "@/lib/api"
+import { revalidateAfterWrite } from "@/lib/cache-actions"
+import { TAG_SCENES } from "@/lib/cache-tags"
 import { completionPct } from "@/lib/scene-utils"
 import { formatApiError } from "@/lib/errors"
 import { useIdToken } from "@/hooks/use-id-token"
@@ -142,6 +144,7 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
       if (editingField === "title") await client.scenes.updateTitle(scene.id, editValue)
       else if (editingField === "categories") await client.scenes.updateCategories(scene.id, editValue)
       else if (editingField === "tags") await client.scenes.updateTags(scene.id, editValue)
+      void revalidateAfterWrite([TAG_SCENES])
 
       const updated = { ...scene, [editingField]: editValue }
       setScene(updated)
@@ -177,6 +180,7 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
     setSaving(true)
     try {
       await client.scenes.updateTitle(scene.id, genTitle)
+      void revalidateAfterWrite([TAG_SCENES])
       const updated = { ...scene, title: genTitle }
       setScene(updated)
       onSceneUpdate(updated)
