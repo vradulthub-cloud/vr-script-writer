@@ -33,6 +33,7 @@ import {
 } from "@/lib/compliance-contract"
 import { SignaturePad } from "@/components/ui/signature-pad"
 import { Letterhead, LockBanner } from "./paper-primitives"
+import { SignatureEditModal } from "./signature-edit-modal"
 
 // ─── Studio colors ────────────────────────────────────────────────────────────
 
@@ -1677,6 +1678,7 @@ function TalentPicker({
   onStartMale,
   onAutoSignMale,
   autoSignMaleStatus,
+  onEditSignature,
   onContinueToPhotos,
   onImportFromDrive,
 }: {
@@ -1687,6 +1689,7 @@ function TalentPicker({
   onStartMale: () => void
   onAutoSignMale: () => void
   autoSignMaleStatus: "idle" | "running" | "no-prior" | "error"
+  onEditSignature: (signatureId: number) => void
   onContinueToPhotos: () => void
   onImportFromDrive: () => void
 }) {
@@ -1735,6 +1738,7 @@ function TalentPicker({
           shootId={shoot.shoot_id}
           slug={shoot.female_talent.replace(/ /g, "")}
           onStart={onStartFemale}
+          onEdit={femaleSigned?.id ? () => onEditSignature(femaleSigned.id!) : undefined}
         />
         {needsMale && (
           <div>
@@ -1746,6 +1750,7 @@ function TalentPicker({
               shootId={shoot.shoot_id}
               slug={shoot.male_talent.replace(/ /g, "")}
               onStart={onStartMale}
+              onEdit={maleSigned?.id ? () => onEditSignature(maleSigned.id!) : undefined}
             />
             {/* Auto-fill: when the male shoots back-to-back the same paperwork
                 applies. Server clones his most recent compliance_signatures row
@@ -1851,6 +1856,7 @@ function TalentSignCard({
   shootId,
   slug,
   onStart,
+  onEdit,
 }: {
   role: "Female" | "Male"
   display: string
@@ -1859,6 +1865,7 @@ function TalentSignCard({
   shootId: string
   slug: string
   onStart: () => void
+  onEdit?: () => void
 }) {
   const isSigned = !!signed
   const pdfHref = isSigned
@@ -1925,6 +1932,23 @@ function TalentSignCard({
           >
             <ExternalLink size={11} /> View PDF
           </a>
+        )}
+        {isSigned && onEdit && (
+          <button
+            onClick={onEdit}
+            type="button"
+            title="Edit fields without re-signing — captures history"
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              padding: "8px 12px", borderRadius: 8,
+              background: "transparent", border: "1px solid var(--color-border)",
+              color: "var(--color-text-muted)",
+              fontSize: 12, fontWeight: 600, cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Edit
+          </button>
         )}
         <button
           onClick={onStart}
@@ -2017,6 +2041,9 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   const [autoSignMaleStatus, setAutoSignMaleStatus] = useState<
     "idle" | "running" | "no-prior" | "error"
   >("idle")
+
+  // Edit-fields modal (TKT-0167) — set to a signature id to open
+  const [editingSignatureId, setEditingSignatureId] = useState<number | null>(null)
 
   // Photos step state — locally captured (this session, not yet uploaded)
   const [photos, setPhotos] = useState<CapturedPhoto[]>([])
@@ -2742,11 +2769,26 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               onStartMale={() => { setSignError(null); setMaleError(null); setDocsPhase("male-form") }}
               onAutoSignMale={handleAutoSignMale}
               autoSignMaleStatus={autoSignMaleStatus}
+              onEditSignature={setEditingSignatureId}
               onContinueToPhotos={() => setStep("photos")}
               onImportFromDrive={() => {
                 setDriveImportError(null)
                 setDriveImportUrl("")
                 setDriveImportOpen(true)
+              }}
+            />
+          )}
+
+          {editingSignatureId !== null && (
+            <SignatureEditModal
+              signatureId={editingSignatureId}
+              idToken={idToken}
+              onClose={() => setEditingSignatureId(null)}
+              onSaved={async () => {
+                if (selected) {
+                  const fresh = await client.compliance.signed(selected.shoot_id).catch(() => [])
+                  setSignedSummary(fresh)
+                }
               }}
             />
           )}
