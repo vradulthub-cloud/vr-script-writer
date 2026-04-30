@@ -946,26 +946,25 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                 </div>
               )
             })()}
-            {/* Description body */}
+            {/* Description body — paper writing surface (Writing Room v3).
+                Newsreader serif body face for long-form reading. */}
             <div
-              className="rounded mb-4 px-4 py-3"
-              style={{
-                background: "var(--color-surface)",
-                border: "1px solid var(--color-border)",
-              }}
+              className="writing-paper rounded mb-4"
+              style={{ padding: "20px 26px" }}
             >
               {stream.streaming ? (
-                /* While streaming — show plain text with cursor */
-                <p style={{ fontSize: 13, color: "var(--color-text)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+                /* While streaming — show serif body with pulsing cursor */
+                <p className="writing-body" style={{ whiteSpace: "pre-wrap" }}>
                   {stream.output}
                   <span
                     style={{
                       display: "inline-block",
-                      width: 6, height: 13,
+                      width: 2, height: "1em",
                       background: studioColor,
-                      marginLeft: 2,
-                      verticalAlign: "middle",
+                      marginLeft: 3,
+                      verticalAlign: "text-bottom",
                       animation: "streamCursorPulse 1s ease-in-out infinite",
+                      borderRadius: 1,
                     }}
                   />
                 </p>
