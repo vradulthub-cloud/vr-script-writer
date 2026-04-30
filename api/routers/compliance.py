@@ -484,10 +484,25 @@ def _fill_pdf_dates(pdf_bytes: bytes, today_str: str) -> bytes:
         return pdf_bytes
 
 
+# In-memory TTL cache for shoot-folder lookups. The compliance list endpoint
+# loops over a day's shoots and calls this for each — pre-cache the result
+# so a second hit (page reload, modal reopen, polling) doesn't repeat the
+# 2 sequential Drive REST calls. 5 min TTL covers a typical reviewer session.
+_SHOOT_FOLDER_CACHE: dict[tuple[date, str, str], tuple[float, Optional[tuple[str, str]]]] = {}
+_SHOOT_FOLDER_TTL_S = 300.0
+
+
 def _get_shoot_folder(
     shoot_date: date, female: str, male: str, token: str
 ) -> Optional[tuple[str, str]]:
     """Return (folder_id, folder_name) if Drive folder already exists."""
+    import time as _time
+
+    cache_key = (shoot_date, (female or "").strip().lower(), (male or "").strip().lower())
+    cached = _SHOOT_FOLDER_CACHE.get(cache_key)
+    if cached and (_time.time() - cached[0]) < _SHOOT_FOLDER_TTL_S:
+        return cached[1]
+
     month_name = shoot_date.strftime("%B")
     date_prefix = shoot_date.strftime("%m%d%y") + "-"
     female_slug = female.replace(" ", "").lower()
@@ -504,6 +519,7 @@ def _get_shoot_folder(
     )
     month_files = (res or {}).get("files") or []
     if not month_files:
+        _SHOOT_FOLDER_CACHE[cache_key] = (_time.time(), None)
         return None
     month_id = month_files[0]["id"]
 
@@ -525,7 +541,10 @@ def _get_shoot_folder(
             continue
         if male_slug and male_slug not in name_lower:
             continue
-        return f["id"], fname
+        result = (f["id"], fname)
+        _SHOOT_FOLDER_CACHE[cache_key] = (_time.time(), result)
+        return result
+    _SHOOT_FOLDER_CACHE[cache_key] = (_time.time(), None)
     return None
 
 
@@ -589,7 +608,14 @@ async def list_compliance_shoots(
         photos_count = 0
 
         # Drive folder lookup is now PURELY for displaying the legacy folder
-        # link in the UI. Completion comes from compliance_signatures.
+        # link in the UI. Completion comes from compliance_signatures, and
+        # the canonical photo count is `photo_counts_db` (server-persisted).
+        #
+        # We avoid the per-shoot `_list_folder_files` call when DB already
+        # has a count — that's the slowest leg of this loop (~500ms/shoot
+        # cold) and was the main reason this endpoint took double-digit
+        # seconds with a busy day.
+        db_photo_count = photo_counts_db.get(shoot.shoot_id, 0)
         if token:
             shoot_date_obj = _parse_shoot_date(shoot.shoot_date)
             if shoot_date_obj:
@@ -600,11 +626,15 @@ async def list_compliance_shoots(
                     if info:
                         folder_id, folder_name = info
                         folder_url = f"https://drive.google.com/drive/folders/{folder_id}"
-                        files = _list_folder_files(folder_id, token)
-                        photos_count = sum(
-                            1 for f in files
-                            if f.get("name", "").lower().endswith((".jpg", ".jpeg", ".png"))
-                        )
+                        # Only walk Drive when DB doesn't have the count.
+                        # New uploads land in DB synchronously, so the
+                        # fallback is just for legacy/back-filled shoots.
+                        if db_photo_count == 0:
+                            files = _list_folder_files(folder_id, token)
+                            photos_count = sum(
+                                1 for f in files
+                                if f.get("name", "").lower().endswith((".jpg", ".jpeg", ".png"))
+                            )
                 except Exception as exc:
                     _log.debug("compliance folder lookup: %s", exc)
 

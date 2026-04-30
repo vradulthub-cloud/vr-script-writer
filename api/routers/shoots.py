@@ -1200,8 +1200,31 @@ def _extract_w9_name(pdf_bytes: bytes, pdf_id: str = "", rw_token: str = "") -> 
     return ""
 
 
+# In-memory TTL cache for legal-docs lookups. The shoot modal in the dashboard
+# fires this on every open, and the underlying Drive walk is 3 sequential REST
+# calls (~600–1500ms cold). Legal docs change rarely (paperwork is added once
+# per shoot, not per minute), so a 5-minute TTL is conservative and turns
+# repeat opens into instant hits. Manual paperwork additions show up after
+# the TTL or after a service restart.
+_LEGAL_DOCS_CACHE: dict[tuple[date, str, str], tuple[float, "LegalDocsResult"]] = {}
+_LEGAL_DOCS_TTL_S = 300.0
+
+
 def _get_shoot_legal_docs(shoot_date: date, female: str, male: str) -> LegalDocsResult:
     """Walk Drive legal folder hierarchy and return files for this shoot."""
+    import time as _time
+
+    key = (shoot_date, (female or "").strip().lower(), (male or "").strip().lower())
+    cached = _LEGAL_DOCS_CACHE.get(key)
+    if cached and (_time.time() - cached[0]) < _LEGAL_DOCS_TTL_S:
+        return cached[1]
+    result = _legal_docs_uncached(shoot_date, female, male)
+    _LEGAL_DOCS_CACHE[key] = (_time.time(), result)
+    return result
+
+
+def _legal_docs_uncached(shoot_date: date, female: str, male: str) -> LegalDocsResult:
+    """Original Drive walk — wrapped by `_get_shoot_legal_docs` with a TTL."""
     import urllib.parse
     import urllib.request
     import json
