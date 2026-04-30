@@ -1021,3 +1021,202 @@ header[class*="fixed"][class*="top-0"] {
   animation: writing-cursor-pulse 0.7s ease-in-out infinite;
   border-radius: 1px;
 }
+
+/* ─── Compliance v2 — light paper surface ──────────────────────────────────
+   Talent-facing iPad UI for legal paperwork (Form / Sign / Success steps).
+   Cream "real document" surface with EB Garamond / Newsreader serif for
+   anything legal-looking. Applied as `class="compliance-paper"` on the
+   step's outer wrapper. The form below is dark-on-paper because that's how
+   real signed documents read — print-feel, not editor-feel.
+
+   The block also remaps the dark-theme color variables to their paper
+   equivalents so every inline `var(--color-elevated)`/`var(--color-border)`
+   inside (the existing TalentForm and SignAgreementStep) inherits the
+   document palette without a per-element rewrite. */
+.compliance-paper {
+  background: var(--color-doc-paper);
+  color: var(--color-doc-ink);
+  /* Variable remap — affects descendants only */
+  --color-bg:             var(--color-doc-paper);
+  --color-base:           var(--color-doc-paper);
+  --color-surface:        #ffffff;
+  --color-elevated:       #ffffff;
+  --color-border:         var(--color-doc-rule);
+  --color-border-subtle:  var(--color-doc-rule-faint);
+  --color-text:           var(--color-doc-ink);
+  --color-text-muted:     var(--color-doc-soft);
+  --color-text-faint:     var(--color-doc-faint);
+}
+.compliance-paper .doc-card {
+  background: #ffffff;
+  border: 1px solid var(--color-doc-rule-faint);
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.compliance-paper .doc-card-cream {
+  background: var(--color-doc-cream);
+}
+.compliance-paper .doc-letterhead-eyebrow {
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: #c4bfb6;
+}
+.compliance-paper .doc-letterhead-rule {
+  width: 40px;
+  height: 1px;
+  background: var(--color-doc-rule);
+  margin: 12px auto;
+}
+.compliance-paper .doc-letterhead-title {
+  font-family: var(--font-serif);
+  font-size: 32px;
+  font-weight: 500;
+  color: var(--color-doc-ink);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  margin: 0;
+}
+.compliance-paper .doc-letterhead-sub {
+  font-size: 13px;
+  color: var(--color-doc-faint);
+  margin-top: 8px;
+}
+.compliance-paper .doc-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-doc-soft);
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+}
+.compliance-paper .doc-field-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-doc-faint);
+  margin-bottom: 5px;
+}
+.compliance-paper .doc-field-required::after {
+  content: " *";
+  color: #8b1a1a;
+}
+.compliance-paper .doc-input {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid var(--color-doc-rule);
+  border-radius: 8px;
+  padding: 13px 14px;
+  font-size: 16px;
+  color: var(--color-doc-ink);
+  font-family: var(--font-sans);
+  outline: none;
+  box-sizing: border-box;
+}
+.compliance-paper .doc-input:focus {
+  border-color: var(--color-doc-ink);
+  box-shadow: 0 0 0 3px rgba(26,24,22,0.06);
+}
+.compliance-paper .doc-btn-primary {
+  background: var(--color-doc-ink);
+  color: var(--color-doc-cream);
+  border: none;
+  border-radius: 8px;
+  padding: 16px 22px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.compliance-paper .doc-btn-primary:disabled {
+  background: var(--color-doc-rule-faint);
+  color: #c4bfb6;
+  cursor: not-allowed;
+}
+.compliance-paper .doc-btn-secondary {
+  background: #ffffff;
+  color: var(--color-doc-soft);
+  border: 1px solid var(--color-doc-rule);
+  border-radius: 8px;
+  padding: 14px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.compliance-paper .legal-prose {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--color-doc-ink);
+}
+.compliance-paper .legal-prose p { margin-bottom: 6px; }
+.compliance-paper .legal-prose .legal-italic { font-style: italic; color: var(--color-doc-soft); }
+.compliance-paper .legal-eyebrow {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-doc-faint);
+  margin-bottom: 8px;
+}
+.compliance-paper .legal-h3 {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-doc-ink);
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+}
+
+/* Lock banner — fixed top, dark, "Document Mode" indicator. Sits above the
+   compliance-paper container; container should add top-padding when locked. */
+.compliance-lock-banner {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  background: #0d0d0d;
+  padding: 6px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  border-bottom: 1px solid #222;
+}
+.compliance-lock-banner .lock-label {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #d4a017;
+}
+.compliance-lock-banner .lock-pin-input {
+  width: 56px;
+  padding: 2px 6px;
+  font-size: 13px;
+  text-align: center;
+  background: #222;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #fff;
+  outline: none;
+  letter-spacing: 0.2em;
+  font-family: var(--font-mono);
+}
+
+@keyframes doc-fadeup {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes doc-stamp-in {
+  0%   { transform: scale(2) rotate(-6deg); opacity: 0; }
+  70%  { transform: scale(0.97) rotate(0deg); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.compliance-paper .doc-fadeup { animation: doc-fadeup 400ms cubic-bezier(0.16,1,0.3,1); }
+.compliance-paper .doc-stamp  { animation: doc-stamp-in 600ms cubic-bezier(0.16,1,0.3,1); }
