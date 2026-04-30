@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
+import { createPortal } from "react-dom"
 import type { Scene } from "@/lib/api"
 import { SceneDetail } from "@/app/(app)/missing/scene-detail"
 
@@ -23,6 +24,12 @@ export function SceneDetailModal({
   onClose: () => void
   onSceneUpdate: (updated: Scene) => void
 }) {
+  // Portal to <body> so position: fixed always anchors to the viewport,
+  // not to whichever ancestor on the host page might create a containing
+  // block (transform / filter / contain). The dashboard hits this case.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+
   useEffect(() => {
     if (!scene) return
     function handleKey(e: KeyboardEvent) {
@@ -39,9 +46,9 @@ export function SceneDetailModal({
     return () => { document.body.style.overflow = prev }
   }, [scene])
 
-  if (!scene) return null
+  if (!scene || !mounted || typeof document === "undefined") return null
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -97,6 +104,7 @@ export function SceneDetailModal({
           />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
