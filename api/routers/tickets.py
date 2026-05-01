@@ -111,32 +111,30 @@ def _next_ticket_id(conn) -> str:
 # Sheets write-through helpers
 # ---------------------------------------------------------------------------
 def _write_ticket_to_sheet(ticket: dict) -> None:
-    """Write a ticket row to the Google Sheets Tickets tab (async-safe)."""
+    """Append a ticket row to Sheet1 — the canonical tab that sync_tickets reads.
+
+    Sheet1 schema (1-indexed):
+      A=Ticket ID, B=Date Submitted, C=Submitted By, D=Project, E=Type,
+      F=Priority, G=Title, H=Description, I=Status, J=Approved By,
+      K=Admin Notes, L=Assigned To, M=Date Resolved
+    """
     try:
         sh = open_tickets()
-        ws = get_or_create_worksheet(
-            sh,
-            "Tickets",
-            headers=[
-                "Ticket ID", "Title", "Description", "Project", "Type",
-                "Priority", "Status", "Submitted By", "Submitted At",
-                "Assignee", "Notes", "Resolved At", "Linked Items",
-            ],
-        )
+        ws = sh.sheet1
         row = [
             ticket["ticket_id"],
-            ticket["title"],
-            ticket["description"],
+            ticket["submitted_at"],
+            ticket["submitted_by"],
             ticket["project"],
             ticket["type"],
             ticket["priority"],
+            ticket["title"],
+            ticket["description"],
             ticket["status"],
-            ticket["submitted_by"],
-            ticket["submitted_at"],
-            ticket["assignee"],
+            "",                       # Approved By
             ticket["notes"],
+            ticket["assignee"],
             ticket["resolved_at"],
-            ticket["linked_items"],
         ]
         with_retry(lambda: ws.append_row(row, value_input_option="USER_ENTERED"))
     except Exception as exc:
@@ -144,23 +142,23 @@ def _write_ticket_to_sheet(ticket: dict) -> None:
 
 
 def _update_ticket_in_sheet(ticket_id: str, updates: dict) -> None:
-    """Update a ticket row in Google Sheets by finding its row."""
+    """Update a ticket row in Sheet1 by finding its row. Column mapping matches
+    the Sheet1 schema documented in `_write_ticket_to_sheet`."""
     try:
         sh = open_tickets()
-        ws = get_or_create_worksheet(sh, "Tickets")
+        ws = sh.sheet1
         cell = with_retry(lambda: ws.find(ticket_id, in_column=1))
         if not cell:
-            _log.warning("Ticket %s not found in sheet", ticket_id)
+            _log.warning("Ticket %s not found in Sheet1", ticket_id)
             return
 
         row_num = cell.row
-        # Column mapping: A=1=ticket_id, B=2=title, ... G=7=status, J=10=assignee, K=11=notes, L=12=resolved_at
         col_map = {
-            "status": 7,
-            "assignee": 10,
-            "notes": 11,
             "priority": 6,
-            "resolved_at": 12,
+            "status": 9,
+            "notes": 11,
+            "assignee": 12,
+            "resolved_at": 13,
         }
 
         for field, value in updates.items():
