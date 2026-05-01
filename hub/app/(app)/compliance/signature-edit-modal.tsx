@@ -283,29 +283,98 @@ export function SignatureEditModal({
                   </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {history.map((h) => (
-                      <div
-                        key={h.history_id}
-                        style={{
-                          background: "var(--color-surface)",
-                          border: "1px solid var(--color-border-subtle)",
-                          borderRadius: 6, padding: "8px 10px",
-                          fontSize: 11.5, color: "var(--color-text-muted)",
-                        }}
-                      >
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                          <span style={{ color: "var(--color-text)" }}>
-                            {new Date(h.snapshot_at).toLocaleString()}
-                          </span>
-                          {h.edited_by && (
-                            <span style={{ color: "var(--color-text-faint)" }}>{h.edited_by}</span>
+                    {history.map((h, i) => {
+                      // Compute the diff: what fields differ between this
+                      // historical state and what came AFTER it. The next-newer
+                      // state is either the previous history entry (history is
+                      // newest-first) or the current row.
+                      const newer = i === 0 ? row : history[i - 1]
+                      const diffs: Array<{ key: keyof SignatureRow; from: string; to: string }> = []
+                      if (newer) {
+                        for (const f of FIELDS) {
+                          const before = String(h[f.key] ?? "")
+                          const after = String(newer[f.key] ?? "")
+                          if (before !== after) {
+                            diffs.push({ key: f.key, from: before, to: after })
+                          }
+                        }
+                      }
+                      const pdfHref = api(idToken ?? null).compliance.signaturePdfUrl(
+                        signatureId, { asOf: h.snapshot_at },
+                      )
+                      return (
+                        <div
+                          key={h.history_id}
+                          style={{
+                            background: "var(--color-surface)",
+                            border: "1px solid var(--color-border-subtle)",
+                            borderRadius: 6, padding: "8px 10px",
+                            fontSize: 11.5, color: "var(--color-text-muted)",
+                          }}
+                        >
+                          <div style={{
+                            display: "flex", justifyContent: "space-between",
+                            alignItems: "center", gap: 12,
+                          }}>
+                            <span style={{ color: "var(--color-text)" }}>
+                              {new Date(h.snapshot_at).toLocaleString()}
+                            </span>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              {h.edited_by && (
+                                <span style={{ color: "var(--color-text-faint)" }}>{h.edited_by}</span>
+                              )}
+                              <a
+                                href={pdfHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  fontSize: 11, color: "var(--color-text-muted)",
+                                  textDecoration: "underline",
+                                  textDecorationStyle: "dotted",
+                                  textUnderlineOffset: 3,
+                                }}
+                                title="Render PDF using this historical state"
+                              >
+                                PDF
+                              </a>
+                            </div>
+                          </div>
+                          {h.edit_reason && (
+                            <div style={{ marginTop: 3, fontStyle: "italic" }}>{h.edit_reason}</div>
+                          )}
+                          {diffs.length > 0 && (
+                            <div style={{
+                              marginTop: 6, paddingTop: 6,
+                              borderTop: "1px solid var(--color-border-subtle)",
+                              display: "flex", flexDirection: "column", gap: 2,
+                            }}>
+                              {diffs.map((d) => {
+                                const label = FIELDS.find((f) => f.key === d.key)?.label ?? d.key
+                                return (
+                                  <div key={d.key as string} style={{
+                                    fontSize: 11, fontFamily: "var(--font-mono)",
+                                    color: "var(--color-text-faint)",
+                                  }}>
+                                    <span style={{
+                                      color: "var(--color-text-muted)",
+                                      fontFamily: "inherit",
+                                    }}>{label}:</span>{" "}
+                                    <span style={{
+                                      textDecoration: "line-through",
+                                      color: "color-mix(in srgb, var(--color-err) 70%, transparent)",
+                                    }}>{d.from || "∅"}</span>
+                                    {" → "}
+                                    <span style={{ color: "var(--color-lime)" }}>
+                                      {d.to || "∅"}
+                                    </span>
+                                  </div>
+                                )
+                              })}
+                            </div>
                           )}
                         </div>
-                        {h.edit_reason && (
-                          <div style={{ marginTop: 3, fontStyle: "italic" }}>{h.edit_reason}</div>
-                        )}
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </div>
