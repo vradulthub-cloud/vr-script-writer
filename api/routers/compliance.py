@@ -1989,72 +1989,125 @@ async def talent_recent_prefill(
 # them as "signed" without an iPad round trip.
 
 
-class AutoSignMaleResult(BaseModel):
+class AutoSignTalentResult(BaseModel):
     shoot_id: str
+    talent_role: str
     talent_slug: str
     source_shoot_id: str = ""    # the prior record we cloned, if any
     created_signature_id: int = 0
+    ids_copied: list[str] = []   # filenames copied from the prior shoot folder
     skipped_reason: str = ""     # set if no prior record exists
 
 
-@router.post("/shoots/{shoot_id}/auto-sign-male", response_model=AutoSignMaleResult)
-async def auto_sign_male(shoot_id: str, user: CurrentUser):
-    """Clone the male's most recent compliance_signatures row into this shoot.
+def _copy_prior_ids_to_shoot_folder(
+    prior_shoot_date_iso: str,
+    prior_female: str,
+    prior_male: str,
+    talent_role: str,
+    talent_slug: str,
+    dest_folder_id: str,
+    existing_dest_lower: set[str],
+    token: str,
+) -> list[str]:
+    """Find the prior shoot's Drive folder, copy that talent's IDs into
+    the destination folder. Idempotent — skips already-present filenames.
+    Returns list of newly-copied destination filenames.
+    """
+    from datetime import datetime as _dt
+    try:
+        prior_date = _dt.fromisoformat(prior_shoot_date_iso[:10]).date()
+    except Exception:
+        return []
+    info = _get_shoot_folder(prior_date, prior_female, prior_male or "", token)
+    if not info:
+        return []
+    prior_folder_id, _ = info
+    prior_files = _list_folder_files(prior_folder_id, token)
 
-    Use case: same male shoots Mon/Tue/Wed back-to-back with the same female
-    or different females. His paperwork is identical (W-9, 2257) every day —
-    no point re-signing. Operator clicks "Auto-fill from prior" in the
-    compliance UI, this endpoint does the rest.
+    slug_lower = talent_slug.lower()
+    copied: list[str] = []
+    for f in prior_files:
+        name = f.get("name", "") or ""
+        if not name:
+            continue
+        # Match files belonging to this talent — slug-prefixed filenames
+        # like "LeanaLovings-id-front.jpg" or "DannySteele-bunny-ear.HEIC".
+        name_collapsed = name.replace(" ", "").replace("-", "").lower()
+        if slug_lower not in name_collapsed:
+            continue
+        # Match ID-like filenames (front/back/bunny/id) — skip random photos
+        nm_lower = name.lower()
+        if not any(k in nm_lower for k in ("front", "back", "bunny", "-id-", "id_")):
+            continue
+        if name.lower() in existing_dest_lower:
+            continue
+        try:
+            _copy_file(f["id"], dest_folder_id, name, token)
+            copied.append(name)
+            existing_dest_lower.add(name.lower())
+        except Exception as exc:
+            _log.warning("auto-sign ID copy %s failed: %s", name, exc)
+    return copied
+
+
+def _do_auto_sign(shoot_id: str, talent_role: str) -> AutoSignTalentResult:
+    """Shared implementation for both female and male auto-sign.
+
+    Clones the talent's most recent populated compliance_signatures row
+    into this shoot, then copies their ID photos from that prior shoot's
+    Drive folder into the current shoot's Drive folder.
 
     Idempotent — UNIQUE(shoot_id, talent_role, talent_slug) means re-calling
-    overwrites the existing row, capturing the prior state in the history
-    trigger.
+    overwrites the existing row (history trigger captures the prior state).
     """
+    if talent_role not in ("female", "male"):
+        raise HTTPException(status_code=400, detail="role must be 'female' or 'male'")
+
     from_d, to_d = _window()
     shoots = _load_shoots_window(from_d, to_d, include_cancelled=False)
     shoot = next((s for s in shoots if s.shoot_id == shoot_id), None)
     if not shoot:
         raise HTTPException(status_code=404, detail="shoot not found")
-    if not shoot.male_talent:
-        raise HTTPException(status_code=400, detail="shoot has no male talent")
 
-    male_slug = shoot.male_talent.replace(" ", "")
+    talent_display = shoot.female_talent if talent_role == "female" else (shoot.male_talent or "")
+    if not talent_display:
+        raise HTTPException(status_code=400, detail=f"shoot has no {talent_role} talent")
+    talent_slug = talent_display.replace(" ", "")
+
     bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in ("BG", "BGCP")]
     primary = bg_scenes[0] if bg_scenes else None
     scene_id = primary.scene_id if primary else ""
     studio = primary.studio if primary else ""
 
-    # Find the male's most recent prior signature (any shoot). Prefer rows
-    # populated with PII (legal_name + dob set) — placeholders without
-    # extracted fields shouldn't propagate.
+    # Find the talent's most recent prior populated row.
     with get_db() as conn:
         prior = conn.execute(
             "SELECT * FROM compliance_signatures "
-            "WHERE talent_role='male' AND talent_slug=? "
+            "WHERE talent_role=? AND talent_slug=? "
             "  AND legal_name != '' AND legal_name IS NOT NULL "
             "  AND shoot_id != ? "
             "ORDER BY signed_at DESC LIMIT 1",
-            (male_slug, shoot_id),
+            (talent_role, talent_slug, shoot_id),
         ).fetchone()
 
     if not prior:
-        return AutoSignMaleResult(
+        return AutoSignTalentResult(
             shoot_id=shoot_id,
-            talent_slug=male_slug,
-            skipped_reason=f"No prior signature on file for {male_slug}. "
+            talent_role=talent_role,
+            talent_slug=talent_slug,
+            skipped_reason=f"No prior signature on file for {talent_slug}. "
                            "Run /admin/bulk-import-from-drive or have the "
                            "talent sign once in-person.",
         )
 
-    # Clone — preserves the male's PII; updates only the shoot anchor.
     sig_id = upsert_signature(
         shoot_id=shoot_id,
         shoot_date=shoot.shoot_date,
         scene_id=scene_id,
         studio=studio,
-        talent_role="male",
-        talent_slug=male_slug,
-        talent_display=shoot.male_talent,
+        talent_role=talent_role,
+        talent_slug=talent_slug,
+        talent_display=talent_display,
         legal_name=prior["legal_name"],
         business_name=prior["business_name"] or "",
         tax_classification=prior["tax_classification"] or "individual",
@@ -2074,23 +2127,84 @@ async def auto_sign_male(shoot_id: str, user: CurrentUser):
         id1_number=prior["id1_number"] or "",
         id2_type=prior["id2_type"] or "",
         id2_number=prior["id2_number"] or "",
-        stage_names=prior["stage_names"] or shoot.male_talent,
+        stage_names=prior["stage_names"] or talent_display,
         professional_names=prior["professional_names"] or "",
         nicknames_aliases=prior["nicknames_aliases"] or "",
         previous_legal_names=prior["previous_legal_names"] or "",
         signature_image_path=prior["signature_image_path"] or "auto-fill-from-prior",
         signed_ip="",
-        signed_user_agent="auto-sign-male",
+        signed_user_agent=f"auto-sign-{talent_role}",
         signed_by_user=f"auto-fill:from-{prior['shoot_id']}",
         pdf_local_path="",
         pdf_mega_path="",
     )
-    return AutoSignMaleResult(
+
+    # Auto-copy IDs from the prior shoot's Drive folder. Best-effort —
+    # failures don't roll back the signature.
+    ids_copied: list[str] = []
+    try:
+        token = _get_drive_rw_token()
+        if token:
+            shoot_date_obj = _parse_shoot_date(shoot.shoot_date)
+            if shoot_date_obj:
+                # Resolve current shoot folder + its existing files.
+                month_id = _find_or_create_folder(LEGAL_ROOT_FOLDER,
+                                                  shoot_date_obj.strftime("%B"), token)
+                date_code = shoot_date_obj.strftime("%m%d%y")
+                female_slug = shoot.female_talent.replace(" ", "")
+                male_slug = (shoot.male_talent or "").replace(" ", "")
+                folder_name = f"{date_code}-{female_slug}" + (f"-{male_slug}" if male_slug else "")
+                folder_id = _find_or_create_folder(month_id, folder_name, token)
+                existing_lower = {f.get("name", "").lower()
+                                  for f in _list_folder_files(folder_id, token)}
+
+                # Look up the prior shoot's female/male talent so we can find
+                # its folder. The shoot_id stores it but the field naming
+                # convention isn't 1:1, so look up by date in the shoots window.
+                prior_shoot = next(
+                    (s for s in shoots if s.shoot_id == prior["shoot_id"]),
+                    None,
+                )
+                if prior_shoot:
+                    ids_copied = _copy_prior_ids_to_shoot_folder(
+                        prior_shoot.shoot_date,
+                        prior_shoot.female_talent,
+                        prior_shoot.male_talent or "",
+                        talent_role, talent_slug,
+                        folder_id, existing_lower, token,
+                    )
+    except Exception as exc:
+        _log.warning("auto-sign ID copy chain failed: %s", exc)
+
+    return AutoSignTalentResult(
         shoot_id=shoot_id,
-        talent_slug=male_slug,
+        talent_role=talent_role,
+        talent_slug=talent_slug,
         source_shoot_id=prior["shoot_id"],
         created_signature_id=sig_id,
+        ids_copied=ids_copied,
     )
+
+
+@router.post("/shoots/{shoot_id}/auto-sign-male", response_model=AutoSignTalentResult)
+async def auto_sign_male(shoot_id: str, user: CurrentUser):
+    """Clone the male's most recent compliance_signatures row + IDs into
+    this shoot. See `_do_auto_sign` for full semantics."""
+    return _do_auto_sign(shoot_id, "male")
+
+
+@router.post("/shoots/{shoot_id}/auto-sign-female", response_model=AutoSignTalentResult)
+async def auto_sign_female(shoot_id: str, user: CurrentUser):
+    """Clone the female's most recent compliance_signatures row + IDs into
+    this shoot. Use when a returning female has shot back-to-back and
+    nothing on her paperwork has changed.
+
+    Same flow as auto-sign-male but for the female role. The talent-prefill
+    UI (which keeps the sign step) is the right choice when the talent
+    might want to update fields; this is the "she just shot yesterday,
+    same paperwork" fast path.
+    """
+    return _do_auto_sign(shoot_id, "female")
 
 
 # ─── Legacy Drive paperwork import (TKT-0152) ────────────────────────────────
