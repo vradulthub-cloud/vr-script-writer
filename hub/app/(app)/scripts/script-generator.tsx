@@ -72,6 +72,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
   const [violations, setViolations] = useState<string[]>([])
   const [validationRan, setValidationRan] = useState(false)
   const [genTitleText, setGenTitleText] = useState("")
+  const [genTitleSource, setGenTitleSource] = useState<"script_sheet" | "ai" | null>(null)
   const [titleGenerating, setTitleGenerating] = useState(false)
   const [feedback, setFeedback] = useState("")
   const [tickets, setTickets] = useState<Ticket[]>([])
@@ -267,8 +268,9 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
 
   async function generateScriptTitle() {
     setTitleGenerating(true)
+    setGenTitleSource(null)
     try {
-      const { title } = await client.scripts.generateTitle({
+      const { title, source } = await client.scripts.generateTitle({
         studio,
         female,
         male,
@@ -280,8 +282,10 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
         props: sections["PROPS"] ?? "",
       })
       setGenTitleText(title)
+      setGenTitleSource(source ?? null)
     } catch {
       setGenTitleText("")
+      setGenTitleSource(null)
     } finally {
       setTitleGenerating(false)
     }
@@ -317,6 +321,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
     setViolations([])
     setValidationRan(false)
     setGenTitleText("")
+    setGenTitleSource(null)
   }
 
   const studioColor = STUDIO_COLOR[studio] ?? "var(--color-text-muted)"
@@ -949,10 +954,23 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
                   </button>
                   {genTitleText && (
                     <span
-                      className="rounded px-2.5 py-1"
+                      className="rounded px-2.5 py-1 inline-flex items-center gap-2"
                       style={{ fontSize: 12, color: "var(--color-text)", background: "var(--color-elevated)", border: "1px solid var(--color-border)" }}
                     >
                       {genTitleText}
+                      {genTitleSource && (
+                        <span
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            letterSpacing: "0.1em",
+                            textTransform: "uppercase",
+                            color: genTitleSource === "script_sheet" ? "var(--color-ok)" : "var(--color-text-faint)",
+                          }}
+                        >
+                          {genTitleSource === "script_sheet" ? "Sheet" : "AI"}
+                        </span>
+                      )}
                     </span>
                   )}
                 </div>

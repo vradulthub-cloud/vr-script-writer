@@ -1086,7 +1086,10 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
           props?: string
         },
       ) =>
-        post<{ title: string }>(`/scenes/${id}/generate-title`, body),
+        // `source` is "script_sheet" when the writer's title from the Scripts
+        // Sheet (col K) was returned directly, "ai" when Claude/Ollama synthesized
+        // one. Older API builds returned only { title }, so the field is optional.
+        post<{ title: string; source?: "script_sheet" | "ai" }>(`/scenes/${id}/generate-title`, body),
       namingIssues: (id: string) =>
         get<{ scene_id: string; issues: NamingIssue[]; ok: boolean }>(`/scenes/${id}/naming-issues`),
       storyboard: (id: string) =>
@@ -1132,7 +1135,10 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         location?: string
         props?: string
       }) =>
-        post<{ title: string }>("/scripts/title-generate", body),
+        // `source` is "script_sheet" when col K of the latest matching row was
+        // returned verbatim, "ai" when Claude/Ollama synthesized one. Optional
+        // for back-compat with older API builds.
+        post<{ title: string; source?: "script_sheet" | "ai" }>("/scripts/title-generate", body),
     },
 
     descriptions: {

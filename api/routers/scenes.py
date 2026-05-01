@@ -525,6 +525,13 @@ async def generate_scene_title(scene_id: str, body: TitleGenerateBody, user: Cur
             },
         )
 
+    # If the Scripts Sheet already has a title for this row, use it directly.
+    # The writers' titles are the source of truth — falling through to Claude
+    # discards human work and produces drift across regen clicks.
+    sheet_title = (merged.get("title") or "").strip()
+    if sheet_title:
+        return {"title": sheet_title, "source": "script_sheet"}
+
     try:
         from api.prompts import generate_title_with_fallback
         title = generate_title_with_fallback(
@@ -535,7 +542,7 @@ async def generate_scene_title(scene_id: str, body: TitleGenerateBody, user: Cur
             location=merged["location"],
             props=merged["props"],
         )
-        return {"title": title}
+        return {"title": title, "source": "ai"}
     except RuntimeError as exc:
         _log.error("Title generation failed: %s", exc)
         raise HTTPException(status_code=503, detail=f"Title generation failed: {exc}")

@@ -94,6 +94,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   // Inline scene-title generator — wired to the selected scene so editors
   // can rename a scene without leaving the Descriptions view.
   const [genTitle, setGenTitle] = useState("")
+  const [genTitleSource, setGenTitleSource] = useState<"script_sheet" | "ai" | null>(null)
   const [genTitleLoading, setGenTitleLoading] = useState(false)
   const [genTitleErr, setGenTitleErr] = useState<string | null>(null)
   const [genTitleSaving, setGenTitleSaving] = useState(false)
@@ -188,8 +189,9 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
     if (!selectedScene) return
     setGenTitleLoading(true)
     setGenTitleErr(null)
+    setGenTitleSource(null)
     try {
-      const { title } = await client.scenes.generateTitle(selectedScene.id, {
+      const { title, source } = await client.scenes.generateTitle(selectedScene.id, {
         female: selectedScene.female,
         male: selectedScene.male,
         theme: selectedScene.theme,
@@ -198,6 +200,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
         wardrobe_f: wardrobe || undefined,
       })
       setGenTitle(title)
+      setGenTitleSource(source ?? null)
     } catch (e) {
       setGenTitleErr(formatApiError(e, "Title"))
     } finally {
@@ -213,6 +216,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
       await client.scenes.updateTitle(selectedScene.id, genTitle)
       void revalidateAfterWrite([TAG_SCENES])
       setGenTitle("")
+      setGenTitleSource(null)
       setSaveMsg("Title saved.")
       setTimeout(() => setSaveMsg(null), 1500)
     } catch (e) {
@@ -560,44 +564,60 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                 <p style={{ fontSize: 10, color: "var(--color-err)", marginTop: 4 }}>{genTitleErr}</p>
               )}
               {genTitle && (
-                <div className="mt-1.5 flex items-center gap-1.5">
-                  <span
-                    className="flex-1 truncate"
-                    style={{
-                      fontSize: 11,
-                      color: "var(--color-text)",
-                      fontWeight: 600,
-                    }}
-                    title={genTitle}
-                  >
-                    {genTitle}
-                  </span>
-                  <button
-                    onClick={applySceneTitle}
-                    disabled={genTitleSaving}
-                    className="px-2 py-0.5 rounded"
-                    style={{
-                      fontSize: 10,
-                      background: genTitleSaving ? "var(--color-elevated)" : "var(--color-lime)",
-                      color: genTitleSaving ? "var(--color-text-muted)" : "var(--color-lime-ink)",
-                      fontWeight: 600,
-                      cursor: genTitleSaving ? "wait" : "pointer",
-                    }}
-                  >
-                    {genTitleSaving ? "…" : "Apply"}
-                  </button>
-                  <button
-                    onClick={() => setGenTitle("")}
-                    className="px-1.5 py-0.5 rounded"
-                    style={{
-                      fontSize: 10,
-                      color: "var(--color-text-faint)",
-                      border: "1px solid var(--color-border)",
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
+                <>
+                  {genTitleSource && (
+                    <p
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: "0.1em",
+                        textTransform: "uppercase",
+                        color: genTitleSource === "script_sheet" ? "var(--color-ok)" : "var(--color-text-faint)",
+                        marginTop: 6,
+                      }}
+                    >
+                      {genTitleSource === "script_sheet" ? "From Scripts Sheet" : "AI generated"}
+                    </p>
+                  )}
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <span
+                      className="flex-1 truncate"
+                      style={{
+                        fontSize: 11,
+                        color: "var(--color-text)",
+                        fontWeight: 600,
+                      }}
+                      title={genTitle}
+                    >
+                      {genTitle}
+                    </span>
+                    <button
+                      onClick={applySceneTitle}
+                      disabled={genTitleSaving}
+                      className="px-2 py-0.5 rounded"
+                      style={{
+                        fontSize: 10,
+                        background: genTitleSaving ? "var(--color-elevated)" : "var(--color-lime)",
+                        color: genTitleSaving ? "var(--color-text-muted)" : "var(--color-lime-ink)",
+                        fontWeight: 600,
+                        cursor: genTitleSaving ? "wait" : "pointer",
+                      }}
+                    >
+                      {genTitleSaving ? "…" : "Apply"}
+                    </button>
+                    <button
+                      onClick={() => setGenTitle("")}
+                      className="px-1.5 py-0.5 rounded"
+                      style={{
+                        fontSize: 10,
+                        color: "var(--color-text-faint)",
+                        border: "1px solid var(--color-border)",
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           )}

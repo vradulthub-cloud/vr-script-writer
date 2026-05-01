@@ -346,6 +346,11 @@ def _enrich_desc_body_from_scripts(body: DescGenRequest) -> DescGenRequest:
     nothing concrete to write about, producing generic copy.
 
     Requires `scene_id`; without it we can't resolve studio/performer.
+
+    The Scripts Sheet's `title` column is also pulled and stitched into
+    `model_properties` so the description model anchors on the writer's
+    working title (the same beat the title generator returns) instead of
+    inventing a new framing.
     """
     if not body.scene_id:
         return body
@@ -373,9 +378,11 @@ def _enrich_desc_body_from_scripts(body: DescGenRequest) -> DescGenRequest:
         )
 
     # Build augmented model_properties: caller's notes first, then any script
-    # context (theme/location) the prompt didn't already see, so Claude has
-    # somewhere to anchor the scene without inventing setting details.
+    # context (theme/location/title) the prompt didn't already see, so Claude
+    # has somewhere to anchor the scene without inventing setting details.
     extras: list[str] = []
+    if merged.get("title"):
+        extras.append(f"Working title: {merged['title']}")
     if merged["theme"]:
         extras.append(f"Theme: {merged['theme']}")
     if merged["location"]:
@@ -395,7 +402,13 @@ def _enrich_desc_body_from_scripts(body: DescGenRequest) -> DescGenRequest:
 
 
 def _build_desc_user_prompt(body: DescGenRequest) -> str:
-    """Build the user-turn prompt for description generation."""
+    """Build the user-turn prompt for description generation.
+
+    The Plot block is labeled "Script (source of truth)" so the model treats
+    it as canonical — earlier wording ("Plot Summary") let it drift. When the
+    sheet has plot text, the model must build the description around those
+    beats instead of inventing a new arc.
+    """
     lines = [f"Write a scene description for {body.studio} with the following details:"]
 
     if body.performers:
@@ -411,7 +424,10 @@ def _build_desc_user_prompt(body: DescGenRequest) -> str:
     if body.model_properties:
         lines.append(f"Model Notes: {body.model_properties}")
     if body.plot:
-        lines.append(f"Plot Summary: {body.plot}")
+        lines.append(
+            f"Script (source of truth — build the description around these beats, "
+            f"do not invent setting/wardrobe/action that contradicts it):\n{body.plot}"
+        )
 
     return "\n".join(lines)
 

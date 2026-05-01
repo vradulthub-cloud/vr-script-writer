@@ -373,6 +373,14 @@ async def generate_script_title(body: TitleGenBody, user: CurrentUser):
             },
         )
 
+    # If the Scripts Sheet already has a title for this row, return it directly
+    # — writers' titles are the source of truth, and AI-regenerating discards
+    # their work. Caller's body.theme/plot/etc don't override the sheet title;
+    # the sheet wins because that's where titles are authored.
+    sheet_title = (merged.get("title") or "").strip()
+    if sheet_title:
+        return {"title": sheet_title, "source": "script_sheet"}
+
     try:
         from api.prompts import generate_title_with_fallback
         title = generate_title_with_fallback(
@@ -383,7 +391,7 @@ async def generate_script_title(body: TitleGenBody, user: CurrentUser):
             location=merged["location"],
             props=merged["props"],
         )
-        return {"title": title}
+        return {"title": title, "source": "ai"}
     except RuntimeError as exc:
         _log.error("Script title generation failed: %s", exc)
         raise HTTPException(status_code=503, detail=f"Title generation failed: {exc}")

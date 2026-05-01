@@ -579,9 +579,13 @@ def get_sync_meta(source: str) -> dict[str, Any] | None:
 
 # Fields the helper resolves from the latest matching scripts row. Order matters
 # only for the merged dict's iteration order, not for SQL.
+#
+# `title` is included so endpoints can use the writer's title from the Scripts
+# Sheet directly (col K) instead of calling Claude on every click — when the
+# row has a real title, that's the source of truth.
 _SCRIPT_ENRICH_FIELDS = (
     "theme", "plot", "wardrobe_f", "wardrobe_m",
-    "location", "props", "male", "scene_type",
+    "location", "props", "male", "scene_type", "title",
 )
 
 # Minimum first-name length before fuzzy startswith match is allowed.
