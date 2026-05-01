@@ -506,6 +506,85 @@ def _fill_pdf_fields(pdf_bytes: bytes, fields: dict[str, str]) -> bytes:
         return pdf_bytes
 
 
+def _row_to_pdf_fields(row: dict, shoot_date_str: str) -> dict[str, str]:
+    """Build the PDF AcroForm field values from a compliance_signatures row.
+
+    Mirror of `_map_form_to_pdf` for the DB-driven render path. Fields are
+    typed as strings — date / phone / etc. formatting that the talent-form
+    UI does is preserved verbatim because the row already stores the
+    normalized values.
+    """
+    legal = row.get("legal_name", "") or ""
+    biz = row.get("business_name", "") or ""
+    stage = row.get("stage_names", "") or legal
+    full_address = f"{row.get('street_address','') or ''} {row.get('city_state_zip','') or ''}".strip()
+    dob_fmt = _format_dob(row.get("dob", "")) if row.get("dob") else ""
+    return {
+        "Custom Field 1":    legal,
+        "Custom Field 2":    biz,
+        "Custom Checkbox 1": "/Yes",
+        "Custom Field 7":    row.get("street_address", "") or "",
+        "Custom Field 9":    row.get("city_state_zip", "") or "",
+        "Custom Field 14":   legal,
+        "Custom Field 16":   legal,
+        "Custom Field 17":   stage,
+        "Custom Field 18":   legal,
+        "Custom Field 23":   legal,
+        "Custom Field 24":   legal,
+        "Custom Field 25":   dob_fmt,
+        "Custom Field 26":   row.get("place_of_birth", "") or "",
+        "Custom Field 27":   full_address,
+        "Custom Field 28":   row.get("id1_type", "") or "",
+        "Custom Field 29":   row.get("id1_number", "") or "",
+        "Custom Field 30":   row.get("id2_type", "") or "",
+        "Custom Field 31":   row.get("id2_number", "") or "",
+        "Custom Field 32":   row.get("phone", "") or "",
+        "Custom Field 33":   row.get("email", "") or "",
+        "Custom Field 34":   stage,
+        "Custom Field 35":   stage,
+        "Date 1":            shoot_date_str,
+        "Date 2":            shoot_date_str,
+        "Custom Field 13":   shoot_date_str,
+    }
+
+
+def _render_pdf_from_signature(row: dict, date_override: Optional[str] = None) -> bytes:
+    """Render a filled-PDF from a compliance_signatures row.
+
+    Uses the appropriate template (female: FEMALE_TPL_ID; male: MALE_TPLS
+    keyed on slug). `date_override` lets the time-travel UI request a
+    different date than what's stored on the row (e.g. "Apr 15, 2026"
+    formatted via shoot_date.strftime("%b %-d, %Y")).
+    """
+    role = row.get("talent_role", "")
+    slug = row.get("talent_slug", "")
+    template_id: Optional[str] = None
+    if role == "female":
+        template_id = FEMALE_TPL_ID
+    elif role == "male":
+        template_id = MALE_TPLS.get(slug)
+    if not template_id:
+        raise HTTPException(status_code=400,
+                            detail=f"No PDF template for role={role!r} slug={slug!r}")
+
+    if date_override:
+        date_str = date_override
+    else:
+        # Format YYYY-MM-DD as "Mon D, YYYY" — mirrors the existing flow.
+        try:
+            d = datetime.fromisoformat((row.get("shoot_date") or "")[:10])
+            date_str = d.strftime("%b ") + str(d.day) + d.strftime(", %Y")
+        except Exception:
+            date_str = row.get("shoot_date", "") or ""
+
+    token = _get_drive_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="Drive credentials unavailable")
+    template_bytes = _drive_download_bytes(template_id, token)
+    fields = _row_to_pdf_fields(row, date_str)
+    return _fill_pdf_fields(template_bytes, fields)
+
+
 def _map_form_to_pdf(req: "FillFormRequest", shoot_date_str: str) -> dict[str, str]:
     full_address = f"{req.street_address} {req.city_state_zip}".strip()
     dob_fmt = _format_dob(req.dob) if req.dob else ""
@@ -1746,6 +1825,71 @@ async def get_signature_as_of(
     if not row:
         raise HTTPException(status_code=404, detail="signature not found")
     return SignatureRow(**dict(row))
+
+
+@router.get("/signatures/{signature_id}/render-pdf")
+async def render_signature_pdf(
+    signature_id: int,
+    user: CurrentUser,
+    date: Optional[str] = Query(None,
+        description="Override the date stamped on the rendered PDF "
+                    "(format: 'Apr 30, 2026'). Defaults to the row's shoot_date."),
+    as_of: Optional[str] = Query(None,
+        description="ISO timestamp — render the row's state as of this moment."),
+):
+    """Render a fresh PDF from the row's current (or as-of-date) state.
+
+    Backbone of the "go back to a specific date" feature: combine
+    `as_of` (which row state to render) with `date` (which date to
+    stamp on it) to reproduce any historical artifact.
+
+    Streams the PDF inline so the browser can preview or save.
+    """
+    from fastapi.responses import StreamingResponse
+
+    if as_of:
+        # Reuse the same logic as get_signature_as_of — earliest history
+        # row >= as_of, else current.
+        with get_db() as conn:
+            hist = conn.execute(
+                "SELECT * FROM compliance_signatures_history "
+                "WHERE signature_id=? AND snapshot_at >= ? "
+                "ORDER BY snapshot_at ASC LIMIT 1",
+                (signature_id, as_of),
+            ).fetchone()
+            if hist:
+                d = dict(hist)
+                row = d
+            else:
+                cur = conn.execute(
+                    "SELECT * FROM compliance_signatures WHERE id=?",
+                    (signature_id,),
+                ).fetchone()
+                if not cur:
+                    raise HTTPException(status_code=404, detail="signature not found")
+                row = dict(cur)
+    else:
+        with get_db() as conn:
+            cur = conn.execute(
+                "SELECT * FROM compliance_signatures WHERE id=?",
+                (signature_id,),
+            ).fetchone()
+        if not cur:
+            raise HTTPException(status_code=404, detail="signature not found")
+        row = dict(cur)
+
+    pdf_bytes = _render_pdf_from_signature(row, date_override=date)
+    slug = row.get("talent_slug") or "talent"
+    shoot_date = (row.get("shoot_date") or "")[:10].replace("-", "")
+    filename = f"{slug}-{shoot_date or 'rendered'}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 # ─── Pre-fill for returning female talent (TKT-0167) ────────────────────────
