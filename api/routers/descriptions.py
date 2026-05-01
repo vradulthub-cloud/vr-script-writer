@@ -444,6 +444,20 @@ class DescSaveMegaBody(BaseModel):
     meta_description: str | None = None
 
 
+def _resolve_bucket(studio_id: str) -> str:
+    """Canonical bucket name for ``studio_id``.
+
+    The DB stores the UI name (e.g. ``"VRHush"``) but ``STUDIO_BUCKETS`` is
+    keyed by the 4-letter code (``"VRH"``). Resolving via ``_STUDIO_ALIASES``
+    matches what ``s4_client.put_object`` does internally — so the response
+    URI and success-log line show the same bucket the upload is actually
+    going to (``vrh``) instead of echoing the UI name back.
+    """
+    import s4_client
+    canon = s4_client._STUDIO_ALIASES.get(studio_id, studio_id).upper()
+    return s4_client.STUDIO_BUCKETS.get(canon, studio_id)
+
+
 def _upload_description_to_mega(src_path: str, studio: str, key: str, scene_id: str) -> None:
     """Background worker: PUTs the DOCX to S4, then cleans up the temp file."""
     import s4_client
@@ -453,7 +467,7 @@ def _upload_description_to_mega(src_path: str, studio: str, key: str, scene_id: 
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
         _log.info("save-mega %s: uploaded to s3://%s/%s", scene_id,
-                  s4_client.STUDIO_BUCKETS.get(studio, studio), key)
+                  _resolve_bucket(studio), key)
     except Exception:
         _log.exception("save-mega %s: background upload failed", scene_id)
     finally:
@@ -530,12 +544,13 @@ async def save_description_to_mega(body: DescSaveMegaBody, user: CurrentUser):
 
     # `mega_path` in the response is the S4 destination URI for status display.
     # The local `mega_path` variable was removed in the rclone→S4 migration
-    # (f4d3bf3) but this return line still referenced it — every save-mega call
-    # raised NameError, surfacing as "Save to MEGA failed (0)" in the UI.
-    bucket = s4_client.STUDIO_BUCKETS.get(studio_id, studio_id)
+    # (f4d3bf3) but the original return line still referenced it — every
+    # save-mega call raised NameError, surfacing as "Save to MEGA failed" in
+    # the UI. Use _resolve_bucket so the URI shows the canonical bucket
+    # (``vrh``) instead of the DB's UI name (``VRHush``).
     return {
         "scene_id": body.scene_id,
-        "mega_path": f"s3://{bucket}/{key}",
+        "mega_path": f"s3://{_resolve_bucket(studio_id)}/{key}",
         "status": "queued",
     }
 
