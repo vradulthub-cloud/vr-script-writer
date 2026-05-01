@@ -1473,6 +1473,24 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
           `/compliance/signatures/${signatureId}/as-of?at=${encodeURIComponent(at)}`,
         ),
 
+      /**
+       * URL to a fresh PDF rendered from the signature row.
+       *
+       * `date` overrides the date stamped on the PDF (e.g. "Apr 15, 2026").
+       * `asOf` returns the historical row state at that ISO timestamp.
+       * Combine both to reproduce any prior artifact verbatim.
+       */
+      signaturePdfUrl: (
+        signatureId: number,
+        opts: { date?: string; asOf?: string } = {},
+      ): string => {
+        const qs = new URLSearchParams()
+        if (opts.date) qs.set("date", opts.date)
+        if (opts.asOf) qs.set("as_of", opts.asOf)
+        const suffix = qs.toString() ? `?${qs.toString()}` : ""
+        return `${API_BASE}/api/compliance/signatures/${signatureId}/render-pdf${suffix}`
+      },
+
       // ─── Server-persisted photos (TKT-0151) ──────────────────────────────
       // Photos saved here are independent of signing and the legacy Drive
       // folder. They reappear on the next visit and push to MEGA when the

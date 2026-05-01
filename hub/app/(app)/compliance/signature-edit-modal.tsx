@@ -317,9 +317,27 @@ export function SignatureEditModal({
           padding: "12px 20px", borderTop: "1px solid var(--color-border)",
           display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
         }}>
-          <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-            {dirtyCount() > 0 ? `${dirtyCount()} field${dirtyCount() === 1 ? "" : "s"} changed` : "No changes"}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+              {dirtyCount() > 0 ? `${dirtyCount()} field${dirtyCount() === 1 ? "" : "s"} changed` : "No changes"}
+            </span>
+            {row && (
+              <a
+                href={api(idToken ?? null).compliance.signaturePdfUrl(signatureId)}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  fontSize: 11, color: "var(--color-text-muted)",
+                  textDecoration: "underline",
+                  textDecorationStyle: "dotted",
+                  textUnderlineOffset: 3,
+                }}
+                title="Render a fresh PDF from the current row values"
+              >
+                Render PDF →
+              </a>
+            )}
+          </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button
               type="button"
