@@ -271,8 +271,13 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
       const { title } = await client.scripts.generateTitle({
         studio,
         female,
+        male,
         theme: sections["THEME"] ?? "",
         plot: sections["PLOT"] ?? "",
+        wardrobe_f: sections["WARDROBE - FEMALE"] ?? "",
+        wardrobe_m: sections["WARDROBE - MALE"] ?? "",
+        location: sections["SHOOT LOCATION"] ?? "",
+        props: sections["PROPS"] ?? "",
       })
       setGenTitleText(title)
     } catch {

@@ -27,7 +27,7 @@ from pydantic import BaseModel
 
 from api.auth import CurrentUser
 from api.config import get_settings
-from api.database import get_db
+from api.database import enrich_from_script_row, get_db
 from api.prompts import DESC_SYSTEMS, DESC_COMPILATION_SYSTEMS, STUDIO_KEY_MAP, get_prompt
 
 _log = logging.getLogger(__name__)
@@ -115,6 +115,7 @@ async def generate_description(body: DescGenRequest, user: CurrentUser):
             detail=f"No description prompt found for studio key: {studio_key}",
         )
 
+    body = _enrich_desc_body_from_scripts(body)
     user_prompt = _build_desc_user_prompt(body)
     settings = get_settings()
 
@@ -336,6 +337,62 @@ async def save_description(body: DescSaveBody, user: CurrentUser):
 # ---------------------------------------------------------------------------
 # User prompt builder
 # ---------------------------------------------------------------------------
+
+def _enrich_desc_body_from_scripts(body: DescGenRequest) -> DescGenRequest:
+    """Backfill plot/wardrobe/model_properties from the latest matching scripts row.
+
+    Caller-supplied fields always win — this only fills empties. Without this,
+    descriptions for pre-Grail scenes get a body with `plot=""` and Claude has
+    nothing concrete to write about, producing generic copy.
+
+    Requires `scene_id`; without it we can't resolve studio/performer.
+    """
+    if not body.scene_id:
+        return body
+
+    with get_db() as conn:
+        scene = conn.execute(
+            "SELECT studio, performers, female FROM scenes WHERE id = ?",
+            (body.scene_id,),
+        ).fetchone()
+        if not scene:
+            return body
+
+        studio = scene["studio"] or body.studio
+        female = scene["female"] or ""
+        if not female and scene["performers"]:
+            female = scene["performers"].split(",")[0].strip()
+        if not female:
+            return body
+
+        merged = enrich_from_script_row(
+            conn,
+            studio=studio,
+            female=female,
+            overrides={"plot": body.plot, "wardrobe_f": body.wardrobe},
+        )
+
+    # Build augmented model_properties: caller's notes first, then any script
+    # context (theme/location) the prompt didn't already see, so Claude has
+    # somewhere to anchor the scene without inventing setting details.
+    extras: list[str] = []
+    if merged["theme"]:
+        extras.append(f"Theme: {merged['theme']}")
+    if merged["location"]:
+        extras.append(f"Location: {merged['location']}")
+    if merged["props"]:
+        extras.append(f"Props: {merged['props']}")
+    extra_str = " · ".join(extras)
+    new_model_props = body.model_properties
+    if extra_str and extra_str not in (body.model_properties or ""):
+        new_model_props = f"{body.model_properties}\n{extra_str}".strip() if body.model_properties else extra_str
+
+    return body.model_copy(update={
+        "plot": merged["plot"],
+        "wardrobe": merged["wardrobe_f"] or body.wardrobe,
+        "model_properties": new_model_props,
+    })
+
 
 def _build_desc_user_prompt(body: DescGenRequest) -> str:
     """Build the user-turn prompt for description generation."""

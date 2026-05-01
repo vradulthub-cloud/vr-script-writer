@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from api.auth import CurrentUser
 from api.config import get_settings
-from api.database import get_db
+from api.database import enrich_from_script_row, get_db
 from api.prompts import SYSTEM_PROMPT, NJOI_STATIC_PLOT, build_script_prompt, get_prompt
 from api.sheets_client import open_scripts, with_retry
 
@@ -350,16 +350,38 @@ class TitleGenBody(BaseModel):
 
 @router.post("/title-generate")
 async def generate_script_title(body: TitleGenBody, user: CurrentUser):
-    """Generate an AI title for a script (Claude with Ollama fallback)."""
+    """Generate an AI title for a script (Claude with Ollama fallback).
+
+    Caller-supplied body fields (the in-progress script editor's unsaved state)
+    win over the DB; any empty fields are filled from the latest matching
+    scripts-table row so titles still hook into concrete plot details when the
+    UI hands us a sparse body.
+    """
+    with get_db() as conn:
+        merged = enrich_from_script_row(
+            conn,
+            studio=body.studio,
+            female=body.female,
+            overrides={
+                "theme":      body.theme,
+                "plot":       body.plot,
+                "wardrobe_f": body.wardrobe_f,
+                "wardrobe_m": body.wardrobe_m,
+                "location":   body.location,
+                "props":      body.props,
+                "male":       body.male,
+            },
+        )
+
     try:
         from api.prompts import generate_title_with_fallback
         title = generate_title_with_fallback(
-            body.studio, body.female, body.theme, body.plot,
-            male=body.male,
-            wardrobe_f=body.wardrobe_f,
-            wardrobe_m=body.wardrobe_m,
-            location=body.location,
-            props=body.props,
+            body.studio, body.female, merged["theme"], merged["plot"],
+            male=merged["male"],
+            wardrobe_f=merged["wardrobe_f"],
+            wardrobe_m=merged["wardrobe_m"],
+            location=merged["location"],
+            props=merged["props"],
         )
         return {"title": title}
     except RuntimeError as exc:

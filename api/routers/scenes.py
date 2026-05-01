@@ -23,7 +23,7 @@ from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel, Field
 
 from api.auth import CurrentUser, require_grail_writer
-from api.database import get_db
+from api.database import enrich_from_script_row, get_db
 from api.sheets_client import open_grail, with_retry
 
 _log = logging.getLogger(__name__)
@@ -490,19 +490,10 @@ class TitleGenerateBody(BaseModel):
 async def generate_scene_title(scene_id: str, body: TitleGenerateBody, user: CurrentUser):
     """Generate an AI title suggestion for a scene (Claude with Ollama fallback).
 
-    The scenes row is often sparse for pre-production scenes — only
-    `performers` is populated, while theme/plot/wardrobe live in the scripts
-    sheet until the Grail row is filled in. We therefore:
-
-      1. Start from the scenes row (and any client-sent overrides).
-      2. If `female` is missing, parse it from `performers` (first comma part).
-      3. If theme/plot are still empty, look up the matching scripts row
-         (studio + case-insensitive female name, newest tab first) and pull
-         theme/plot/wardrobe/location/props from there.
-
-    Without step 3, Claude receives an empty user prompt and replies
-    "I don't see a script provided" — the bug this endpoint was hitting on
-    pre-Grail scenes (e.g. VRH0764 for Harley Love).
+    Caller-supplied body fields and the scenes row override the script-sheet
+    values; the helper fills any remaining empty fields from the latest
+    matching scripts-table row. Without that fallback, Claude gets an empty
+    prompt for pre-Grail scenes and refuses with "I don't see a script."
     """
     with get_db() as conn:
         row = conn.execute("SELECT * FROM scenes WHERE id = ?", (scene_id,)).fetchone()
@@ -510,15 +501,8 @@ async def generate_scene_title(scene_id: str, body: TitleGenerateBody, user: Cur
             raise HTTPException(status_code=404, detail="Scene not found")
         scene = dict(row)
 
-        studio     = scene.get("studio", "VRHush")
-        female     = body.female     or scene.get("female", "")     or ""
-        male       = body.male       or scene.get("male", "")       or ""
-        theme      = body.theme      or scene.get("theme", "")      or ""
-        plot       = body.plot       or scene.get("plot", "")       or ""
-        wardrobe_f = body.wardrobe_f or scene.get("wardrobe_f", "") or ""
-        wardrobe_m = body.wardrobe_m or scene.get("wardrobe_m", "") or ""
-        location   = body.location   or ""
-        props      = body.props      or ""
+        studio = scene.get("studio", "VRHush")
+        female = body.female or scene.get("female", "") or ""
 
         # Derive female from `performers` when the scene row hasn't been
         # flattened. Scenes sync populates performers ("Female, Male") before
@@ -526,39 +510,30 @@ async def generate_scene_title(scene_id: str, body: TitleGenerateBody, user: Cur
         if not female and scene.get("performers"):
             female = scene["performers"].split(",")[0].strip()
 
-        # If the scenes row lacks theme/plot, fetch the matching script row.
-        # This is the load-bearing path for pre-Grail scenes — without it,
-        # Claude gets an empty prompt and refuses.
-        if (not theme or not plot) and female:
-            srow = conn.execute(
-                "SELECT theme, plot, wardrobe_f, wardrobe_m, location, props, male "
-                "FROM scripts "
-                "WHERE studio = ? AND LOWER(female) = LOWER(?) "
-                "ORDER BY tab_name DESC LIMIT 1",
-                (studio, female),
-            ).fetchone()
-            if srow:
-                s = dict(srow)
-                theme      = theme      or (s.get("theme")      or "")
-                plot       = plot       or (s.get("plot")       or "")
-                wardrobe_f = wardrobe_f or (s.get("wardrobe_f") or "")
-                wardrobe_m = wardrobe_m or (s.get("wardrobe_m") or "")
-                location   = location   or (s.get("location")   or "")
-                props      = props      or (s.get("props")      or "")
-                male       = male       or (s.get("male")       or "")
-                _log.info("generate-title %s: enriched from scripts row (female=%s)", scene_id, female)
-            else:
-                _log.warning("generate-title %s: no scripts match for female=%r studio=%s", scene_id, female, studio)
+        merged = enrich_from_script_row(
+            conn,
+            studio=studio,
+            female=female,
+            overrides={
+                "theme":      body.theme      or scene.get("theme", "")      or "",
+                "plot":       body.plot       or scene.get("plot", "")       or "",
+                "wardrobe_f": body.wardrobe_f or scene.get("wardrobe_f", "") or "",
+                "wardrobe_m": body.wardrobe_m or scene.get("wardrobe_m", "") or "",
+                "location":   body.location   or "",
+                "props":      body.props      or "",
+                "male":       body.male       or scene.get("male", "")       or "",
+            },
+        )
 
     try:
         from api.prompts import generate_title_with_fallback
         title = generate_title_with_fallback(
-            studio, female, theme, plot,
-            male=male,
-            wardrobe_f=wardrobe_f,
-            wardrobe_m=wardrobe_m,
-            location=location,
-            props=props,
+            studio, female, merged["theme"], merged["plot"],
+            male=merged["male"],
+            wardrobe_f=merged["wardrobe_f"],
+            wardrobe_m=merged["wardrobe_m"],
+            location=merged["location"],
+            props=merged["props"],
         )
         return {"title": title}
     except RuntimeError as exc:

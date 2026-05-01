@@ -571,3 +571,90 @@ def get_sync_meta(source: str) -> dict[str, Any] | None:
         if row:
             return dict(row)
     return None
+
+
+# ---------------------------------------------------------------------------
+# Script-sheet enrichment helper
+# ---------------------------------------------------------------------------
+
+# Fields the helper resolves from the latest matching scripts row. Order matters
+# only for the merged dict's iteration order, not for SQL.
+_SCRIPT_ENRICH_FIELDS = (
+    "theme", "plot", "wardrobe_f", "wardrobe_m",
+    "location", "props", "male", "scene_type",
+)
+
+# Minimum first-name length before fuzzy startswith match is allowed.
+# "Mia" → "Mia Khalifa" / "Mia Malkova" is too ambiguous; "Scarlett" → "Scarlett Mae" is fine.
+_FUZZY_MIN_FIRST_NAME = 4
+
+
+def enrich_from_script_row(
+    conn: sqlite3.Connection,
+    *,
+    studio: str,
+    female: str,
+    overrides: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Merge caller-supplied overrides with the latest matching scripts-table row.
+
+    Resolution order per field: overrides[k] (if truthy) → DB value → "".
+    Lookup is scoped by studio and ordered by tab_name DESC (newest monthly tab wins).
+
+    Female matching is two-pass: exact case-insensitive first, then a first-word
+    startswith fallback (e.g. "Scarlett" → "Scarlett Mae"). The fallback is gated
+    on first-name length to avoid common-short-name collisions, and logs a warning
+    when it fires so silent mismatches are auditable.
+
+    Returns a dict containing every field in _SCRIPT_ENRICH_FIELDS — empty strings
+    for fields the script row didn't have.
+    """
+    overrides = overrides or {}
+    result: dict[str, str] = {k: (overrides.get(k) or "") for k in _SCRIPT_ENRICH_FIELDS}
+
+    if not studio or not female:
+        return result
+
+    cols = ", ".join(_SCRIPT_ENRICH_FIELDS)
+
+    # Prefer rows where plot is non-empty, then by newest tab. The same
+    # performer appears in multiple monthly tabs — the most recent tab is
+    # often a planning row with blank plot/theme, while the row that ACTUALLY
+    # has the script written is one or two tabs back. Without the plot-first
+    # ordering the helper happily returns an empty row and the title model
+    # gets the same empty prompt it had before.
+    order_clause = "ORDER BY (CASE WHEN plot != '' THEN 0 ELSE 1 END), tab_name DESC"
+
+    # Pass 1: exact match.
+    row = conn.execute(
+        f"SELECT {cols} FROM scripts "
+        f"WHERE studio = ? AND LOWER(female) = LOWER(?) "
+        f"{order_clause} LIMIT 1",
+        (studio, female),
+    ).fetchone()
+
+    # Pass 2: first-word startswith fallback.
+    if row is None:
+        first = female.split()[0] if female.split() else ""
+        if len(first) >= _FUZZY_MIN_FIRST_NAME:
+            row = conn.execute(
+                f"SELECT {cols}, female FROM scripts "
+                f"WHERE studio = ? AND LOWER(female) LIKE LOWER(? || ' %') "
+                f"{order_clause} LIMIT 1",
+                (studio, first),
+            ).fetchone()
+            if row is not None:
+                _log.warning(
+                    "enrich_from_script_row: fuzzy match — searched %r, matched %r (studio=%s)",
+                    female, row["female"], studio,
+                )
+
+    if row is None:
+        return result
+
+    s = dict(row)
+    for k in _SCRIPT_ENRICH_FIELDS:
+        # Caller override always wins; only fill from DB when override was empty.
+        if not result[k]:
+            result[k] = s.get(k) or ""
+    return result
