@@ -528,7 +528,16 @@ async def save_description_to_mega(body: DescSaveMegaBody, user: CurrentUser):
         daemon=True,
     ).start()
 
-    return {"scene_id": body.scene_id, "mega_path": f"{mega_path}{filename}", "status": "queued"}
+    # `mega_path` in the response is the S4 destination URI for status display.
+    # The local `mega_path` variable was removed in the rclone→S4 migration
+    # (f4d3bf3) but this return line still referenced it — every save-mega call
+    # raised NameError, surfacing as "Save to MEGA failed (0)" in the UI.
+    bucket = s4_client.STUDIO_BUCKETS.get(studio_id, studio_id)
+    return {
+        "scene_id": body.scene_id,
+        "mega_path": f"s3://{bucket}/{key}",
+        "status": "queued",
+    }
 
 
 # ---------------------------------------------------------------------------
