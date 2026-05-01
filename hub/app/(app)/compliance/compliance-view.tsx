@@ -1795,7 +1795,9 @@ function TalentPicker({
   signed,
   onStartFemale,
   onStartMale,
+  onAutoSignFemale,
   onAutoSignMale,
+  autoSignFemaleStatus,
   autoSignMaleStatus,
   onEditSignature,
   onContinueToPhotos,
@@ -1806,7 +1808,9 @@ function TalentPicker({
   signed: SignedSummary[]
   onStartFemale: () => void
   onStartMale: () => void
+  onAutoSignFemale: () => void
   onAutoSignMale: () => void
+  autoSignFemaleStatus: "idle" | "running" | "no-prior" | "error"
   autoSignMaleStatus: "idle" | "running" | "no-prior" | "error"
   onEditSignature: (signatureId: number) => void
   onContinueToPhotos: () => void
@@ -1849,16 +1853,51 @@ function TalentPicker({
 
       {/* Per-talent cards */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10, marginBottom: 14 }}>
-        <TalentSignCard
-          role="Female"
-          display={shoot.female_talent}
-          accent={accent}
-          signed={femaleSigned}
-          shootId={shoot.shoot_id}
-          slug={shoot.female_talent.replace(/ /g, "")}
-          onStart={onStartFemale}
-          onEdit={femaleSigned?.id ? () => onEditSignature(femaleSigned.id!) : undefined}
-        />
+        <div>
+          <TalentSignCard
+            role="Female"
+            display={shoot.female_talent}
+            accent={accent}
+            signed={femaleSigned}
+            shootId={shoot.shoot_id}
+            slug={shoot.female_talent.replace(/ /g, "")}
+            onStart={onStartFemale}
+            onEdit={femaleSigned?.id ? () => onEditSignature(femaleSigned.id!) : undefined}
+          />
+          {/* Auto-fill: same back-to-back fast path as the male flow.
+              Only when not yet signed. The prefill flow (form pre-populated
+              with last shoot's values + sign step) is still available via
+              "Sign →"; this button is the no-changes shortcut. */}
+          {!femaleSigned && (
+            <button
+              type="button"
+              onClick={onAutoSignFemale}
+              disabled={autoSignFemaleStatus === "running"}
+              style={{
+                marginTop: 8,
+                width: "100%",
+                background: "transparent",
+                border: "1px solid var(--color-border)",
+                borderRadius: 8, padding: "10px 12px",
+                fontSize: 12, fontWeight: 500,
+                color: autoSignFemaleStatus === "no-prior"
+                  ? "var(--color-text-faint)"
+                  : "var(--color-text-muted)",
+                cursor: autoSignFemaleStatus === "running" ? "wait" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              }}
+              title="Apply her most recent paperwork to this shoot. No iPad signature needed."
+            >
+              {autoSignFemaleStatus === "running"
+                ? "Auto-filling…"
+                : autoSignFemaleStatus === "no-prior"
+                ? `No prior paperwork on file for ${shoot.female_talent} — sign once first`
+                : autoSignFemaleStatus === "error"
+                ? "Auto-fill failed — try again"
+                : `Auto-fill from prior paperwork`}
+            </button>
+          )}
+        </div>
         {needsMale && (
           <div>
             <TalentSignCard
@@ -2156,8 +2195,12 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
   const [driveImportSubmitting, setDriveImportSubmitting] = useState(false)
   const [driveImportError, setDriveImportError] = useState<string | null>(null)
 
-  // Auto-fill male paperwork from prior shoots (TKT-0167)
+  // Auto-fill paperwork from prior shoots (TKT-0167) — separate state per
+  // role because both can be in flight at once (different talent cards).
   const [autoSignMaleStatus, setAutoSignMaleStatus] = useState<
+    "idle" | "running" | "no-prior" | "error"
+  >("idle")
+  const [autoSignFemaleStatus, setAutoSignFemaleStatus] = useState<
     "idle" | "running" | "no-prior" | "error"
   >("idle")
 
@@ -2290,10 +2333,11 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
     setDocsPhase("male-sign")
   }
 
-  // ── Auto-fill male paperwork from prior shoot ─────────────────────────
-  // Cloud lookup of the male's most recent compliance_signatures row +
-  // upsert into this shoot. No iPad signature needed — typical for
-  // back-to-back shoots where the male's W-9/2257 hasn't changed.
+  // ── Auto-fill paperwork from prior shoot ──────────────────────────────
+  // Lookup the talent's most recent compliance_signatures row + upsert
+  // into this shoot. No iPad signature needed — typical for back-to-back
+  // shoots where the talent's paperwork hasn't changed. Backend also
+  // copies their ID photos from the prior shoot's Drive folder.
   async function handleAutoSignMale() {
     if (!selected) return
     setAutoSignMaleStatus("running")
@@ -2303,12 +2347,28 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
         setAutoSignMaleStatus("no-prior")
         return
       }
-      // Refresh the signed summary so the male card flips to "signed"
       const updated = await client.compliance.signed(selected.shoot_id)
       setSignedSummary(updated)
       setAutoSignMaleStatus("idle")
     } catch {
       setAutoSignMaleStatus("error")
+    }
+  }
+
+  async function handleAutoSignFemale() {
+    if (!selected) return
+    setAutoSignFemaleStatus("running")
+    try {
+      const result = await client.compliance.autoSignFemale(selected.shoot_id)
+      if (result.skipped_reason) {
+        setAutoSignFemaleStatus("no-prior")
+        return
+      }
+      const updated = await client.compliance.signed(selected.shoot_id)
+      setSignedSummary(updated)
+      setAutoSignFemaleStatus("idle")
+    } catch {
+      setAutoSignFemaleStatus("error")
     }
   }
 
@@ -2886,7 +2946,9 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               signed={signedSummary}
               onStartFemale={() => { setSignError(null); setFemaleError(null); setDocsPhase("female-form") }}
               onStartMale={() => { setSignError(null); setMaleError(null); setDocsPhase("male-form") }}
+              onAutoSignFemale={handleAutoSignFemale}
               onAutoSignMale={handleAutoSignMale}
+              autoSignFemaleStatus={autoSignFemaleStatus}
               autoSignMaleStatus={autoSignMaleStatus}
               onEditSignature={setEditingSignatureId}
               onContinueToPhotos={() => setStep("photos")}

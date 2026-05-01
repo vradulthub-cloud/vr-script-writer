@@ -1393,19 +1393,45 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
 
       /**
        * Auto-sign the male role by cloning his most recent prior
-       * compliance_signatures row into this shoot. Use when the same
+       * compliance_signatures row into this shoot + auto-copying his ID
+       * photos from that prior shoot's Drive folder. Use when the same
        * male shoots back-to-back — his W-9/2257 don't change between days.
        * Returns `skipped_reason` when no prior record exists yet.
        */
       autoSignMale: (shootId: string) =>
         post<{
           shoot_id: string
+          talent_role?: string
           talent_slug: string
           source_shoot_id?: string
           created_signature_id?: number
+          ids_copied?: string[]
           skipped_reason?: string
         }>(
           `/compliance/shoots/${encodeURIComponent(shootId)}/auto-sign-male`,
+          {},
+        ),
+
+      /**
+       * Same as `autoSignMale` but for the female role. Use when a
+       * returning female has shot back-to-back and nothing on her
+       * paperwork has changed. The prefill flow (`talentPrefill` +
+       * the lime banner) is the right choice when she might want to
+       * update fields; this is the "no changes, just clone yesterday"
+       * fast path. Also auto-copies her ID photos from the prior shoot
+       * folder so the new shoot folder is fully populated.
+       */
+      autoSignFemale: (shootId: string) =>
+        post<{
+          shoot_id: string
+          talent_role?: string
+          talent_slug: string
+          source_shoot_id?: string
+          created_signature_id?: number
+          ids_copied?: string[]
+          skipped_reason?: string
+        }>(
+          `/compliance/shoots/${encodeURIComponent(shootId)}/auto-sign-female`,
           {},
         ),
 
