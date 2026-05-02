@@ -343,6 +343,17 @@ async def generate_call_sheet(body: GenerateRequest, user: CurrentUser):
         return STUDIO_WEBSITES.get(s, s.lower().replace(" ", "") + ".com")
 
     pending = "[Script not yet generated]"
+
+    def _wrap_wardrobe(text: str) -> str:
+        if not text or text.startswith("["):
+            return text or "[Wardrobe pending]"
+        prefix = "** Approximate Wardrobe Request.\n\n"
+        suffix = (
+            "\n\n** Please bring one or two additional outfits you feel sexy in "
+            "just in case we have to do a plot change on set."
+        )
+        return f"{prefix}{text}{suffix}"
+
     repl = {
         "{{Date}}":            date_display,
         "{{Studio Name}}":     " / ".join(studio_parts),
@@ -357,8 +368,8 @@ async def generate_call_sheet(body: GenerateRequest, user: CurrentUser):
         "{{Script Theme 2}}":  sc2.get("theme") or ("[Title pending]" if s2 else ""),
         "{{Script Text 1}}":   sc1.get("plot") or pending,
         "{{Script Text 2}}":   sc2.get("plot") or (pending if s2 else ""),
-        "{{Female Wardrobe}}": sc1.get("wardrobe_female") or "[Wardrobe pending]",
-        "{{Male Wardrobe}}":   sc1.get("wardrobe_male") or "[Wardrobe pending]",
+        "{{Female Wardrobe}}": _wrap_wardrobe(sc1.get("wardrobe_female", "")),
+        "{{Male Wardrobe}}":   _wrap_wardrobe(sc1.get("wardrobe_male", "")),
         "{{Female Agency}}":   female_agency or "[Agency pending]",
         "1322":                body.door_code,
         "7078":                body.door_code,
