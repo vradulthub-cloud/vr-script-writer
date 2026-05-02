@@ -132,6 +132,10 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
 
   // ── Users ─────────────────────────────────────────────────────────────
   if (base === "/users/me") return wait(MOCK_USER as unknown as T)
+  if (base === "/users/teammates") {
+    const all = MOCK_ALL_USERS as Array<{ email: string; name: string }>
+    return wait(all.map(u => ({ email: u.email, name: u.name })) as unknown as T)
+  }
   if (base === "/users/") {
     const method = (init.method || "GET").toUpperCase()
     if (method === "GET") return wait(MOCK_ALL_USERS as unknown as T)

@@ -115,9 +115,9 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkMsg, setBulkMsg] = useState<string | null>(null)
 
-  // "Content only" filter — hides engineering/audit tickets that are
-  // mostly AI chatter about the hub itself. Default on. Persisted so a
-  // user's choice survives refresh.
+  // Hide engineering/audit tickets that are mostly AI chatter about the
+  // hub itself. Default on. Persisted so a user's choice survives refresh.
+  // Old key `contentOnly` honored for backward compat.
   const [contentOnly, setContentOnly] = useState<boolean>(() => {
     if (typeof window === "undefined") return true
     const raw = window.localStorage.getItem("hub:tickets:contentOnly")
@@ -127,6 +127,26 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
     if (typeof window === "undefined") return
     window.localStorage.setItem("hub:tickets:contentOnly", contentOnly ? "1" : "0")
   }, [contentOnly])
+
+  // Project filter — multi-select. Empty set means "all projects". Persisted
+  // alongside the other filters.
+  const [projectFilter, setProjectFilter] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set<string>()
+    const raw = window.localStorage.getItem("hub:tickets:projects")
+    if (!raw) return new Set<string>()
+    try {
+      const arr = JSON.parse(raw) as string[]
+      return new Set(Array.isArray(arr) ? arr : [])
+    } catch { return new Set<string>() }
+  })
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem(
+      "hub:tickets:projects",
+      JSON.stringify([...projectFilter])
+    )
+  }, [projectFilter])
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false)
 
   // Create form state
   const [createForm, setCreateForm] = useState<TicketCreate>({
@@ -198,6 +218,30 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
     return out
   }, [tickets, statusFilter, contentOnly])
 
+  // All projects present in the current ticket set, sorted with non-empty
+  // ones first. Used by the project filter dropdown.
+  const projectOptions = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const t of tickets) {
+      const p = t.project || "(none)"
+      counts.set(p, (counts.get(p) ?? 0) + 1)
+    }
+    return [...counts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([project, count]) => ({ project, count }))
+  }, [tickets])
+
+  // How many tickets the engineering filter is hiding right now. Surfaced on
+  // the toggle so users see the effect at a glance.
+  const hiddenEngineeringCount = useMemo(() => {
+    const scope = statusFilter === "All"
+      ? tickets
+      : statusFilter === "Active"
+        ? tickets.filter(t => t.status !== "Closed" && t.status !== "Rejected")
+        : tickets.filter(t => t.status === statusFilter)
+    return scope.filter(t => ENGINEERING_PROJECTS.has(t.project) || t.type === "Audit").length
+  }, [tickets, statusFilter])
+
   const displayTickets = useMemo(() => {
     let result = statusFilter === "All"
       ? tickets
@@ -205,9 +249,12 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
         ? tickets.filter(t => t.status !== "Closed" && t.status !== "Rejected")
         : tickets.filter(t => t.status === statusFilter)
     if (contentOnly) {
-      // "Content only" hides engineering/audit tickets so the list isn't
-      // dominated by AI-generated work about the hub's own code.
+      // Hides engineering/audit tickets so the list isn't dominated by
+      // AI-generated work about the hub's own code.
       result = result.filter(t => !ENGINEERING_PROJECTS.has(t.project) && t.type !== "Audit")
+    }
+    if (projectFilter.size > 0) {
+      result = result.filter(t => projectFilter.has(t.project || "(none)"))
     }
     if (studioFilter) {
       // Tickets without any linked scene IDs drop out when a studio is
@@ -238,7 +285,7 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
       }
       return sortDir === "asc" ? cmp : -cmp
     })
-  }, [tickets, statusFilter, contentOnly, studioFilter, deferredSearch, sortKey, sortDir])
+  }, [tickets, statusFilter, contentOnly, projectFilter, studioFilter, deferredSearch, sortKey, sortDir])
 
   // ── Keyboard: Escape ─────────────────────────────────────────────
 
@@ -470,8 +517,8 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                 role="switch"
                 aria-checked={contentOnly}
                 title={contentOnly
-                  ? "Hiding Hub/engineering + audit tickets — click to show everything"
-                  : "Showing all tickets — click to hide Hub/engineering + audit"}
+                  ? `Hiding ${hiddenEngineeringCount} engineering / audit ticket${hiddenEngineeringCount === 1 ? "" : "s"} — click to show everything`
+                  : "Showing all tickets — click to hide hub engineering + audit work"}
                 className="rounded transition-colors"
                 style={{
                   padding: "4px 10px",
@@ -482,8 +529,106 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
                   border: `1px solid ${contentOnly ? "color-mix(in srgb, var(--color-lime) 30%, transparent)" : "var(--color-border)"}`,
                 }}
               >
-                Content only
+                Hide engineering{contentOnly && hiddenEngineeringCount > 0 ? ` (${hiddenEngineeringCount})` : ""}
               </button>
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setProjectMenuOpen(v => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={projectMenuOpen}
+                  className="rounded transition-colors"
+                  style={{
+                    padding: "4px 10px",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    background: projectFilter.size > 0
+                      ? "color-mix(in srgb, var(--color-lime) 12%, transparent)"
+                      : "transparent",
+                    color: projectFilter.size > 0 ? "var(--color-lime)" : "var(--color-text-muted)",
+                    border: `1px solid ${projectFilter.size > 0
+                      ? "color-mix(in srgb, var(--color-lime) 30%, transparent)"
+                      : "var(--color-border)"}`,
+                  }}
+                >
+                  Project{projectFilter.size > 0 ? ` (${projectFilter.size})` : ""} ▾
+                </button>
+                {projectMenuOpen && (
+                  <>
+                    <div
+                      onClick={() => setProjectMenuOpen(false)}
+                      style={{ position: "fixed", inset: 0, zIndex: 40 }}
+                    />
+                    <div
+                      role="menu"
+                      style={{
+                        position: "absolute",
+                        top: "calc(100% + 4px)",
+                        left: 0,
+                        zIndex: 41,
+                        minWidth: 200,
+                        background: "var(--color-surface)",
+                        border: "1px solid var(--color-border)",
+                        borderRadius: 4,
+                        padding: "6px 0",
+                        boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                        maxHeight: 320,
+                        overflowY: "auto",
+                      }}
+                    >
+                      {projectFilter.size > 0 && (
+                        <button
+                          onClick={() => setProjectFilter(new Set())}
+                          style={{
+                            display: "block",
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "4px 12px",
+                            fontSize: 11,
+                            color: "var(--color-text-muted)",
+                            background: "transparent",
+                            cursor: "pointer",
+                            border: "none",
+                          }}
+                        >
+                          Clear all
+                        </button>
+                      )}
+                      {projectOptions.map(({ project, count }) => {
+                        const checked = projectFilter.has(project)
+                        return (
+                          <label
+                            key={project}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              padding: "5px 12px",
+                              fontSize: 12,
+                              cursor: "pointer",
+                              color: "var(--color-text)",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setProjectFilter(prev => {
+                                  const next = new Set(prev)
+                                  if (next.has(project)) next.delete(project)
+                                  else next.add(project)
+                                  return next
+                                })
+                              }}
+                            />
+                            <span style={{ flex: 1 }}>{project}</span>
+                            <span style={{ color: "var(--color-text-faint)", fontSize: 10 }}>{count}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
               <button
                 onClick={() => setShowCreate(true)}
                 className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
