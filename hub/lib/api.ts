@@ -1273,6 +1273,7 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
     users: {
       me: async () => normalizeProfile(await get<UserProfile>("/users/me")),
       list: async () => (await get<UserProfile[]>("/users/")).map(normalizeProfile),
+      teammates: () => get<{ email: string; name: string }[]>("/users/teammates"),
       update: async (email: string, body: UserUpdate) =>
         normalizeProfile(await patch<UserProfile>(`/users/${encodeURIComponent(email)}`, body)),
       create: async (body: { email: string; name: string; role?: string; allowed_tabs?: string }) =>

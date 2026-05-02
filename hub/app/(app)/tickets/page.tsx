@@ -27,9 +27,10 @@ export default async function TicketsPage() {
   let users: UserProfile[]         = []
   let userRole = "editor"
 
-  const [ticketsRes, usersRes, meRes] = await Promise.allSettled([
+  const [ticketsRes, usersRes, teammatesRes, meRes] = await Promise.allSettled([
     client.tickets.list(),
     client.users.list(),
+    client.users.teammates(),
     cachedUsersMe(idToken),
   ])
 
@@ -40,7 +41,19 @@ export default async function TicketsPage() {
       ? ticketsRes.reason.message : "Failed to load tickets"
   }
 
-  if (usersRes.status === "fulfilled") users = usersRes.value
+  // Non-admins can't list users (user-manager gated), but they still need
+  // teammates for assignee/notify pickers. Fall back to the public teammates
+  // endpoint, padded into the UserProfile shape that <TicketList> expects.
+  if (usersRes.status === "fulfilled") {
+    users = usersRes.value
+  } else if (teammatesRes.status === "fulfilled") {
+    users = teammatesRes.value.map(t => ({
+      email: t.email,
+      name: t.name,
+      role: "editor",
+      allowed_tabs: "",
+    }))
+  }
   if (meRes.status    === "fulfilled" && meRes.value) {
     userRole = (meRes.value.role ?? "editor").toLowerCase()
   }

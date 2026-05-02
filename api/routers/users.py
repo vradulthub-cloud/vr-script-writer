@@ -66,6 +66,19 @@ async def list_users(_manager: dict = Depends(require_user_manager)):
     return [dict(r) for r in rows]
 
 
+@router.get("/teammates")
+async def list_teammates(user: CurrentUser):
+    """List teammates available for tagging/assigning on tickets, etc. Returns
+    only name + email (no role/permissions). Available to any authenticated
+    user — distinct from the user-manager-only list_users endpoint."""
+    del user  # only auth check matters
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT email, name FROM users ORDER BY name"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 @router.patch("/{email}")
 async def update_user(
     email: str,
