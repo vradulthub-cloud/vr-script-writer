@@ -308,30 +308,38 @@ async def generate_call_sheet(body: GenerateRequest, user: CurrentUser):
     order = {"BG": 0, "GG": 1, "BGG": 2, "BGCP": 2, "JOI": 8, "Solo": 9}
     scenes_data.sort(key=lambda s: order.get(s.get("type", ""), 5))
 
-    s1 = scenes_data[0] if len(scenes_data) > 0 else {}
-    s2 = scenes_data[1] if len(scenes_data) > 1 else {}
-    s3 = scenes_data[2] if len(scenes_data) > 2 else {}
+    # Per-scene script lookup — each scene's own female + studio
+    scene_scripts: list[dict] = []
+    for scene in scenes_data:
+        female = scene.get("female", "")
+        studio = scene.get("studio", "")
+        script = get_script(female, studio) if female and studio else {}
+        scene_scripts.append({**scene, "script": script})
 
-    dt = s1.get("date_dt") or datetime.strptime(body.date_key, "%Y-%m-%d")
-    model1 = s1.get("female", "")
-    model2 = s1.get("male", "")
-    if not model2 and s2 and s2.get("female", "") != model1:
-        model2 = s2.get("female", "")
-    model3 = s3.get("female", "") if s3 and s3.get("female", "") not in (model1, model2) else ""
+    dt = scene_scripts[0].get("date_dt") or datetime.strptime(body.date_key, "%Y-%m-%d")
 
-    studio1 = s1.get("studio", "")
-    studio2 = s2.get("studio", "") if s2 else ""
-    type1 = s1.get("type", "BG")
-    type2 = s2.get("type", "") if s2 else ""
+    # Unique talent: females first, then males not already listed
+    all_females = list(dict.fromkeys(
+        s.get("female", "") for s in scene_scripts if s.get("female", "")
+    ))
+    all_males = list(dict.fromkeys(
+        s.get("male", "") for s in scene_scripts if s.get("male", "")
+    ))
+    talent_list = all_females + [m for m in all_males if m not in all_females]
 
-    sc1 = get_script(model1, studio1) if model1 and studio1 else {}
-    sc2 = get_script(model1, studio2) if model1 and studio2 else {}
+    model1 = talent_list[0] if len(talent_list) > 0 else ""
+    model2 = talent_list[1] if len(talent_list) > 1 else ""
+    model3 = talent_list[2] if len(talent_list) > 2 else ""
 
-    female_agency = next((s.get("agency", "") for s in scenes_data if s.get("agency", "")), "")
-    male_agency   = next((s.get("male_agency", "") for s in scenes_data if s.get("male_agency", "")), "")
+    # Unique studios (preserving scene order)
+    studio_parts = list(dict.fromkeys(
+        s.get("studio", "") for s in scene_scripts if s.get("studio", "")
+    ))
 
-    talent_parts = [p for p in [model1, model2, model3] if p]
-    studio_parts = list(dict.fromkeys(s for s in [studio1, studio2] if s))
+    female_agency = next((s.get("agency", "") for s in scene_scripts if s.get("agency", "")), "")
+    male_agency   = next((s.get("male_agency", "") for s in scene_scripts if s.get("male_agency", "")), "")
+
+    talent_parts = [p for p in talent_list if p]
     date_display = _fmt_date(dt)
 
     doc_title = (
@@ -354,26 +362,53 @@ async def generate_call_sheet(body: GenerateRequest, user: CurrentUser):
         )
         return f"{prefix}{text}{suffix}"
 
-    repl = {
+    repl: dict[str, str] = {
         "{{Date}}":            date_display,
         "{{Studio Name}}":     " / ".join(studio_parts),
         "{{Model 1}}":         model1,
         "{{Model 2}}":         model2,
         "{{Model 3}}":         f" / {model3}" if model3 else "",
-        "{{Scene Type 1}}":    type1,
-        "{{Scene Type 2}}":    type2,
-        "{{Studio Website 1}}":web(studio1),
-        "{{Studio Website 2}}":web(studio2) if studio2 else "",
-        "{{Script Theme 1}}":  sc1.get("theme") or "[Title pending]",
-        "{{Script Theme 2}}":  sc2.get("theme") or ("[Title pending]" if s2 else ""),
-        "{{Script Text 1}}":   sc1.get("plot") or pending,
-        "{{Script Text 2}}":   sc2.get("plot") or (pending if s2 else ""),
-        "{{Female Wardrobe}}": _wrap_wardrobe(sc1.get("wardrobe_female", "")),
-        "{{Male Wardrobe}}":   _wrap_wardrobe(sc1.get("wardrobe_male", "")),
         "{{Female Agency}}":   female_agency or "[Agency pending]",
         "1322":                body.door_code,
         "7078":                body.door_code,
     }
+
+    # Per-scene: type, studio website, script theme/text
+    for i, ss in enumerate(scene_scripts):
+        idx = i + 1
+        sc = ss["script"]
+        repl[f"{{{{Scene Type {idx}}}}}"] = ss.get("type", "")
+        repl[f"{{{{Studio Website {idx}}}}}"] = web(ss.get("studio", ""))
+        repl[f"{{{{Script Theme {idx}}}}}"] = sc.get("theme") or "[Title pending]"
+        repl[f"{{{{Script Text {idx}}}}}"] = sc.get("plot") or pending
+
+    # Clear unused scene slots so raw {{…}} placeholders don't leak into the doc
+    for idx in range(len(scene_scripts) + 1, 6):
+        repl[f"{{{{Scene Type {idx}}}}}"] = ""
+        repl[f"{{{{Studio Website {idx}}}}}"] = ""
+        repl[f"{{{{Script Theme {idx}}}}}"] = ""
+        repl[f"{{{{Script Text {idx}}}}}"] = ""
+
+    # Wardrobe: single-scene keeps it simple; multi-scene labels each block
+    if len(scene_scripts) == 1:
+        sc = scene_scripts[0]["script"]
+        repl["{{Female Wardrobe}}"] = _wrap_wardrobe(sc.get("wardrobe_female", ""))
+        repl["{{Male Wardrobe}}"]   = _wrap_wardrobe(sc.get("wardrobe_male", ""))
+    else:
+        f_parts: list[str] = []
+        m_parts: list[str] = []
+        for ss in scene_scripts:
+            sc = ss["script"]
+            scene_label = f"{ss.get('studio', '')} {ss.get('type', '')} — {ss.get('female', '')}"
+            fw = sc.get("wardrobe_female", "")
+            mw = sc.get("wardrobe_male", "")
+            if fw:
+                f_parts.append(f"[ {scene_label} ]\n{fw}")
+            if mw:
+                male_label = f"{ss.get('studio', '')} {ss.get('type', '')}"
+                m_parts.append(f"[ {male_label} ]\n{mw}")
+        repl["{{Female Wardrobe}}"] = _wrap_wardrobe("\n\n".join(f_parts)) if f_parts else "[Wardrobe pending]"
+        repl["{{Male Wardrobe}}"]   = _wrap_wardrobe("\n\n".join(m_parts)) if m_parts else "[Wardrobe pending]"
 
     # Drive / Docs via OAuth creds
     try:
@@ -461,21 +496,26 @@ async def generate_call_sheet(body: GenerateRequest, user: CurrentUser):
         },
     ).execute()
 
-    # Independent male talent — also copy into their own folder
-    if model2 and male_agency and male_agency.lower() == "independent":
-        male_folder_id = get_or_create_folder(month_folder_id, model2)
-        q_male = (
-            f"name contains '{_escape_q(date_display)}' and name contains 'Call Sheet'"
-            f" and '{male_folder_id}' in parents"
-            " and mimeType='application/vnd.google-apps.document' and trashed=false"
-        )
-        for old in drive.files().list(q=q_male, fields="files(id)").execute().get("files", []):
-            drive.files().update(fileId=old["id"], body={"trashed": True}).execute()
-        drive.files().copy(
-            fileId=doc_id,
-            body={"name": doc_title, "parents": [male_folder_id]},
-            fields="id",
-        ).execute()
+    # Independent male talent — copy into each independent male's folder
+    copied_males: set[str] = set()
+    for ss in scene_scripts:
+        male = ss.get("male", "")
+        m_agency = ss.get("male_agency", "")
+        if male and m_agency and m_agency.lower() == "independent" and male not in copied_males:
+            copied_males.add(male)
+            male_folder_id = get_or_create_folder(month_folder_id, male)
+            q_male = (
+                f"name contains '{_escape_q(date_display)}' and name contains 'Call Sheet'"
+                f" and '{male_folder_id}' in parents"
+                " and mimeType='application/vnd.google-apps.document' and trashed=false"
+            )
+            for old in drive.files().list(q=q_male, fields="files(id)").execute().get("files", []):
+                drive.files().update(fileId=old["id"], body={"trashed": True}).execute()
+            drive.files().copy(
+                fileId=doc_id,
+                body={"name": doc_title, "parents": [male_folder_id]},
+                fields="id",
+            ).execute()
 
     _log.info("Call sheet generated: %s → %s", doc_title, doc_url)
     return GenerateResult(doc_id=doc_id, doc_url=doc_url, title=doc_title)
