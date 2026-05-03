@@ -6,10 +6,7 @@ Backend: Google Sheets ("Eclatech Tickets")
 
 import os
 import time
-import smtplib
 from datetime import datetime
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from google.oauth2.service_account import Credentials
 import gspread
 
@@ -20,11 +17,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-
-# Email notification settings (optional — falls back silently if not set)
-NOTIFY_EMAIL = os.environ.get("TICKET_NOTIFY_EMAIL", "")       # sender Gmail
-NOTIFY_PASSWORD = os.environ.get("TICKET_NOTIFY_PASSWORD", "")  # Gmail app password
-ADMIN_EMAIL = os.environ.get("TICKET_ADMIN_EMAIL", "")          # recipient
 
 # Employee list — update these with real names
 EMPLOYEES = [
@@ -62,42 +54,79 @@ HEADERS = [
     "Admin Notes", "Assigned To", "Date Resolved",
 ]
 
-# ── Sheet client (cached) ────────────────────────────────────────────────────
+# ── Sheet client + worksheet (both cached 30 min) ────────────────────────────
 _cached_client = None
 _cached_at = 0
+_cached_ws = None
+_cached_ws_at = 0
+
+# ── Tickets data cache (5 min TTL) ───────────────────────────────────────────
+_tickets_cache = None
+_tickets_cached_at = 0.0
+
+def _bust_tickets_cache():
+    global _tickets_cache
+    _tickets_cache = None
+
+
+def _with_retry(fn, max_retries=3):
+    """Call fn(), retrying up to max_retries times on 429 rate-limit errors."""
+    delay = 2
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except gspread.exceptions.APIError as e:
+            if "429" in str(e) and attempt < max_retries - 1:
+                time.sleep(delay)
+                delay *= 2
+            else:
+                raise
 
 
 def _get_client():
-    global _cached_client, _cached_at
+    global _cached_client, _cached_at, _cached_ws, _cached_ws_at
     now = time.time()
     if _cached_client and (now - _cached_at) < 1800:
         return _cached_client
     creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
     _cached_client = gspread.authorize(creds)
     _cached_at = now
+    # Invalidate worksheet cache when client refreshes
+    _cached_ws = None
+    _cached_ws_at = 0
     return _cached_client
 
 
 def _get_worksheet():
-    """Get the Tickets worksheet, creating headers if needed."""
+    """Get the Tickets worksheet (cached 30 min). Header init runs only on cache miss."""
+    global _cached_ws, _cached_ws_at
+    now = time.time()
+    if _cached_ws and (now - _cached_ws_at) < 1800:
+        return _cached_ws
     gc = _get_client()
-    sh = gc.open_by_key(TICKETS_SHEET_ID)
+    sh = _with_retry(lambda: gc.open_by_key(TICKETS_SHEET_ID))
     ws = sh.sheet1
-    # Auto-create headers if row 1 is empty
-    first_row = ws.row_values(1)
+    # One-time header initialization (only on cache miss, not every read)
+    first_row = _with_retry(lambda: ws.row_values(1))
     if not first_row or first_row[0] != "Ticket ID":
         ws.update("A1:M1", [HEADERS])
         ws.format("A1:M1", {"textFormat": {"bold": True}})
         ws.freeze(rows=1)
-    return ws
+    _cached_ws = ws
+    _cached_ws_at = now
+    return _cached_ws
 
 
 # ── CRUD operations ──────────────────────────────────────────────────────────
 
 def load_tickets():
     """Load all tickets from the sheet. Returns list of dicts."""
+    global _tickets_cache, _tickets_cached_at
+    now = time.time()
+    if _tickets_cache is not None and (now - _tickets_cached_at) < 300:
+        return _tickets_cache
     ws = _get_worksheet()
-    rows = ws.get_all_values()
+    rows = _with_retry(lambda: ws.get_all_values())
     if len(rows) <= 1:
         return []
     tickets = []
@@ -119,6 +148,8 @@ def load_tickets():
             "assigned_to": row[COL_ASSIGNED_TO],
             "date_resolved": row[COL_DATE_RESOLVED],
         })
+    _tickets_cache = tickets
+    _tickets_cached_at = now
     return tickets
 
 
@@ -165,13 +196,7 @@ def create_ticket(submitted_by, project, ticket_type, priority, title, descripti
         "",   # date_resolved
     ]
     ws.append_row(new_row, value_input_option="USER_ENTERED")
-
-    # Send email notification (non-blocking, fails silently)
-    try:
-        _send_notification(ticket_id, submitted_by, project, ticket_type, priority, title, description)
-    except Exception:
-        pass
-
+    _bust_tickets_cache()
     return ticket_id
 
 
@@ -190,6 +215,7 @@ def update_ticket(row_index, status=None, approved_by=None, admin_notes=None,
         ws.update_cell(row_index, COL_ADMIN_NOTES + 1, admin_notes)
     if assigned_to is not None:
         ws.update_cell(row_index, COL_ASSIGNED_TO + 1, assigned_to)
+    _bust_tickets_cache()
 
 
 def resolve_ticket(ticket_id, status="In Review", notes="", approved_by="Claude"):
@@ -225,15 +251,18 @@ def get_open_tickets():
 
 
 def progress_ticket(ticket_id, new_status="In Progress", notes="", by=""):
-    """Move a ticket forward in the workflow. Used by tab linking."""
+    """Move a ticket forward in the workflow. Used by tab linking.
+    Returns True if the ticket was updated, False if ticket_id not found."""
     tickets = load_tickets()
     match = next((t for t in tickets if t["id"] == ticket_id), None)
     if not match:
-        return
+        print(f"[tickets] WARNING: progress_ticket called with unknown id '{ticket_id}'")
+        return False
     existing = match.get("admin_notes", "")
     combined = f"{existing}\n{notes}".strip() if existing and notes else (notes or existing)
     update_ticket(match["row_index"], status=new_status,
                   admin_notes=combined if combined != existing else None)
+    return True
 
 
 # ── Notes helper ─────────────────────────────────────────────────────────────
@@ -246,36 +275,3 @@ def append_note(existing_notes, author, text):
 
 
 # ── Email notification ───────────────────────────────────────────────────────
-
-def _send_notification(ticket_id, submitted_by, project, ticket_type, priority, title, description):
-    """Send email notification for a new ticket."""
-    if not all([NOTIFY_EMAIL, NOTIFY_PASSWORD, ADMIN_EMAIL]):
-        return
-
-    priority_emoji = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "🟢"}.get(priority, "⚪")
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"[{priority_emoji} {priority}] New Ticket: {title} ({ticket_id})"
-    msg["From"] = NOTIFY_EMAIL
-    msg["To"] = ADMIN_EMAIL
-
-    body = f"""New ticket submitted to Eclatech Hub:
-
-Ticket ID:    {ticket_id}
-Submitted By: {submitted_by}
-Project:      {project}
-Type:         {ticket_type}
-Priority:     {priority_emoji} {priority}
-Title:        {title}
-
-Description:
-{description}
-
----
-View in Eclatech Hub → Tickets tab
-"""
-    msg.attach(MIMEText(body, "plain"))
-
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(NOTIFY_EMAIL, NOTIFY_PASSWORD)
-        server.send_message(msg)

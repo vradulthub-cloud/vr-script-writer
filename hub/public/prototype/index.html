@@ -1,0 +1,367 @@
+<!DOCTYPE html><html lang="en" style="--bone: #F4EFE6; --bone-2: #ECE6DA; --bone-3: #DED6C5; --ink: #0A0A0A; --ink-2: #1F1D1B; --ink-muted: #6A6258; --ink-faint: #9A9286; --rule: #C8BFA9; --rule-soft: #DED6C5; --molten: #FF4500; --molten-ink: #2A0E00;"><head>
+
+
+<meta charset="utf-8">
+<title>Eclatech Hub — Film Strip OS</title>
+<meta name="viewport" content="width=1440">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="styles.css">
+<link id="gfont-Architects-Daughter" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Architects+Daughter:wght@300;400;500;600;700&amp;display=swap"></head>
+<body>
+
+<div class="app">
+
+  <!-- ══════════════════ LEFT RAIL ══════════════════ -->
+  <aside class="rail" data-screen-label="Rail">
+    <div class="logo-slab">
+      <h1 class="wordmark">Eclatech</h1>
+      <div class="hub-line">Hub</div>
+    </div>
+
+    <nav>
+      <a href="#/dashboard" data-route="dashboard"><span>Dashboard</span><span class="badge">4</span></a>
+      <a href="#/missing" data-route="missing"><span>Missing</span><span class="badge">38</span></a>
+
+      <hr class="section-hr">
+      <div class="section-title">Production</div>
+
+      <a href="#/shoots" data-route="shoots"><span>Shoot Tracker</span><span class="badge">7</span></a>
+      <a href="#/catalog" data-route="catalog"><span>Studio Catalog</span></a>
+      <a href="#/research" data-route="research"><span>Model Research</span></a>
+
+      <hr class="section-hr">
+      <div class="section-title">Writing Room</div>
+
+      <a href="#/scripts" data-route="scripts"><span>Scripts</span><span class="badge">6</span></a>
+      <a href="#/call-sheets" data-route="call-sheets"><span>Call Sheets</span></a>
+      <a href="#/titles" data-route="titles"><span>Titles</span></a>
+      <a href="#/descriptions" data-route="descriptions"><span>Descriptions</span></a>
+      <a href="#/compilations" data-route="compilations"><span>Compilations</span></a>
+
+      <hr class="section-hr">
+      <div class="section-title">Operations</div>
+
+      <a href="#/tickets" data-route="tickets"><span>Tickets</span><span class="badge">32</span></a>
+      <a href="#/admin" data-route="admin"><span>Admin</span></a>
+    </nav>
+
+    <div class="footer">
+      <div class="row"><span>System</span><span>All Green</span></div>
+      <div class="tc" id="railClock">17:08:30</div>
+      <div class="row"><span>SUN · APR 19</span><span>PDT</span></div>
+    </div>
+  </aside>
+
+  <!-- ══════════════════ RIGHT SIDE ══════════════════ -->
+  <div>
+    <header class="topbar">
+      <div class="crumbs">
+        <span>Hub</span>
+        <span>›</span>
+        <span class="now" id="crumb">Dashboard</span>
+      </div>
+      <div class="right">
+        <span><span>Jump</span><span class="kbd">⌘K</span></span>
+        <span class="bell"><span>Inbox</span><span class="pip" aria-hidden="true"></span></span>
+        <span class="avatar-blk"><em style="font-style:italic">Andrew</em><span class="mono">Admin</span></span>
+      </div>
+    </header>
+
+    <main class="main" id="view" data-screen-label="View">
+  
+    <section class="page-head">
+      <div>
+        <div class="eyebrow"><span class="pip"></span><span>SUN · APR 19 · 09:47 PDT · ANDREW</span></div>
+        <h1 class="display">Good <em>morning</em>,<br><em>Andrew</em><span class="tick">.</span></h1>
+        <div class="sub">Four studios, three aging shoots, nine approvals waiting.</div>
+      </div>
+      <div class="actions"><button class="btn ghost">Today</button><button class="btn primary">New Shoot</button></div>
+    </section>
+
+  <div class="stat-cluster">
+    <div class="s"><div class="k">Scenes Live</div><div class="v">1,154</div><div class="d">+24 this week · 38 missing assets</div></div>
+    <div class="s"><div class="k">Shoots Active</div><div class="v">7<span class="unit">/ 12</span></div><div class="d">3 aging past 72h</div></div>
+    <div class="s"><div class="k">Queue Depth</div><div class="v">32</div><div class="d">9 approvals · 6 scripts · 17 tickets</div></div>
+    <div class="s"><div class="k">Uptime · win-prod</div><div class="v">99.84<span class="unit">%</span></div><div class="d">Last deploy 3d 06h ago</div></div>
+  </div>
+
+  <div style="margin-top:18px"></div>
+
+  <div class="strip">
+    <div class="cell" style="border-right:1px solid var(--ink)">
+      <div class="label">Production Scope</div>
+      <div style="font-family:var(--font-display);font-style:italic;font-size:20px;margin-top:4px;">Q2 · 2026</div>
+    </div>
+    
+      <div class="cell fpvr">
+        <div class="mono">FPVR</div>
+        <div class="big">412<sup>SCN</sup></div>
+        <div class="bar" style="background:var(--fpvr)"></div>
+      </div>
+      <div class="cell vrh">
+        <div class="mono">VRH</div>
+        <div class="big">307<sup>SCN</sup></div>
+        <div class="bar" style="background:var(--vrh)"></div>
+      </div>
+      <div class="cell vra">
+        <div class="mono">VRA</div>
+        <div class="big">251<sup>SCN</sup></div>
+        <div class="bar" style="background:var(--vra)"></div>
+      </div>
+      <div class="cell njoi">
+        <div class="mono">NJOI</div>
+        <div class="big">184<sup>SCN</sup></div>
+        <div class="bar" style="background:var(--njoi)"></div>
+      </div>
+    <div class="cell" style="align-items:flex-end">
+      <div class="label" style="text-align:right">Total</div>
+      <div style="font-family:var(--font-display);font-style:italic;font-size:34px;letter-spacing:-0.02em">1,154</div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+
+      <section class="block">
+        <header>
+          <h2><span class="num">09</span>Approvals Queue</h2>
+          <div class="act"><a href="#/approvals">Open all →</a></div>
+        </header>
+
+        <div class="seg" style="border:none;border-bottom:1px solid var(--ink)">
+          <button aria-selected="true">Approvals <span class="c">9</span></button>
+          <button>Missing <span class="c">8</span></button>
+          <button>Scripts <span class="c">6</span></button>
+          <button>Shoots <span class="c">3</span></button>
+        </div>
+
+        
+          <div class="row triage">
+            <div class="tag" style="color:var(--fpvr)">F</div>
+            <div class="code">FPV-2041</div>
+            <div class="title"><em>Sunset Suite</em><span class="meta">— 04 / Final trailer · jess.k</span></div>
+            <span class="mono-chip fpvr">FPVR</span>
+            <span class="age" data-hot="">4h</span>
+            <button class="btn molten">Approve</button>
+          </div>
+          <div class="row triage">
+            <div class="tag" style="color:var(--vrh)">V</div>
+            <div class="code">VRH-1887</div>
+            <div class="title"><em>Moonlit Balcony</em><span class="meta">— 02 / Director cut · marco.t</span></div>
+            <span class="mono-chip vrh">VRH</span>
+            <span class="age">11h</span>
+            <button class="btn molten">Approve</button>
+          </div>
+          <div class="row triage">
+            <div class="tag" style="color:var(--vra)">V</div>
+            <div class="code">VRA-1204</div>
+            <div class="title"><em>Atrium 6</em><span class="meta">— 07 / Color pass v3 · jess.k</span></div>
+            <span class="mono-chip vra">VRA</span>
+            <span class="age">1d</span>
+            <button class="btn molten">Approve</button>
+          </div>
+          <div class="row triage">
+            <div class="tag" style="color:var(--njoi)">N</div>
+            <div class="code">NJO-0833</div>
+            <div class="title"><em>Backlot 12</em><span class="meta">— 01 / Title card · rhea.d</span></div>
+            <span class="mono-chip njoi">NJOI</span>
+            <span class="age">1d</span>
+            <button class="btn molten">Approve</button>
+          </div>
+          <div class="row triage">
+            <div class="tag" style="color:var(--fpvr)">F</div>
+            <div class="code">FPV-2039</div>
+            <div class="title"><em>Loft Series</em><span class="meta">— 11 / Compilation master · marco.t</span></div>
+            <span class="mono-chip fpvr">FPVR</span>
+            <span class="age">2d</span>
+            <button class="btn molten">Approve</button>
+          </div>
+          <div class="row triage">
+            <div class="tag" style="color:var(--vrh)">V</div>
+            <div class="code">VRH-1882</div>
+            <div class="title"><em>Greenhouse</em><span class="meta">— 03 / Teaser · jess.k</span></div>
+            <span class="mono-chip vrh">VRH</span>
+            <span class="age">3d</span>
+            <button class="btn molten">Approve</button>
+          </div>
+      </section>
+
+      <section class="block">
+        <header>
+          <h2><span class="num">05</span>This Week on Set</h2>
+          <div class="act"><a href="#/shoots">Tracker →</a></div>
+        </header>
+        <div class="cal">
+          <div class="cal-head">
+            <div>Studio</div>
+            <div><span class="dnum">19</span>SUN</div>
+            <div><span class="dnum">20</span>MON</div>
+            <div><span class="dnum">21</span>TUE</div>
+            <div><span class="dnum">22</span>WED</div>
+            <div><span class="dnum">23</span>THU</div>
+            <div><span class="dnum">24</span>FRI</div>
+            <div><span class="dnum">25</span>SAT</div>
+          </div>
+          
+            <div class="lane">
+              <div class="label"><div class="who">FuckPassVR</div><div>FPVR</div></div>
+              <div class="track">
+                <div class="ev fpvr" style="left:14%;right:64%"><div class="t">Sunset Suite · 04</div><div class="m">Pool Villa — 2 talent</div></div>
+              </div>
+            </div>
+            <div class="lane">
+              <div class="label"><div class="who">VRHush</div><div>VRH</div></div>
+              <div class="track">
+                <div class="ev vrh" style="left:28%;right:50%"><div class="t">Greenhouse · 02</div><div class="m">Night exterior — 3 talent</div></div>
+              </div>
+            </div>
+            <div class="lane">
+              <div class="label"><div class="who">VRAllure</div><div>VRA</div></div>
+              <div class="track">
+                <div class="ev vra" style="left:57%;right:14%"><div class="t">Atrium · 06</div><div class="m">Color pass + pickups</div></div>
+              </div>
+            </div>
+            <div class="lane">
+              <div class="label"><div class="who">NaughtyJOI</div><div>NJOI</div></div>
+              <div class="track">
+                <div class="ev njoi" style="left:72%;right:0%"><div class="t">Backlot 12 · 01</div><div class="m">Title card + Teaser</div></div>
+              </div>
+            </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- side rail -->
+    <div class="col">
+      <section class="block">
+        <header>
+          <h2><span class="num">03</span>Aging Shoots</h2>
+          <div class="act"><a href="#/shoots">All →</a></div>
+        </header>
+        
+          <div class="row" style="grid-template-columns:auto minmax(0,1fr) auto;gap:12px">
+            <div class="mono-block vra"><div class="m">A</div><div class="s">6d</div></div>
+            <div>
+              <div class="title"><em>Sasha L.</em><span class="meta"> / Theo R.</span></div>
+              <div class="age">14/18 ASSETS · 78%</div>
+            </div>
+            <span class="pill" data-s="err"><span class="d"></span>OVERDUE</span>
+          </div>
+          <div class="row" style="grid-template-columns:auto minmax(0,1fr) auto;gap:12px">
+            <div class="mono-block fpvr"><div class="m">F</div><div class="s">5d</div></div>
+            <div>
+              <div class="title"><em>Mia D.</em><span class="meta"> / Kai N.</span></div>
+              <div class="age">9/12 ASSETS · 75%</div>
+            </div>
+            <span class="pill" data-s="err"><span class="d"></span>OVERDUE</span>
+          </div>
+          <div class="row" style="grid-template-columns:auto minmax(0,1fr) auto;gap:12px">
+            <div class="mono-block njoi"><div class="m">N</div><div class="s">4d</div></div>
+            <div>
+              <div class="title"><em>Ellie V.</em><span class="meta"> </span></div>
+              <div class="age">6/10 ASSETS · 60%</div>
+            </div>
+            <span class="pill" data-s="err"><span class="d"></span>OVERDUE</span>
+          </div>
+      </section>
+
+      <section class="block inverted">
+        <header>
+          <h2><span class="num">04</span>Notifications</h2>
+          <div class="act"><a href="#">Mark read</a></div>
+        </header>
+        
+          <div class="notif-row" data-unread="">
+            <span class="dot"></span>
+            <div class="msg"><em>jess.k</em> submitted Sunset Suite · 04</div>
+            <span class="when">4H</span>
+          </div>
+          <div class="notif-row" data-unread="">
+            <span class="dot"></span>
+            <div class="msg">MEGA sync finished · <em>1,244 files</em></div>
+            <span class="when">6H</span>
+          </div>
+          <div class="notif-row" data-unread="">
+            <span class="dot"></span>
+            <div class="msg"><em>rhea.d</em> reopened TKT-0221</div>
+            <span class="when">11H</span>
+          </div>
+          <div class="notif-row" data-unread="">
+            <span class="dot"></span>
+            <div class="msg">Call sheet <em>Backlot 12 · 04/22</em> sent</div>
+            <span class="when">1D</span>
+          </div>
+          <div class="notif-row">
+            <span class="dot"></span>
+            <div class="msg"><em>marco.t</em> uploaded 3 new NJOI scenes</div>
+            <span class="when">1D</span>
+          </div>
+          <div class="notif-row">
+            <span class="dot"></span>
+            <div class="msg">Director voice model retrained · WER 4.2%</div>
+            <span class="when">2D</span>
+          </div>
+      </section>
+
+      <section class="block">
+        <header><h2><span class="num">06</span>Sync Status</h2><div class="act">6H</div></header>
+        <ul class="list">
+          <li style="grid-template-columns:10px 1fr auto"><span style="width:6px;height:6px;background:var(--ok)"></span><span>Google Sheets</span><span class="age">24,812 ROWS</span></li>
+          <li style="grid-template-columns:10px 1fr auto"><span style="width:6px;height:6px;background:var(--ok)"></span><span>MEGA · Grail</span><span class="age">1,244 FILES</span></li>
+          <li style="grid-template-columns:10px 1fr auto"><span style="width:6px;height:6px;background:var(--warn)"></span><span>Platform stats</span><span class="age">RETRY 8M</span></li>
+          <li style="grid-template-columns:10px 1fr auto"><span style="width:6px;height:6px;background:var(--ok)"></span><span>Ollama · win-prod</span><span class="age">38MS</span></li>
+          <li style="grid-template-columns:10px 1fr auto"><span style="width:6px;height:6px;background:var(--ok)"></span><span>Pixoo calendar</span><span class="age">OK</span></li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</main>
+  </div>
+</div>
+
+<!-- ══════════════════ TWEAKS PANEL ══════════════════ -->
+<div class="tweaks" id="tweaks" data-open="">
+  <header>
+    <span>Tweaks</span>
+    <button id="tweaksClose" aria-label="Close" style="color:var(--bone)">✕</button>
+  </header>
+  <div class="row-t">
+    <label>Paper</label>
+    <div class="swatches">
+      <button data-paper="bone" aria-pressed="true" style="background:#F4EFE6"></button>
+      <button data-paper="cream" style="background:#FAF4E1" aria-pressed="false"></button>
+      <button data-paper="steel" style="background:#E3E6E8" aria-pressed="false"></button>
+      <button data-paper="rose" style="background:#F0E1DE" aria-pressed="false"></button>
+    </div>
+  </div>
+  <div class="row-t">
+    <label>Accent</label>
+    <div class="swatches">
+      <button data-accent="molten" aria-pressed="true" style="background:#FF4500"></button>
+      <button data-accent="acid" style="background:#BED62F" aria-pressed="false"></button>
+      <button data-accent="electric" style="background:#2B4BFF" aria-pressed="false"></button>
+      <button data-accent="blood" style="background:#B3200F" aria-pressed="false"></button>
+    </div>
+  </div>
+  <div class="row-t">
+    <label>Mode</label>
+    <div class="swatches">
+      <button id="modeLight" aria-pressed="true" style="background:#F4EFE6;color:#0A0A0A;width:auto;padding:0 8px;font-size:9px;letter-spacing:0.1em">LIGHT</button>
+      <button id="modeDark" style="background:#0A0A0A;color:#F4EFE6;width:auto;padding:0 8px;font-size:9px;letter-spacing:0.1em" aria-pressed="false">DARK</button>
+    </div>
+  </div>
+</div>
+
+<!-- =================== SCRIPTS =================== -->
+<script src="pages.js"></script>
+<script src="pages2.js"></script>
+<script src="app.js"></script>
+
+
+
+</body></html>

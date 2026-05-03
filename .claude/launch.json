@@ -1,0 +1,37 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "hub-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000,
+      "autoPort": false,
+      "cwd": "hub"
+    },
+    {
+      "name": "hub-dev-mock",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:mock"],
+      "port": 3001,
+      "autoPort": false,
+      "cwd": "hub"
+    },
+    {
+      "name": "hub-dev-staging",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:staging"],
+      "port": 3002,
+      "autoPort": false,
+      "cwd": "hub"
+    },
+    {
+      "name": "hub-existing",
+      "runtimeExecutable": "echo",
+      "runtimeArgs": ["already-running"],
+      "port": 3000,
+      "autoPort": false,
+      "cwd": "hub"
+    }
+  ]
+}

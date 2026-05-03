@@ -1,0 +1,160 @@
+"use client"
+
+import { useState } from "react"
+import type { Shoot } from "@/lib/api"
+import { studioAbbr } from "@/lib/studio-colors"
+import { ShootModal } from "@/components/ui/shoot-modal"
+
+/** Week-view timeline using the v2 `.ec-cal` primitive.
+ *  Shows 4 studio lanes with a bar per shoot positioned across the 7-day week.
+ *  Clicking an event opens a modal with the shoot's details.
+ *  `flat` strips the calendar's outer frame (border + surface bg + radius) so
+ *  it can live directly on the page background — used on the dashboard to
+ *  break container monotony. */
+export function WeekCalendar({
+  shoots,
+  weekStart,
+  showHeader = true,
+  flat = false,
+  studios = ["FuckPassVR", "VRHush", "VRAllure", "NaughtyJOI"],
+}: {
+  shoots: Shoot[]
+  weekStart?: Date
+  showHeader?: boolean
+  flat?: boolean
+  studios?: string[]
+}) {
+  const [selected, setSelected] = useState<Shoot | null>(null)
+
+  const start = weekStart ?? startOfWeek(new Date())
+  const end = new Date(start)
+  end.setDate(end.getDate() + 7)
+
+  const lanes = studios.map(studio => {
+    const laneEvents = shoots
+      .filter(s => {
+        if (s.scenes.length === 0) return false
+        if (!s.scenes.some(sc => sc.studio === studio)) return false
+        const t = parseLocalDate(s.shoot_date || "")
+        return t !== null && t >= start.getTime() && t < end.getTime()
+      })
+      .map(s => {
+        const t = parseLocalDate(s.shoot_date)!
+        const dayIdx = Math.floor((t - start.getTime()) / (24 * 60 * 60 * 1000))
+        const left = (dayIdx / 7) * 100
+        const right = ((dayIdx + 1) / 7) * 100
+        const studioScenes = s.scenes.filter(sc => sc.studio === studio)
+        const studioScene = studioScenes[0] ?? s.scenes[0]
+        const types = Array.from(new Set(studioScenes.map(sc => sc.scene_type).filter(Boolean)))
+        return { shoot: s, left, right, female: s.female_talent, male: s.male_talent, studioScene, sceneCount: studioScenes.length, types }
+      })
+    return { studio, abbr: studioAbbr(studio), events: laneEvents }
+  })
+
+  if (lanes.every(l => l.events.length === 0)) return null
+
+  const weekLabel = `${formatMonthDay(start)} → ${formatMonthDay(new Date(end.getTime() - 1))}`
+
+  return (
+    <div>
+      {showHeader && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            marginBottom: 8,
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            color: "var(--color-text-muted)",
+          }}
+        >
+          <span>This Week on Set</span>
+          <span style={{ fontSize: 10, color: "var(--color-text-faint)", letterSpacing: "0.14em" }}>
+            {weekLabel}
+          </span>
+        </div>
+      )}
+      <section className={flat ? "ec-cal ec-cal-flat" : "ec-cal"}>
+        <div className="cal-head">
+          <div>Studio</div>
+          {Array.from({ length: 7 }).map((_, i) => {
+            const d = new Date(start)
+            d.setDate(d.getDate() + i)
+            const wd = d.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase()
+            return (
+              <div key={i}>
+                <span className="dnum">{d.getDate()}</span>
+                {wd}
+              </div>
+            )
+          })}
+        </div>
+        {lanes.map(lane => (
+          <div key={lane.studio} className="lane">
+            <div className={`label ${lane.abbr.toLowerCase()}`}>
+              <div className="who">{lane.abbr}</div>
+              <div className="sub">{lane.studio}</div>
+            </div>
+            <div className="track">
+              {lane.events.map(e => {
+                const cls = lane.abbr.toLowerCase()
+                const typeBadges = e.types.join(" · ")
+                const talentFull = [e.female, e.male].filter(Boolean).join(" / ")
+                return (
+                  <button
+                    key={e.shoot.shoot_id}
+                    type="button"
+                    onClick={() => setSelected(e.shoot)}
+                    className={`ev ${cls}`}
+                    style={{
+                      left: `${e.left}%`,
+                      right: `${100 - e.right}%`,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      font: "inherit",
+                      overflow: "hidden",
+                      minWidth: 0,
+                    }}
+                    title={`${lane.studio} · ${talentFull}${typeBadges ? " · " + typeBadges : ""}`}
+                    aria-label={`Open details for ${talentFull || e.shoot.shoot_id}`}
+                  >
+                    <div className="meta-row">
+                      {typeBadges && <span className="types">{typeBadges}</span>}
+                      {e.sceneCount > 1 && <span className="count">×{e.sceneCount}</span>}
+                    </div>
+                    {e.female && <div className="t">{e.female}</div>}
+                    {e.male && <div className="m male">{e.male}</div>}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </section>
+
+      {selected && <ShootModal shoot={selected} onClose={() => setSelected(null)} />}
+    </div>
+  )
+}
+
+function formatMonthDay(d: Date): string {
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+}
+
+function startOfWeek(d: Date): Date {
+  const out = new Date(d)
+  out.setHours(0, 0, 0, 0)
+  out.setDate(out.getDate() - out.getDay())
+  return out
+}
+
+// "2026-04-24" → local midnight timestamp. Date.parse interprets bare
+// ISO dates as UTC midnight, which shifts the day by the timezone offset.
+function parseLocalDate(s: string): number | null {
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return null
+  return new Date(+m[1], +m[2] - 1, +m[3]).getTime()
+}

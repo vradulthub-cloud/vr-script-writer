@@ -1,0 +1,94 @@
+{
+  "_comment": "FLUX.1 Schnell + RMBG-2.0 transparent title generation. Placeholders: {prompt} {seed} {steps} {lora_name} {lora_strength} {width} {height}. Substitute with str.format() before POSTing to /prompt. Set lora_name to '' to skip LoRA (the LoraLoader node strength_model is then 0).",
+  "1": {
+    "class_type": "UnetLoaderGGUF",
+    "inputs": { "unet_name": "flux1-schnell-Q8_0.gguf" }
+  },
+  "2": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "t5xxl_fp8_e4m3fn.safetensors",
+      "clip_name2": "clip_l.safetensors",
+      "type": "flux"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "flux_ae.safetensors" }
+  },
+  "4": {
+    "class_type": "LoraLoader",
+    "inputs": {
+      "model": ["1", 0],
+      "clip": ["2", 0],
+      "lora_name": "{lora_name}",
+      "strength_model": {lora_strength},
+      "strength_clip": {lora_strength}
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["4", 1],
+      "text": "{prompt}"
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["4", 1],
+      "text": ""
+    }
+  },
+  "7": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": {width},
+      "height": {height},
+      "batch_size": 1
+    }
+  },
+  "8": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["4", 0],
+      "positive": ["5", 0],
+      "negative": ["6", 0],
+      "latent_image": ["7", 0],
+      "seed": {seed},
+      "steps": {steps},
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "9": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["8", 0],
+      "vae": ["3", 0]
+    }
+  },
+  "10": {
+    "class_type": "RMBG",
+    "inputs": {
+      "image": ["9", 0],
+      "model": "RMBG-2.0",
+      "sensitivity": 1.0,
+      "process_res": 512,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "background": "Alpha",
+      "invert_output": false,
+      "refine_foreground": true
+    }
+  },
+  "11": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["10", 0],
+      "filename_prefix": "flux_title"
+    }
+  }
+}

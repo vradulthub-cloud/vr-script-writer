@@ -72,8 +72,15 @@ The Streamlit app runs on Windows. Do NOT try to import or test app modules on t
 | App UI | FuckPassVR | VRHush | VRAllure | NaughtyJOI |
 | Scripts Sheet | FuckPassVR | VRHush | VRAllure | NaughtyJOI |
 | Grail Tabs | FPVR | VRH | VRA | NNJOI |
-| MEGA Folders | Grail/FPVR | Grail/VRH | Grail/VRA | Grail/NNJOI |
+| S4 Buckets | fpvr | vrh | vra | njoi |
 | Site Codes | fpvr | vrh | vra | njoi |
+
+**S4 keys** are bucket-rooted scene IDs with no `/Grail/` prefix
+(e.g. `vrh/VRH0762/Description/foo.docx`). The legacy `Grail/Backup/`
+hierarchy was merged into the main tree on 2026-04-29.
+`s4_client._STUDIO_ALIASES` resolves all of `NNJOI`, `FuckPassVR`, `VRHush`,
+`VRAllure`, `NaughtyJOI` (and lowercase forms) to the canonical 4-letter
+code.
 
 ---
 
@@ -81,9 +88,35 @@ The Streamlit app runs on Windows. Do NOT try to import or test app modules on t
 Detailed rules for each subsystem are in `.claude/rules/`:
 - `hub-app.md` — Streamlit app, auth, caching, Python 3.11 gotchas
 - `sheets.md` — Google Sheets IDs, column mappings, service account
-- `mega.md` — MEGA storage paths, rclone, scan/sync
+- `mega.md` — MEGA S4 (S3) buckets, key shape, casing, scan/sync, refresher cron
 - `audio.md` — Director voice removal, WAV handling
 - `comfyui.md` — Image generation, LoRA training, CTA titles, compilations
 - `windows-ssh.md` — SSH lessons learned (process lifecycle gotchas)
 
 These load automatically when you work on matching files.
+
+---
+
+## Design Context
+
+### Users
+Small internal team of 7 (3 admins, 3 editors) managing video production workflows for 4 adult content studios. Used daily, in-depth — not casual browsing. Users are comfortable with dense UIs and need speed over hand-holding. Context is typically a desktop browser in a work setting. Power users who will notice inconsistencies.
+
+### Brand Personality
+**Three words:** precise · cinematic · backstage
+
+The tool lives behind the scenes of a production operation. It should feel like the equipment rack in a film studio — purposeful, authoritative, no wasted space. Not glamorous, not grim — just completely in control.
+
+### Aesthetic Direction
+- **Theme:** Dark, always. Not "dark mode as a preference" — dark as the primary reality of this interface.
+- **Reference feel:** Linear, Raycast, Vercel Dashboard — confident use of dark surfaces, restrained accent use, excellent information density
+- **Color system:** Keep lime green (`#bed62f`) as the sole primary action color. Keep studio identity colors (FPVR orange `#f97316`, VRH purple `#8b5cf6`, VRA pink `#ec4899`, NJOI blue `#3b82f6`) as contextual anchors — they should dominate when in a studio context. (FPVR and NJOI are swapped relative to early drafts; the values in `hub/app/globals.css` are authoritative — confirmed by commit `2ea9cc4`.)
+- **Typography evolution:** Syne and DM Sans are approved to replace on new work. Prefer a high-contrast grotesque display face (e.g., Basement Grotesque, Cabinet Grotesk, Clash Display, Neue Montreal) for headings. Body: General Sans, Geist, or Switzer. DM Mono is fine to keep for code/monospace contexts.
+- **Anti-references:** NO purple/cyan gradient combos, NO gradient text, NO glowing card borders, NO AI startup aesthetic. NO gray enterprise table grids, NO blue primary buttons, NO sidebar-with-accordion nav.
+
+### Design Principles
+1. **Information density first.** This is a pro tool used all day. Prioritize fitting more on screen over breathing room. Tight line-height, compact spacing, minimal chrome.
+2. **Studio color owns its context.** When working in FPVR, blue is the dominant accent. When in VRH, purple leads. Lime green recedes to action-only use (submit, save, approve, CTA).
+3. **Lime green means "this commits something."** Any button or chip tinted lime must perform a write on click — Save, Apply, Approve, Start, Submit, Find, Undo, Generate. Active-nav fill also uses lime at ≤12% mix because "you are here" is itself navigational state. Non-committing affordances (Edit, Cancel, filter toggles, Refresh, Preview) must be neutral outlined buttons. If you want lime for emphasis, don't — use font weight instead.
+4. **Weight and size carry hierarchy — not color.** Use font weight (400→700) and size steps aggressively. Reserve color for status and identity, not emphasis.
+5. **Nothing decorates.** Every visual element must communicate something: status, identity, hierarchy, or interactivity. Purely decorative elements (dividers, background patterns, ambient glow) are banned unless they orient the user.

@@ -107,10 +107,13 @@ def measure(d: ImageDraw.Draw, text: str, font) -> tuple:
     bb = d.textbbox((0,0), text, font=font)
     return bb[2]-bb[0], bb[3]-bb[1], bb[1]
 
-def make_mask(text: str, font, pad: int = 80, max_width: int = 3600) -> Image.Image:
+def make_mask(text: str, font, pad: int = 80, max_width: int = 3600,
+              supersample: int = 2) -> Image.Image:
     """Render text as a greyscale alpha mask.
     - pad=80 gives glow/shadow effects room to breathe without clipping.
     - max_width auto-scales the font down if text would exceed that pixel width.
+    - supersample (default 2) renders at NxN, then downsamples with LANCZOS for
+      sub-pixel-smooth alpha edges. Set to 1 to disable for testing/perf.
     """
     dummy = ImageDraw.Draw(Image.new("L", (10000, 3000), 0))
     w, h, top = measure(dummy, text, font)
@@ -123,6 +126,16 @@ def make_mask(text: str, font, pad: int = 80, max_width: int = 3600) -> Image.Im
             w, h, top = measure(dummy, text, font)
         except Exception:
             pass
+    if supersample > 1:
+        try:
+            big_font = ImageFont.truetype(font.path, font.size * supersample)
+            big_w, big_h, big_top = measure(dummy, text, big_font)
+            big_pad = pad * supersample
+            big = Image.new("L", (big_w + big_pad * 2, big_h + big_pad * 2), 0)
+            ImageDraw.Draw(big).text((big_pad, big_pad - big_top), text, fill=255, font=big_font)
+            return big.resize((w + pad * 2, h + pad * 2), Image.LANCZOS)
+        except Exception:
+            pass  # fall through to native-resolution path
     img = Image.new("L", (w + pad * 2, h + pad * 2), 0)
     ImageDraw.Draw(img).text((pad, pad - top), text, fill=255, font=font)
     return img
@@ -142,8 +155,11 @@ def auto_size_hd(title: str, base: int = 420, pivot: int = 14) -> int:
         return base
     return max(120, int(base * pivot / n))
 
-def make_mask_hd(text: str, font, pad: int = 100, max_width: int = 3840) -> Image.Image:
-    """HD mask — larger canvas, more padding for effects at 4K resolution."""
+def make_mask_hd(text: str, font, pad: int = 100, max_width: int = 3840,
+                 supersample: int = 2) -> Image.Image:
+    """HD mask — larger canvas, more padding for effects at 4K resolution.
+    supersample=2 by default for crisp 4K edges on transparent backgrounds.
+    """
     dummy = ImageDraw.Draw(Image.new("L", (12000, 4000), 0))
     w, h, top = measure(dummy, text, font)
     if w > max_width:
@@ -154,9 +170,58 @@ def make_mask_hd(text: str, font, pad: int = 100, max_width: int = 3840) -> Imag
             w, h, top = measure(dummy, text, font)
         except Exception:
             pass
+    if supersample > 1:
+        try:
+            big_font = ImageFont.truetype(font.path, font.size * supersample)
+            big_w, big_h, big_top = measure(dummy, text, big_font)
+            big_pad = pad * supersample
+            big = Image.new("L", (big_w + big_pad * 2, big_h + big_pad * 2), 0)
+            ImageDraw.Draw(big).text((big_pad, big_pad - big_top), text, fill=255, font=big_font)
+            return big.resize((w + pad * 2, h + pad * 2), Image.LANCZOS)
+        except Exception:
+            pass
     img = Image.new("L", (w + pad * 2, h + pad * 2), 0)
     ImageDraw.Draw(img).text((pad, pad - top), text, fill=255, font=font)
     return img
+
+
+# ── Blend mode helpers (RGBA-aware, float32 internal) ─────────────────────────
+
+def _to_f32(img: Image.Image) -> np.ndarray:
+    """RGBA -> float32 in [0,1]."""
+    return np.array(img.convert("RGBA"), dtype=np.float32) / 255.0
+
+def _to_rgba(arr: np.ndarray) -> Image.Image:
+    return Image.fromarray(np.clip(arr * 255, 0, 255).astype(np.uint8), "RGBA")
+
+def screen_blend(base: Image.Image, top: Image.Image) -> Image.Image:
+    """Screen blend (1 - (1-a)(1-b)) on RGB, alpha = max(base.a, top.a).
+    Use for additive light effects — glows, highlights — without crushing whites.
+    """
+    a = _to_f32(base); b = _to_f32(top)
+    if a.shape != b.shape:
+        # Conform sizes by pasting onto common canvas
+        size = (max(a.shape[1], b.shape[1]), max(a.shape[0], b.shape[0]))
+        ca = Image.new("RGBA", size, (0, 0, 0, 0)); ca.paste(base, (0, 0), base)
+        cb = Image.new("RGBA", size, (0, 0, 0, 0)); cb.paste(top, (0, 0), top)
+        a = _to_f32(ca); b = _to_f32(cb)
+    out = np.empty_like(a)
+    out[..., :3] = 1.0 - (1.0 - a[..., :3]) * (1.0 - b[..., :3])
+    out[..., 3]  = np.maximum(a[..., 3], b[..., 3])
+    return _to_rgba(out)
+
+def multiply_blend(base: Image.Image, top: Image.Image) -> Image.Image:
+    """Multiply RGB, alpha = base.a * top.a. Use for shadows and tints."""
+    a = _to_f32(base); b = _to_f32(top)
+    if a.shape != b.shape:
+        size = (max(a.shape[1], b.shape[1]), max(a.shape[0], b.shape[0]))
+        ca = Image.new("RGBA", size, (0, 0, 0, 0)); ca.paste(base, (0, 0), base)
+        cb = Image.new("RGBA", size, (0, 0, 0, 0)); cb.paste(top, (0, 0), top)
+        a = _to_f32(ca); b = _to_f32(cb)
+    out = np.empty_like(a)
+    out[..., :3] = a[..., :3] * b[..., :3]
+    out[..., 3]  = a[..., 3] * b[..., 3]
+    return _to_rgba(out)
 
 
 def colorize(mask: Image.Image, stops: list) -> Image.Image:
@@ -921,4 +986,113 @@ def wrap_px(title: str, font, max_px: int) -> list:
             cur.append(word)
     if cur: lines.append(" ".join(cur))
     return lines if lines else [title]
+
+
+# ── CC0 texture compositing (real photographic material clipped to letterforms)
+
+_TEXTURE_DIR = Path(__file__).resolve().parent / "textures"
+_TEXTURE_CACHE: dict = {}
+
+def load_texture(slug: str) -> Image.Image:
+    """Load a CC0 diffuse texture by slug. In-memory cached after first load."""
+    if slug in _TEXTURE_CACHE:
+        return _TEXTURE_CACHE[slug]
+    for suffix in (f"{slug}_diff_1k.jpg", f"{slug}_col_1k.jpg",
+                   f"{slug}_albedo_1k.jpg", f"{slug}.jpg", f"{slug}.png"):
+        p = _TEXTURE_DIR / suffix
+        if p.exists():
+            img = Image.open(p).convert("RGB")
+            _TEXTURE_CACHE[slug] = img
+            return img
+    raise FileNotFoundError(f"Texture '{slug}' not in {_TEXTURE_DIR}")
+
+
+def hsv_shift(rgb: Image.Image, hue_deg: float = 0, sat: float = 1.0,
+              val: float = 1.0) -> Image.Image:
+    """Rotate hue (0-360 deg), scale saturation/value. Operates on RGB image."""
+    if hue_deg == 0 and sat == 1.0 and val == 1.0:
+        return rgb
+    arr = np.array(rgb.convert("RGB"), dtype=np.float32) / 255.0
+    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+    cmax = np.max(arr, axis=2); cmin = np.min(arr, axis=2)
+    delta = cmax - cmin
+    h = np.zeros_like(cmax)
+    safe = np.where(delta > 0, delta, 1.0)
+    mr = (cmax == r) & (delta > 0)
+    mg = (cmax == g) & (delta > 0)
+    mb = (cmax == b) & (delta > 0)
+    h[mr] = ((g[mr] - b[mr]) / safe[mr]) % 6
+    h[mg] = ((b[mg] - r[mg]) / safe[mg]) + 2
+    h[mb] = ((r[mb] - g[mb]) / safe[mb]) + 4
+    h = (h / 6.0) % 1.0
+    s = np.where(cmax > 0, delta / np.where(cmax > 0, cmax, 1.0), 0)
+    v = cmax
+    h = (h + hue_deg / 360.0) % 1.0
+    s = np.clip(s * sat, 0, 1)
+    v = np.clip(v * val, 0, 1)
+    i = (h * 6).astype(np.int32) % 6
+    f = h * 6 - (h * 6).astype(np.int32)
+    p_ = v * (1 - s); q_ = v * (1 - f * s); t_ = v * (1 - (1 - f) * s)
+    out = np.stack([v, v, v], axis=2)
+    for idx, R, G, B in [(0, v, t_, p_), (1, q_, v, p_), (2, p_, v, t_),
+                          (3, p_, q_, v), (4, t_, p_, v), (5, v, p_, q_)]:
+        m = (i == idx)
+        out[m, 0] = R[m]; out[m, 1] = G[m]; out[m, 2] = B[m]
+    return Image.fromarray(np.clip(out * 255, 0, 255).astype(np.uint8), "RGB")
+
+
+def _fit_texture(texture: Image.Image, target_size: tuple, fit: str = "cover") -> Image.Image:
+    mw, mh = target_size
+    tw, th = texture.size
+    if fit == "stretch":
+        return texture.resize((mw, mh), Image.LANCZOS)
+    scale = max(mw / tw, mh / th)
+    new_size = (max(mw, int(tw * scale)), max(mh, int(th * scale)))
+    tex = texture.resize(new_size, Image.LANCZOS)
+    cx = (tex.size[0] - mw) // 2
+    cy = (tex.size[1] - mh) // 2
+    return tex.crop((cx, cy, cx + mw, cy + mh))
+
+
+def texture_overlay(mask: Image.Image, texture, hue_deg: float = 0,
+                    sat: float = 1.0, val: float = 1.0,
+                    fit: str = "cover") -> Image.Image:
+    """Composite a CC0 texture clipped to the text alpha mask. Returns RGBA.
+
+    Best for materials whose source texture is already the right color
+    (rust, oak, marble, denim, leather). For colored metals / coloured stone,
+    use texture_modulate() with a color gradient as the base.
+    """
+    if isinstance(texture, str):
+        texture = load_texture(texture)
+    if hue_deg or sat != 1.0 or val != 1.0:
+        texture = hsv_shift(texture, hue_deg, sat, val)
+    tex = _fit_texture(texture, mask.size, fit)
+    rgba = tex.convert("RGBA")
+    rgba.putalpha(mask)
+    return rgba
+
+
+def texture_modulate(mask: Image.Image, base_rgba: Image.Image,
+                     texture, strength: float = 0.45,
+                     fit: str = "cover") -> Image.Image:
+    """Use texture luminance to modulate an existing RGBA color layer.
+
+    The base RGBA supplies the COLOR (e.g. from colorize() / FACE_GRADIENTS),
+    the texture supplies the surface GRAIN. Sweet spot strength 0.4-0.6.
+    """
+    if isinstance(texture, str):
+        texture = load_texture(texture)
+    tex = _fit_texture(texture, mask.size, fit)
+    tex_l = np.array(tex.convert("L"), dtype=np.float32) / 255.0
+    base = np.array(base_rgba.convert("RGBA"), dtype=np.float32) / 255.0
+    modulated = base[..., :3] * (1.0 - strength) + base[..., :3] * tex_l[..., None] * strength * 2.0
+    out = np.empty_like(base)
+    out[..., :3] = np.clip(modulated, 0, 1)
+    m = np.array(mask, dtype=np.float32) / 255.0
+    out[..., 3] = m
+    return Image.fromarray((out * 255).astype(np.uint8), "RGBA")
+
+
+# screen_blend / multiply_blend are defined earlier in this file (~line 197).
 

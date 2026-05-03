@@ -1,0 +1,901 @@
+"use client"
+
+import { useState, useMemo, useEffect } from "react"
+import { useStream } from "@/lib/sse"
+import { api, API_BASE_URL, type Scene, type ExistingComp } from "@/lib/api"
+import { StudioBadge } from "@/components/ui/studio-badge"
+import { ErrorAlert } from "@/components/ui/error-alert"
+import { STUDIO_COLOR } from "@/lib/studio-colors"
+import { useIdToken } from "@/hooks/use-id-token"
+import { StudioSelector, STUDIOS } from "@/components/ui/studio-selector"
+import { PageHeader } from "@/components/ui/page-header"
+import { ExistingCompModal } from "@/components/ui/existing-comp-modal"
+import { studioAbbr } from "@/lib/studio-colors"
+
+type Mode = "ideas" | "builder" | "existing"
+
+interface Props {
+  idToken: string | undefined
+}
+
+// ---------------------------------------------------------------------------
+// Parsed idea from the streaming ideas response
+// ---------------------------------------------------------------------------
+
+interface ParsedIdea {
+  title: string
+  concept: string
+  talent: string
+}
+
+const STUDIO_COMP_PREFIX: Record<string, string> = {
+  FuckPassVR: "FPVR", VRHush: "VRH", VRAllure: "VRA", NaughtyJOI: "NNJOI",
+}
+
+function photosetCompId(studio: string): string {
+  return `${STUDIO_COMP_PREFIX[studio] ?? "FPVR"}-COMP-XXXX`
+}
+
+function parseIdeas(raw: string): ParsedIdea[] {
+  const ideas: ParsedIdea[] = []
+  // Split on blank lines or "TITLE:" to find idea blocks
+  const blocks = raw.split(/\n(?=TITLE:)/g)
+  for (const block of blocks) {
+    const titleMatch = block.match(/TITLE:\s*(.+)/i)
+    const conceptMatch = block.match(/CONCEPT:\s*(.+)/i)
+    const talentMatch = block.match(/TALENT:\s*(.+)/i)
+    if (titleMatch && (conceptMatch || talentMatch)) {
+      ideas.push({
+        title: titleMatch[1].trim(),
+        concept: conceptMatch ? conceptMatch[1].trim() : "",
+        talent: talentMatch ? talentMatch[1].trim() : "",
+      })
+    }
+  }
+  return ideas
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+export function CompBuilder({ idToken: serverIdToken }: Props) {
+  const idToken = useIdToken(serverIdToken)
+  const client = api(idToken ?? null)
+
+  const [studio, setStudio] = useState("FuckPassVR")
+  const [mode, setMode] = useState<Mode>("ideas")
+  const [title, setTitle] = useState("")
+  const [selected, setSelected] = useState<string[]>([])
+  const [sceneSearch, setSceneSearch] = useState("")
+  const [ideasNotes, setIdeasNotes] = useState("")
+  const [ideasCount, setIdeasCount] = useState(6)
+
+  // Scene catalog — lazy-loaded the first time Builder mode is opened so
+  // landing on Ideas/Existing doesn't pay for the 200-row fetch.
+  const [allScenes, setAllScenes] = useState<Scene[]>([])
+  const [scenesLoaded, setScenesLoaded] = useState(false)
+  const [scenesLoading, setScenesLoading] = useState(false)
+  const [scenesError, setScenesError] = useState<string | null>(null)
+
+  // Existing comps state (rich shape from /compilations/existing)
+  const [existingComps, setExistingComps] = useState<ExistingComp[]>([])
+  const [existingLoading, setExistingLoading] = useState(false)
+  const [expandedComp, setExpandedComp] = useState<string | null>(null)
+
+  const ideasStream = useStream()
+  const descStream = useStream()
+
+  // Load existing comps when switching to that tab
+  useEffect(() => {
+    if (mode !== "existing") return
+    setExistingLoading(true)
+    client.compilations.existing(studio).then(setExistingComps).catch((e) => { console.warn("[comps] Failed to load existing:", e); setExistingComps([]) }).finally(() => setExistingLoading(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, studio])
+
+  // Lazy-load the scene catalog the first time Builder is opened.
+  useEffect(() => {
+    if (mode !== "builder" || scenesLoaded || scenesLoading) return
+    setScenesLoading(true)
+    setScenesError(null)
+    client.scenes.list({ limit: 200 })
+      .then(s => { setAllScenes(s); setScenesLoaded(true) })
+      .catch(e => setScenesError(e instanceof Error ? e.message : "Failed to load scenes"))
+      .finally(() => setScenesLoading(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
+
+  const eligibleScenes = useMemo(
+    () => allScenes.filter(s => s.studio === studio),
+    [allScenes, studio]
+  )
+
+  const filteredScenes = useMemo(() => {
+    if (!sceneSearch) return eligibleScenes
+    const q = sceneSearch.toLowerCase()
+    return eligibleScenes.filter(s =>
+      s.title.toLowerCase().includes(q) ||
+      s.performers.toLowerCase().includes(q) ||
+      s.id.toLowerCase().includes(q)
+    )
+  }, [eligibleScenes, sceneSearch])
+
+  const selectedScenes = useMemo(
+    () => allScenes.filter(s => selected.includes(s.id)),
+    [allScenes, selected]
+  )
+
+  function toggleScene(id: string) {
+    // Guard against a cross-studio add: a compilation is scoped to one
+    // studio, so we refuse any scene whose studio doesn't match.
+    const scene = allScenes.find(s => s.id === id)
+    if (scene && scene.studio !== studio) {
+      setSaveMsg(`Scene ${id} belongs to ${scene.studio}, not ${studio}.`)
+      return
+    }
+    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+
+  const [saving, setSaving] = useState(false)
+  const [saveMsg, setSaveMsg] = useState<string | null>(null)
+  const [grailSaving, setGrailSaving] = useState(false)
+  const [grailMsg, setGrailMsg] = useState<string | null>(null)
+  const [photosetOpen, setPhotosetOpen] = useState(false)
+
+  // Detect volume series: given an idea title, scan existing comps whose
+  // titles share a root (after stripping "Vol. N" / "Best X" suffixes) and
+  // return either the next volume number or "New" when the series is fresh.
+  function detectVolume(ideaTitle: string): string {
+    const strip = (s: string) =>
+      s.toLowerCase()
+        .replace(/\bvol(?:\.|ume)?\s*\d+\b/g, "")
+        .replace(/\bbest\s+(?:of\s+)?/g, "")
+        .replace(/\bcompilation\b/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+    const root = strip(ideaTitle)
+    if (!root) return "New"
+    const matches = existingComps.filter(c => strip(c.title) === root)
+    if (matches.length === 0) return "New"
+    // Find the highest "Vol. N" in matching titles and return N+1
+    let maxVol = 1
+    for (const c of matches) {
+      const m = c.title.match(/\bvol(?:\.|ume)?\s*(\d+)\b/i)
+      if (m) maxVol = Math.max(maxVol, parseInt(m[1], 10))
+      else maxVol = Math.max(maxVol, 1)  // treat un-numbered as Vol. 1
+    }
+    return `Vol. ${maxVol + 1}`
+  }
+
+  // Parse ideas as they stream in
+  const parsedIdeas = useMemo(() => {
+    if (!ideasStream.output) return []
+    return parseIdeas(ideasStream.output)
+  }, [ideasStream.output])
+
+  function generateIdeas() {
+    setSaveMsg(null)
+    ideasStream.start(
+      `${API_BASE_URL}/api/compilations/ideas`,
+      idToken,
+      { studio, notes: ideasNotes, count: ideasCount }
+    )
+  }
+
+  function generateDescription() {
+    setSaveMsg(null)
+    descStream.start(
+      `${API_BASE_URL}/api/compilations/generate`,
+      idToken,
+      { studio, title: title || "", scene_ids: selected, notes: "" }
+    )
+  }
+
+  function applyIdea(idea: ParsedIdea) {
+    setTitle(idea.title)
+    setMode("builder")
+  }
+
+  async function saveCompilation() {
+    if (!descStream.output) return
+    setSaving(true)
+    setSaveMsg(null)
+    try {
+      const volume = detectVolume(title || "Untitled Compilation")
+      const res = await fetch(`${API_BASE_URL}/api/compilations/save`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
+        body: JSON.stringify({
+          studio,
+          title: title || "Untitled Compilation",
+          scene_ids: selected,
+          description: descStream.output,
+          notes: "",
+          status: "Draft",
+          volume: volume === "New" ? "New" : volume,
+        }),
+      })
+      if (!res.ok) throw new Error(`Save failed: ${res.status}`)
+      setSaveMsg("Saved — writing to sheet.")
+    } catch (e) {
+      setSaveMsg(e instanceof Error ? e.message : "Save failed")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function saveToGrail() {
+    if (selected.length === 0) return
+    setGrailSaving(true)
+    setGrailMsg(null)
+    try {
+      const res = await api(idToken ?? null).compilations.grailWrite({
+        studio,
+        title: title || "Untitled Compilation",
+        scene_ids: selected,
+      })
+      setGrailMsg(`✓ Flagged ${res.scene_count} scene${res.scene_count === 1 ? "" : "s"} as compilation.`)
+    } catch (e) {
+      setGrailMsg(e instanceof Error ? e.message : "Grail write failed")
+    } finally {
+      setGrailSaving(false)
+    }
+  }
+
+  const studioColor = STUDIO_COLOR[studio]
+
+  const modeLabel = mode === "ideas" ? "IDEAS" : mode === "builder" ? "BUILDER" : "EXISTING"
+  // V2 subtitle — one line that tells the user the state of this tab.
+  const subtitle = mode === "ideas"
+    ? `${parsedIdeas.length > 0 ? `${parsedIdeas.length} ideas generated` : "Generate themed compilation concepts"}`
+    : mode === "builder"
+      ? `${selected.length} scene${selected.length === 1 ? "" : "s"} selected${title ? ` · ${title}` : ""}`
+      : `${existingComps.length} ${studioAbbr(studio)} compilation${existingComps.length === 1 ? "" : "s"} on file`
+
+  return (
+    <div>
+      <PageHeader
+        title="Compilations"
+        eyebrow={`PACKAGING · ${modeLabel} · ${studioAbbr(studio)}`}
+        subtitle={subtitle}
+        studioAccent={studio}
+        actions={
+          <>
+            <StudioSelector value={studio} onChange={(s) => { setStudio(s); setSelected([]) }} />
+            <div
+              className="ec-seg"
+              role="tablist"
+              aria-label="Compilation mode"
+              style={{
+                display: "inline-flex",
+                border: "1px solid var(--color-border)",
+                background: "var(--color-surface)",
+                borderRadius: 4,
+                overflow: "hidden",
+              }}
+            >
+              {(["ideas", "builder", "existing"] as Mode[]).map((m, i, arr) => {
+                const active = mode === m
+                return (
+                  <button
+                    key={m}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setMode(m)}
+                    style={{
+                      padding: "6px 14px",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: "0.1em",
+                      textTransform: "uppercase",
+                      background: active ? "var(--color-text)" : "transparent",
+                      color: active ? "var(--color-base)" : "var(--color-text-muted)",
+                      border: "none",
+                      borderRight: i < arr.length - 1 ? "1px solid var(--color-border)" : undefined,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {m === "ideas" ? "Ideas" : m === "builder" ? "Builder" : "Existing"}
+                  </button>
+                )
+              })}
+            </div>
+          </>
+        }
+      />
+
+      {/* ── IDEAS MODE ── */}
+      {mode === "ideas" && (
+        <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
+          <div style={{ width: 260, flexShrink: 0 }}>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  Creative direction <span style={{ color: "var(--color-text-faint)" }}>(optional)</span>
+                </label>
+                <textarea
+                  value={ideasNotes}
+                  onChange={e => setIdeasNotes(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. Focus on blondes, holiday theme, body type…"
+                  className="w-full px-2.5 py-1.5 rounded text-xs outline-none resize-none"
+                  style={{
+                    background: "var(--color-surface)",
+                    border: "1px solid var(--color-border)",
+                    color: "var(--color-text)",
+                  }}
+                />
+                <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 3 }}>Theme, performer type, or angle — leave blank for open-ended ideas</p>
+              </div>
+              {/* Ideas count slider */}
+              <div>
+                <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  # Ideas: <span style={{ color: "var(--color-text)" }}>{ideasCount}</span>
+                </label>
+                <input
+                  type="range" min={3} max={10} value={ideasCount}
+                  onChange={e => setIdeasCount(Number(e.target.value))}
+                  className="w-full" style={{ accentColor: "var(--color-lime)" }}
+                />
+              </div>
+              <button
+                onClick={generateIdeas}
+                disabled={ideasStream.streaming}
+                className="w-full px-3 py-2 rounded text-xs font-semibold transition-colors"
+                style={{
+                  background: ideasStream.streaming ? "var(--color-elevated)" : "var(--color-lime)",
+                  color: ideasStream.streaming ? "var(--color-text-muted)" : "var(--color-lime-ink)",
+                  cursor: ideasStream.streaming ? "wait" : "pointer",
+                }}
+              >
+                {ideasStream.streaming ? "Generating…" : `Suggest ${ideasCount} Ideas`}
+              </button>
+              {ideasStream.streaming && (
+                <button
+                  onClick={ideasStream.stop}
+                  className="w-full px-3 py-1.5 rounded text-xs"
+                  style={{ color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
+                >
+                  Stop
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {ideasStream.error && <ErrorAlert className="mb-3">{ideasStream.error}</ErrorAlert>}
+
+            {!ideasStream.output && !ideasStream.streaming && (
+              <div
+                className="rounded flex items-center justify-center"
+                style={{
+                  height: 180,
+                  border: "1px dashed var(--color-border)",
+                  color: "var(--color-text-faint)",
+                  fontSize: 12,
+                }}
+              >
+                Hit suggest and watch the ideas roll in. Pick one to start building.
+              </div>
+            )}
+
+            {/* Show parsed idea cards once we have them, otherwise raw stream */}
+            {ideasStream.output && parsedIdeas.length > 0 && !ideasStream.streaming ? (
+              <div className="flex flex-col gap-2">
+                {parsedIdeas.map((idea, i) => (
+                  <div
+                    key={i}
+                    className="rounded px-4 py-3"
+                    style={{
+                      background: "var(--color-surface)",
+                      border: "1px solid var(--color-border)",
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                          <span>{idea.title}</span>
+                          {(() => {
+                            const badge = detectVolume(idea.title)
+                            const isNew = badge === "New"
+                            return (
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  fontWeight: 600,
+                                  letterSpacing: "0.04em",
+                                  textTransform: "uppercase",
+                                  padding: "1px 6px",
+                                  borderRadius: 9,
+                                  color: isNew ? "var(--color-lime)" : studioColor,
+                                  background: isNew
+                                    ? "color-mix(in srgb, var(--color-lime) 12%, transparent)"
+                                    : `color-mix(in srgb, ${studioColor} 12%, transparent)`,
+                                  border: isNew
+                                    ? "1px solid color-mix(in srgb, var(--color-lime) 28%, transparent)"
+                                    : `1px solid color-mix(in srgb, ${studioColor} 28%, transparent)`,
+                                }}
+                              >
+                                {badge}
+                              </span>
+                            )
+                          })()}
+                        </p>
+                        {idea.concept && (
+                          <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: idea.talent ? 4 : 0 }}>
+                            {idea.concept}
+                          </p>
+                        )}
+                        {idea.talent && (
+                          <p style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                            Suggested: {idea.talent}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => applyIdea(idea)}
+                        className="px-3 py-1.5 rounded text-xs font-semibold shrink-0"
+                        style={{
+                          background: `color-mix(in srgb, ${studioColor} 15%, transparent)`,
+                          color: studioColor,
+                          border: `1px solid color-mix(in srgb, ${studioColor} 30%, transparent)`,
+                        }}
+                      >
+                        Use this →
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : ideasStream.output ? (
+              /* Fallback: raw stream output while streaming or if parsing fails */
+              <div
+                className="rounded px-4 py-3"
+                style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
+              >
+                <pre style={{ fontSize: 12, lineHeight: 1.7, color: "var(--color-text)", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontFamily: "var(--font-sans)" }}>
+                  {ideasStream.output}
+                  {ideasStream.streaming && (
+                    <span style={{ display: "inline-block", width: 6, height: 12, background: studioColor, marginLeft: 2, verticalAlign: "middle", animation: "streamCursorPulse 1s ease-in-out infinite" }} />
+                  )}
+                </pre>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* ── BUILDER MODE ── */}
+      {mode === "builder" && (
+        <div className="flex gap-6" style={{ alignItems: "flex-start" }}>
+          <div style={{ width: 340, flexShrink: 0 }}>
+            <div className="flex flex-col gap-3">
+              {/* Title */}
+              <div>
+                <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  Compilation title <span style={{ color: "var(--color-text-faint)" }}>(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  placeholder="e.g. Best of 2025 — Creampies"
+                  className="w-full px-2.5 py-1.5 rounded text-xs outline-none"
+                  style={{
+                    background: "var(--color-surface)",
+                    border: "1px solid var(--color-border)",
+                    color: "var(--color-text)",
+                  }}
+                />
+              </div>
+
+              {/* Scene search + multiselect */}
+              <div>
+                <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  Add scenes
+                  {selected.length > 0 && (
+                    <span style={{ color: studioColor, marginLeft: 6 }}>
+                      {selected.length} selected
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  value={sceneSearch}
+                  onChange={e => setSceneSearch(e.target.value)}
+                  placeholder="Search scenes…"
+                  className="w-full px-2.5 py-1.5 rounded-t text-xs outline-none"
+                  style={{
+                    background: "var(--color-surface)",
+                    border: "1px solid var(--color-border)",
+                    borderBottom: "none",
+                    color: "var(--color-text)",
+                  }}
+                />
+                {scenesError ? (
+                  <div className="rounded-b px-3 py-2 text-xs" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-err)" }}>
+                    {scenesError}
+                  </div>
+                ) : scenesLoading && !scenesLoaded ? (
+                  <div className="rounded-b px-3 py-2 text-xs" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text-faint)" }}>
+                    Loading scenes…
+                  </div>
+                ) : (
+                  <div className="rounded-b overflow-auto" style={{ border: "1px solid var(--color-border)", background: "var(--color-surface)", maxHeight: 220 }}>
+                    {filteredScenes.length === 0 && (
+                      <p className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                        {sceneSearch ? "No matches." : "No scenes for this studio."}
+                      </p>
+                    )}
+                    {filteredScenes.map((scene, i) => {
+                      const isSelected = selected.includes(scene.id)
+                      return (
+                        <button
+                          key={scene.id}
+                          role="checkbox"
+                          aria-checked={isSelected}
+                          onClick={() => toggleScene(scene.id)}
+                          className="w-full text-left px-3 py-1.5 transition-colors"
+                          style={{
+                            borderBottom: i < filteredScenes.length - 1 ? "1px solid var(--color-border-subtle)" : undefined,
+                            background: isSelected ? `color-mix(in srgb, ${studioColor} 10%, transparent)` : "transparent",
+                            display: "flex", alignItems: "center", gap: 8,
+                          }}
+                        >
+                          <span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: 3, border: `1px solid ${isSelected ? studioColor : "var(--color-border)"}`, background: isSelected ? studioColor : "transparent", flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                            {isSelected && <span style={{ fontSize: 9, color: "#000", fontWeight: 700 }}>✓</span>}
+                          </span>
+                          <div style={{ minWidth: 0 }}>
+                            <p className="line-clamp-1" style={{ fontSize: 11, color: isSelected ? "var(--color-text)" : "var(--color-text-muted)" }}>
+                              {scene.title || "Untitled"}
+                            </p>
+                            {scene.performers && (
+                              <p style={{ fontSize: 10, color: "var(--color-text-faint)" }}>{scene.performers}</p>
+                            )}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Selected scenes list */}
+              {selected.length > 0 && (
+                <div>
+                  <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Selected scenes</label>
+                  <div className="flex flex-col gap-1">
+                    {selectedScenes.map(s => (
+                      <div key={s.id} className="flex items-center justify-between px-2.5 py-1.5 rounded" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}>
+                        <div>
+                          <p style={{ fontSize: 11, color: "var(--color-text)" }} className="line-clamp-1">{s.title || "Untitled"}</p>
+                          <p style={{ fontSize: 10, color: "var(--color-text-faint)" }}>{s.id}</p>
+                        </div>
+                        <button onClick={() => toggleScene(s.id)} aria-label={`Remove ${s.title || s.id}`} style={{ fontSize: 12, color: "var(--color-text-faint)", padding: "0 4px" }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Generate description button */}
+            <button
+              onClick={generateDescription}
+              disabled={descStream.streaming || selected.length === 0}
+              className="w-full mt-4 px-3 py-2 rounded text-xs font-semibold transition-colors"
+              style={{
+                background: descStream.streaming ? "var(--color-elevated)" : "var(--color-lime)",
+                color: descStream.streaming ? "var(--color-text-muted)" : "var(--color-lime-ink)",
+                cursor: descStream.streaming ? "wait" : "pointer",
+                opacity: (selected.length === 0 && !descStream.streaming) ? 0.5 : 1,
+              }}
+            >
+              {descStream.streaming ? "Generating…" : selected.length === 0 ? "Select scenes to continue" : "Generate Description"}
+            </button>
+            {descStream.streaming && (
+              <button onClick={descStream.stop} className="w-full mt-2 px-3 py-1.5 rounded text-xs" style={{ color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}>
+                Stop
+              </button>
+            )}
+          </div>
+
+          {/* Output */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {descStream.error && <ErrorAlert className="mb-3">{descStream.error}</ErrorAlert>}
+
+            {!descStream.output && !descStream.streaming && (
+              <div className="rounded flex items-center justify-center" style={{ height: 200, border: "1px dashed var(--color-border)", color: "var(--color-text-faint)", fontSize: 12 }}>
+                Compilation description will appear here
+              </div>
+            )}
+
+            {(descStream.output || descStream.streaming) && (
+              <>
+                <div className="rounded mb-3" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", padding: "12px 14px" }}>
+                  <pre style={{ fontFamily: "var(--font-sans)", fontSize: 12, lineHeight: 1.7, color: "var(--color-text)", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0 }}>
+                    {descStream.output}
+                    {descStream.streaming && (
+                      <span style={{ display: "inline-block", width: 6, height: 12, background: studioColor, marginLeft: 2, verticalAlign: "middle", animation: "streamCursorPulse 1s ease-in-out infinite" }} />
+                    )}
+                  </pre>
+                </div>
+
+                {!descStream.streaming && descStream.output && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={saveCompilation}
+                        disabled={saving}
+                        className="px-3 py-1.5 rounded text-xs font-semibold"
+                        style={{ background: "var(--color-lime)", color: "var(--color-lime-ink)", opacity: saving ? 0.5 : 1 }}
+                      >
+                        {saving ? "Saving…" : "Save to Planning Sheet"}
+                      </button>
+                      <button
+                        onClick={saveToGrail}
+                        disabled={grailSaving || selected.length === 0}
+                        title="Flag selected scenes as is_compilation in the Grail DB"
+                        className="px-3 py-1.5 rounded text-xs font-semibold"
+                        style={{
+                          background: "transparent",
+                          color: "var(--color-text)",
+                          border: "1px solid var(--color-border)",
+                          cursor: grailSaving ? "wait" : "pointer",
+                          opacity: grailSaving || selected.length === 0 ? 0.5 : 1,
+                        }}
+                      >
+                        {grailSaving ? "Writing…" : "Add to Grail Sheet"}
+                      </button>
+                      {saveMsg && (
+                        <span style={{ fontSize: 11, color: saveMsg.startsWith("Saved") ? "var(--color-ok)" : "var(--color-err)" }}>
+                          {saveMsg}
+                        </span>
+                      )}
+                      {grailMsg && (
+                        <span style={{ fontSize: 11, color: grailMsg.startsWith("✓") ? "var(--color-ok)" : "var(--color-err)" }}>
+                          {grailMsg}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Photoset build helper — copy-paste command for the local Mac script */}
+                    <div style={{ border: "1px solid var(--color-border)", borderRadius: 4, background: "var(--color-surface)" }}>
+                      <button
+                        type="button"
+                        onClick={() => setPhotosetOpen(o => !o)}
+                        aria-expanded={photosetOpen}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          width: "100%",
+                          padding: "6px 10px",
+                          background: "transparent",
+                          border: "none",
+                          color: "var(--color-text-muted)",
+                          fontSize: 11,
+                          cursor: "pointer",
+                          textAlign: "left",
+                        }}
+                      >
+                        <span aria-hidden style={{ fontSize: 9, color: "var(--color-text-faint)", transform: photosetOpen ? "rotate(90deg)" : undefined, transition: "transform 150ms" }}>▶</span>
+                        🖼 Build Photoset (Mac command)
+                      </button>
+                      {photosetOpen && (
+                        <div style={{ padding: "6px 10px 10px", borderTop: "1px solid var(--color-border-subtle)" }}>
+                          <pre
+                            style={{
+                              fontFamily: "var(--font-mono)",
+                              fontSize: 11,
+                              color: "var(--color-text)",
+                              background: "var(--color-elevated)",
+                              padding: "8px 10px",
+                              borderRadius: 4,
+                              margin: 0,
+                              overflow: "auto",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-all",
+                            }}
+                          >
+{`python3 ~/Scripts/comp_photoset.py --comp-id ${photosetCompId(studio)} --scenes ${selected.join(",") || "<scene-ids>"} --output ~/Desktop/Compilations --zip`}
+                          </pre>
+                          <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginTop: 6 }}>
+                            Save to Grail first to get the real comp ID.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Existing comps tab ── */}
+      {mode === "existing" && (
+        <ExistingCompsTable
+          comps={existingComps}
+          loading={existingLoading}
+          studio={studio}
+          studioColor={studioColor}
+          onOpen={(id) => setExpandedComp(id)}
+          onStartBuild={() => setMode("builder")}
+          onStartIdeas={() => setMode("ideas")}
+        />
+      )}
+
+      {/* Existing-comp detail modal — lifted out of the inline accordion. */}
+      {expandedComp && (() => {
+        const comp = existingComps.find(c => c.comp_id === expandedComp)
+        if (!comp) return null
+        return (
+          <ExistingCompModal
+            comp={comp}
+            studioColor={studioColor}
+            onClose={() => setExpandedComp(null)}
+            serverIdToken={serverIdToken}
+          />
+        )
+      })()}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Existing compilations table (sheet-synced, grouped by Comp ID)
+// ---------------------------------------------------------------------------
+
+function statusColors(status: string) {
+  const s = status.trim().toLowerCase()
+  if (s === "published") return { fg: "var(--color-ok)", bg: "color-mix(in srgb, var(--color-ok) 12%, transparent)", border: "color-mix(in srgb, var(--color-ok) 30%, transparent)" }
+  if (s === "planned")   return { fg: "var(--color-text)",  bg: "var(--color-elevated)", border: "var(--color-border)" }
+  // Draft / empty fallback
+  return { fg: "var(--color-text-muted)", bg: "color-mix(in srgb, var(--color-text-muted) 10%, transparent)", border: "var(--color-border)" }
+}
+
+interface ExistingCompsTableProps {
+  comps: ExistingComp[]
+  loading: boolean
+  studio: string
+  studioColor: string
+  onOpen: (compId: string) => void
+  onStartBuild?: () => void
+  onStartIdeas?: () => void
+}
+
+function ExistingCompsTable({ comps, loading, studio, studioColor, onOpen, onStartBuild, onStartIdeas }: ExistingCompsTableProps) {
+  if (loading) {
+    return <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Loading existing compilations…</p>
+  }
+  if (comps.length === 0) {
+    return (
+      <div
+        className="rounded flex flex-col items-center justify-center gap-3"
+        style={{ padding: "40px 24px", border: "1px dashed var(--color-border)", textAlign: "center" }}
+      >
+        <span aria-hidden="true" style={{ fontSize: 22, color: studioColor, opacity: 0.55 }}>◈</span>
+        <span style={{ fontWeight: 600, color: "var(--color-text)", fontSize: 14 }}>
+          No compilations yet for {studioAbbr(studio)}
+        </span>
+        <span style={{ fontSize: 12, color: "var(--color-text-muted)", maxWidth: 360, lineHeight: 1.5 }}>
+          A compilation bundles scenes into a release set. Start from a prompt for AI-suggested groupings, or hand-pick scenes in the builder.
+        </span>
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          {onStartIdeas && (
+            <button
+              type="button"
+              onClick={onStartIdeas}
+              style={{
+                background: "var(--color-lime)",
+                color: "var(--color-lime-ink)",
+                padding: "7px 14px",
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 600,
+                border: "1px solid transparent",
+                cursor: "pointer",
+              }}
+            >
+              Get ideas
+            </button>
+          )}
+          {onStartBuild && (
+            <button
+              type="button"
+              onClick={onStartBuild}
+              style={{
+                background: "transparent",
+                color: "var(--color-text)",
+                padding: "7px 14px",
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 500,
+                border: "1px solid var(--color-border)",
+                cursor: "pointer",
+              }}
+            >
+              Start building
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="rounded overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
+      <table className="ec-ctab w-full" style={{ borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ background: "var(--color-elevated)", borderBottom: "1px solid var(--color-border)" }}>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Comp ID</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Title</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Vol.</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Status</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Scenes</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>Created</th>
+            <th className="text-left px-3 py-2" style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-text-muted)", width: 24 }} aria-hidden="true"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {comps.map((comp) => {
+            const statCol = statusColors(comp.status)
+            return (
+              <tr
+                key={comp.comp_id}
+                tabIndex={0}
+                role="button"
+                aria-label={`Open ${comp.title || comp.comp_id}`}
+                onClick={() => onOpen(comp.comp_id)}
+                onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(comp.comp_id) } }}
+                style={{
+                  borderBottom: "1px solid var(--color-border)",
+                  cursor: "pointer",
+                }}
+              >
+                <td className="px-3 py-2 font-mono" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  {comp.comp_id}
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 12, color: "var(--color-text)", fontWeight: 500 }}>
+                  {comp.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  {comp.volume || "—"}
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 11 }}>
+                  <span style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                    padding: "2px 7px",
+                    borderRadius: 9,
+                    color: statCol.fg,
+                    background: statCol.bg,
+                    border: `1px solid ${statCol.border}`,
+                  }}>
+                    {comp.status || "Draft"}
+                  </span>
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  {comp.scene_count}
+                </td>
+                <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                  {comp.created || "—"}
+                </td>
+                <td className="px-3 py-2" aria-hidden="true" style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
+                  ›
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
