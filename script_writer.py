@@ -309,6 +309,11 @@ def build_prompt(parsed: dict) -> str:
             f"\nRemember: This is a FuckPassVR scene set in {destination}. The male POV character is traveling there. After they make love, she stamps his passport. The destination should influence the plot, her persona, and/or wardrobe."
         )
 
+    if studio == "VRHush":
+        prompt_parts.append(
+            "\nRemember: This is a VRHush scene. VRHush does NOT use travel themes, destinations, passports, or passport-stamping — those are FuckPassVR conventions and must not appear here. Pick ONE of VRH's two formats and commit to it: a grounded Fantasy Scenario (a believable real-world reason these two end up together — coworker, trainer, real-estate showing, etc.) OR a Pornstar Experience where she breaks the fourth wall and addresses the viewer directly as herself. State the format choice implicitly through the plot — do not blend the two."
+        )
+
     if scene_type == "BGCP":
         prompt_parts.append(
             "\nThis is a BGCP (Creampie) scene. The plot must reflect the heightened intimacy of this ending — make it feel special and meaningful. The female model should convey why this level of connection is significant."
