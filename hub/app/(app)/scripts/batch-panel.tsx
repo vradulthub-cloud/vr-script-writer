@@ -6,6 +6,7 @@ import { revalidateAfterWrite } from "@/lib/cache-actions"
 import { TAG_SCRIPTS } from "@/lib/cache-tags"
 import { STUDIO_COLOR } from "@/lib/studio-colors"
 import { formatApiError } from "@/lib/errors"
+import { normalizeSceneType } from "./script-utils"
 
 interface BatchResult {
   rowId: number
@@ -84,7 +85,7 @@ export function BatchPanel({ rows, idToken, isAdmin, onGenerated }: Props) {
       const row = targets[i]
       setProgress(i + 1)
       const label = `${row.female || "—"}${row.male ? ` / ${row.male}` : ""} — ${row.studio}`
-      const sceneType = sceneTypeFor(row.studio, row.title, row.theme)
+      const sceneType = sceneTypeFor(row.studio, row.scene_type)
 
       if (dryRun) {
         collected.push({
@@ -562,10 +563,14 @@ function ResultCard({
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
 
-function sceneTypeFor(studio: string, _title: string, _theme: string): string {
+function sceneTypeFor(studio: string, sheetSceneType: string | undefined): string {
   if (studio === "NaughtyJOI") return "JOI"
   if (studio === "VRAllure") return "Pornstar Experience"
-  return "BG"
+  // VRH / FPVR: drive BG vs BGCP off the Scripts sheet's column D so creampie
+  // shoots aren't silently rewritten as standard BG. normalizeSceneType
+  // tolerates the various ways writers spell it ("BGCP", "Creampie", "CP",
+  // "B/G CP", etc.) and falls back to BG when the cell is blank.
+  return normalizeSceneType(sheetSceneType)
 }
 
 /**

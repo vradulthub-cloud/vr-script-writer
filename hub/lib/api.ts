@@ -301,6 +301,11 @@ export interface Script {
   plot: string
   title: string
   script_status: string
+  // Sheet column C (location) and D (scene type, e.g. "BG", "BGCP",
+  // "Creampie"). Surfaced so the generator can drive the BG/BGCP toggle
+  // off the row instead of defaulting to BG.
+  scene_type?: string
+  location?: string
   // Additional fields returned when the row has been filled out past the
   // minimum — surface in the shoot modal so directors can see wardrobe at
   // a glance. Optional since they may be blank on fresh rows.

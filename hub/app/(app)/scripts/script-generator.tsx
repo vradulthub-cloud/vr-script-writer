@@ -25,7 +25,7 @@ import { SheetRowModal } from "@/components/ui/sheet-row-modal"
 import { TodayBriefing, type Briefing } from "@/components/ui/today-briefing"
 import { studioAbbr } from "@/lib/studio-colors"
 import { BatchPanel } from "./batch-panel"
-import { parseSections } from "./script-utils"
+import { parseSections, normalizeSceneType } from "./script-utils"
 const SCENE_TYPES = ["BG", "BGCP"]
 
 interface Props {
@@ -144,8 +144,8 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
 
   /**
    * Populate manual fields from a sheet row.
-   * Overwrites: selectedRow, studio, female, male.
-   * Preserves:  directorNote, destination, sceneType, feedback, stream output.
+   * Overwrites: selectedRow, studio, female, male, sceneType (from sheet col D).
+   * Preserves:  directorNote, destination, feedback, stream output.
    * Callers must route through selectRow() so the dirty-check fires.
    */
   function applyRow(row: Script) {
@@ -153,6 +153,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
     setStudio(row.studio || "FuckPassVR")
     setFemale(row.female || "")
     setMale(row.male || "")
+    setSceneType(normalizeSceneType(row.scene_type))
     setPendingRow(null)
     setMode("manual")
   }
