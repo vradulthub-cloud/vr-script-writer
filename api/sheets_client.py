@@ -162,6 +162,12 @@ def open_comp_planning() -> gspread.Spreadsheet:
     return with_retry(lambda: get_client().open_by_key(s.comp_planning_sheet_id))
 
 
+def open_revenue() -> gspread.Spreadsheet:
+    """Open the Premium Breakdowns sheet (revenue per platform/scene/month)."""
+    s = get_settings()
+    return with_retry(lambda: get_client().open_by_key(s.revenue_sheet_id))
+
+
 # ---------------------------------------------------------------------------
 # Worksheet helpers — get-or-create with optional header init
 # ---------------------------------------------------------------------------

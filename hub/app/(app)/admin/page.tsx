@@ -1,3 +1,5 @@
+import Link from "next/link"
+import { DollarSign } from "lucide-react"
 import { auth } from "@/auth"
 import { api, type UserProfile, type TicketStats, type SceneStats, type TaskStats } from "@/lib/api"
 import { requireAdmin } from "@/lib/rbac"
@@ -91,13 +93,33 @@ export default async function AdminPage() {
 
   return (
     <div style={{ padding: "0 0 32px" }}>
-      <header style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 10, fontWeight: 400, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>
-          Admin
+      <header style={{ marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 400, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>
+            Admin
+          </div>
+          <h1 style={{ margin: "4px 0 0", fontSize: 32, fontWeight: 400, letterSpacing: "-0.02em", color: "var(--color-text)", fontFamily: "var(--font-display-hero)" }}>
+            Console
+          </h1>
         </div>
-        <h1 style={{ margin: "4px 0 0", fontSize: 32, fontWeight: 400, letterSpacing: "-0.02em", color: "var(--color-text)", fontFamily: "var(--font-display-hero)" }}>
-          Console
-        </h1>
+        {/* Direct entry point to the Premium Breakdowns dashboard. Lives outside
+            the tab strip because revenue is its own page (too tall + needs full
+            width — wouldn't fit a tab pane cleanly). */}
+        <Link
+          href="/admin/revenue"
+          style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "8px 14px",
+            border: "1px solid var(--color-border)",
+            background: "var(--color-surface)",
+            color: "var(--color-text)",
+            fontSize: 12, fontWeight: 600, letterSpacing: "0.04em",
+            textTransform: "uppercase", textDecoration: "none",
+          }}
+        >
+          <DollarSign size={13} style={{ color: "var(--color-lime)" }} />
+          Revenue dashboard
+        </Link>
       </header>
 
       <StatStrip stats={stats} />

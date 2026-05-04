@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     budgets_sheet_id: str = "1bM1G49p2KK9WY3WfjzPixrWUw8KBiDGKR-0jKw5QUVc"
     booking_sheet_id: str = "1Dxrh0UZNqoBt6otZqsU85fxz9z-dt0csSCV9sGdobKw"
     comp_planning_sheet_id: str = "1i6W4eZ8Bva3HvVmhpAVgjeHwfqbARkwBZ38aUhriaGs"
+    # Premium Breakdowns — revenue per platform/scene/month from SLR/POVR/VRPorn portals
+    revenue_sheet_id: str = "1nVf7rT7O75U5jxhQ2vzX-nczp6c1fZqrvFGB6nfIOI8"
 
     # --- Google OAuth (for user auth, not service account) ---
     google_client_id: str = ""
