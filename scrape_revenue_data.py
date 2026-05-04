@@ -120,46 +120,67 @@ def save_state(context: BrowserContext, platform: str) -> None:
 # SexLikeReal — sellers.sexlikereal.com
 # ---------------------------------------------------------------------------
 def scrape_slr(page: Page, dry_run: bool) -> list[list[str]]:
-    """Log into SLR sellers and pull all-studios per-video stats.
+    """Log into SLR partners (partners.sexlikereal.com) and pull
+    all-studios per-video stats.
 
-    EXPECTED OUTPUT SHAPE (must match refresh_premium_breakdowns SLR_HEADER):
+    Output schema:
       Studio, Release Date, SLR_ID, Title, Uniq Views, Favorites,
       Premium $, Sales $, Scripts $, Total Income $
 
-    TODO: fill in real selectors. The login URL + form-field IDs need
-    confirmation from the user — typically:
-      - https://sellers.sexlikereal.com/login
-      - input[name=email] + input[name=password] + button[type=submit]
-      - then navigate to the per-video stats / income export page
-      - either trigger the "Export CSV" button + capture download, OR
-        scrape the table by paginating through all rows.
+    *FIRST-RUN REQUIREMENT*: SLR's login form is gated by Google
+    reCAPTCHA v2 ("I'm not a robot" checkbox). We CANNOT solve this
+    headlessly. The first time you run this script:
+
+        python3 scrape_revenue_data.py --slr --headed
+
+    Complete the reCAPTCHA + login by hand. We persist the resulting
+    session cookies under ~/.scraper_state/slr.json. Subsequent runs
+    skip the login form entirely (cookies survive ~30 days typically),
+    so the monthly scheduled task runs unattended.
+
+    Once logged-in, scrape the per-video stats page (URL/selectors below
+    — confirmed against the user's existing CSV header).
     """
     user = os.environ.get("SLR_USER")
     pw   = os.environ.get("SLR_PASS")
     if not user or not pw:
         raise RuntimeError("SLR_USER / SLR_PASS env vars not set")
 
-    log.info("SLR: navigating to login...")
-    page.goto("https://sellers.sexlikereal.com/login", wait_until="domcontentloaded")
+    log.info("SLR: opening partners portal...")
+    page.goto("https://partners.sexlikereal.com/user/signin",
+              wait_until="domcontentloaded", timeout=30_000)
 
-    # If we're already logged in (state restored), the URL will redirect off /login.
-    if "/login" in page.url:
-        log.info("SLR: filling credentials...")
-        # TODO confirm exact selectors:
+    # Already authed via persisted cookies? Sign-in URL redirects off /signin.
+    if "/signin" in page.url:
+        log.info("SLR: not authed (still on /signin) — login form needs reCAPTCHA")
+        # If a human is sitting in front of a headed browser they can solve
+        # it; otherwise we surface a clear error so the monthly task fails
+        # loudly instead of silently scraping a logged-out page.
         page.fill('input[name="email"]', user)
         page.fill('input[name="password"]', pw)
-        page.click('button[type="submit"]')
+        # Wait up to 60s for either the URL to leave /signin (reCAPTCHA solved)
+        # or for the user to give up.
         try:
-            page.wait_for_url(lambda u: "/login" not in u, timeout=15_000)
+            page.locator('input[type="submit"]').click()
+            page.wait_for_url(lambda u: "/signin" not in u, timeout=60_000)
         except PWTimeout:
-            raise RuntimeError("SLR login failed — check creds or 2FA")
+            raise RuntimeError(
+                "SLR login still on /signin after 60s — reCAPTCHA likely "
+                "blocking. Re-run with --headed and complete the challenge "
+                "by hand. Cookies will persist for future unattended runs."
+            )
 
-    # TODO: navigate to the all-studios per-video stats page + scrape.
-    # Common pattern: an "Export CSV" link on the dashboard. We'd capture the
-    # download via context.expect_download() and parse it into our schema.
+    # TODO: navigate to the per-video stats page. Inspect the partners
+    # portal's left-nav after a successful login to find the right URL
+    # and table structure. Header in the user's existing CSV is:
+    #   Studio | Release Date | SLR_ID | Title | Uniq Views | Favorites |
+    #   Premium $ | Sales $ | Scripts $ | Total Income $
+    # Likely candidates: /stats, /content, /videos, /earnings — fill in
+    # once we've eyeballed the post-login dashboard.
     raise NotImplementedError(
-        "SLR scrape not yet wired — need the URL of the per-video stats page "
-        "and selector for the 'Export CSV' button (or pagination structure)."
+        "SLR per-video stats page URL not yet known — run --headed once, "
+        "navigate to the all-studios stats page in the browser, then update "
+        "this function with the URL and table-column mapping."
     )
 
 
@@ -169,36 +190,91 @@ def scrape_slr(page: Page, dry_run: bool) -> list[list[str]]:
 def scrape_povr(page: Page, dry_run: bool) -> list[list[str]]:
     """Log into POVR partners and pull per-video stats.
 
-    EXPECTED OUTPUT SHAPE:
+    Output schema:
       Year, POVR_ID, Title, Premium Views, Time Streamed, Downloads, Member Share $
 
-    The CSV the user downloads manually has 4,749 rows (today's count) and
-    these exact columns. Likely available via an "Export" button on the
-    Videos / Earnings dashboard.
+    Steps:
+      1. Land on partners.povr.com → click 'Login' link → fill the modal form
+         (form has name="username" + name="password", submit button)
+      2. Navigate to /stats?gr=scene&pp=1000&d1=2018-01-01&d2=<today>
+         - gr=scene: per-video grouping
+         - pp=1000:  "All" per page
+         - d1/d2:    date range — default of last-30-days only ships ~400
+                     rows; we want all-time (~4,800)
+      3. Scrape the table. TD[0] is `#<POVR_ID> - <Title>`, columns 1-4
+         are Premium Views / Time Streamed / Downloads / Member Share Amount.
     """
+    import re
+    from datetime import date
+
     user = os.environ.get("POVR_USER")
     pw   = os.environ.get("POVR_PASS")
     if not user or not pw:
         raise RuntimeError("POVR_USER / POVR_PASS env vars not set")
 
-    log.info("POVR: navigating to login...")
-    page.goto("https://partners.povr.com/login", wait_until="domcontentloaded")
+    log.info("POVR: opening partners portal...")
+    page.goto("https://partners.povr.com/", wait_until="domcontentloaded", timeout=30_000)
 
-    if "/login" in page.url:
+    # Marketing landing page renders the login form INSIDE a collapsed
+    # accordion — the <input> exists in the DOM but is hidden until the
+    # "Login" header link is clicked. If we land already authed, the
+    # /stats nav appears and there's no login link to click. Detect by
+    # form visibility, not presence.
+    if page.locator('input[name="username"]:visible').count() == 0:
+        login_link = page.locator('a:has-text("Login"), button:has-text("Login")').first
+        if login_link.count() > 0:
+            log.info("POVR: clicking Login link to expand form...")
+            login_link.click(timeout=10_000)
+            page.wait_for_selector('input[name="username"]:visible', state="visible", timeout=10_000)
+        else:
+            log.info("POVR: already authed (no Login link, form hidden)")
+    if page.locator('input[name="username"]:visible').count() > 0:
         log.info("POVR: filling credentials...")
-        # TODO confirm selectors
-        page.fill('input[type="email"], input[name="email"]', user)
-        page.fill('input[type="password"], input[name="password"]', pw)
-        page.click('button[type="submit"]')
+        page.fill('input[name="username"]', user)
+        page.fill('input[name="password"]', pw)
+        page.click('button[type="submit"], input[type="submit"]')
         try:
-            page.wait_for_url(lambda u: "/login" not in u, timeout=15_000)
+            page.wait_for_url(lambda u: "stats" in u or "content" in u, timeout=20_000)
         except PWTimeout:
-            raise RuntimeError("POVR login failed — check creds or 2FA")
+            # Some logins land on '/' with a stale URL — soft tolerance.
+            pass
 
-    raise NotImplementedError(
-        "POVR scrape not yet wired — need the URL of the videos/earnings "
-        "page and the export-button selector."
+    today = date.today().isoformat()
+    url = f"https://partners.povr.com/stats?gr=scene&pp=1000&d1=2018-01-01&d2={today}"
+    log.info(f"POVR: loading per-video stats ({url})")
+    page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+    page.wait_for_load_state("networkidle", timeout=30_000)
+    page.wait_for_selector("table tbody tr", timeout=30_000)
+
+    raw_rows = page.eval_on_selector_all(
+        "table tbody tr",
+        "els => els.map(tr => [...tr.querySelectorAll('td')].map(td => (td.innerText||'').trim()))",
     )
+    log.info(f"POVR: scraped {len(raw_rows)} table rows")
+
+    out: list[list[str]] = []
+    for cells in raw_rows:
+        if len(cells) < 5:
+            continue
+        breakdown = cells[0]
+        # Trailing "Total (N rows)" summary row — skip
+        if breakdown.lower().startswith("total"):
+            continue
+        # Parse "#5821241 - Hard Wood On Fire"
+        m = re.match(r"#(\d+)\s*-\s*(.+)", breakdown)
+        povr_id = m.group(1) if m else ""
+        title   = m.group(2).strip() if m else breakdown
+        share = cells[4].replace("$", "").replace(",", "").strip()
+        out.append([
+            "",                          # Year — not in the per-video view
+            povr_id,                     # POVR_ID
+            title,                       # Title
+            cells[1].replace(",", ""),   # Premium Views
+            cells[2],                    # Time Streamed (e.g. "14h, 41m")
+            cells[3].replace(",", ""),   # Downloads
+            share,                       # Member Share $ (raw number)
+        ])
+    return out
 
 
 # ---------------------------------------------------------------------------
