@@ -166,11 +166,11 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
                 className="hidden xl:block"
                 style={{
                   padding: "14px 16px 4px",
-                  fontSize: 9,
+                  fontSize: 10,
                   fontWeight: 700,
-                  letterSpacing: "0.22em",
+                  letterSpacing: "0.2em",
                   textTransform: "uppercase",
-                  color: "var(--color-text-faint)",
+                  color: "var(--color-text-muted)",
                   userSelect: "none",
                 }}
               >
@@ -264,16 +264,16 @@ function RailClock() {
             justifyContent: "space-between",
             width: "100%",
             padding: "0 14px",
-            fontSize: 9,
+            fontSize: 10,
             fontWeight: 600,
-            letterSpacing: "0.14em",
+            letterSpacing: "0.12em",
             textTransform: "uppercase",
-            color: "var(--color-text-faint)",
+            color: "var(--color-text-muted)",
             marginTop: 3,
           }}
         >
           <span>{dayDate}</span>
-          <span style={{ opacity: 0.6 }}>{tz}</span>
+          <span style={{ opacity: 0.7 }}>{tz}</span>
         </div>
       </div>
     </div>
