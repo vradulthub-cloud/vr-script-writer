@@ -239,41 +239,85 @@ def scrape_povr(page: Page, dry_run: bool) -> list[list[str]]:
             # Some logins land on '/' with a stale URL — soft tolerance.
             pass
 
-    today = date.today().isoformat()
-    url = f"https://partners.povr.com/stats?gr=scene&pp=1000&d1=2018-01-01&d2={today}"
-    log.info(f"POVR: loading per-video stats ({url})")
-    page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-    page.wait_for_load_state("networkidle", timeout=30_000)
-    page.wait_for_selector("table tbody tr", timeout=30_000)
-
-    raw_rows = page.eval_on_selector_all(
-        "table tbody tr",
-        "els => els.map(tr => [...tr.querySelectorAll('td')].map(td => (td.innerText||'').trim()))",
-    )
-    log.info(f"POVR: scraped {len(raw_rows)} table rows")
+    # POVR's /stats backend returns blank/empty HTML when the date range
+    # spans more than ~1 year (server-side query timeout). The user's
+    # existing CSV indexes by (Year × POVR_ID) — one row per video per
+    # year that earned. We mirror that: paginate each year separately,
+    # emit one row per (year, video) tuple.
+    #
+    # Per-page row counts are 97-100 (the dropdown pp=100 is approximate
+    # not exact), so we ONLY stop a year's pagination when we hit a fully
+    # empty page (0 data rows). 50 pages × 100 = 5000 rows is a generous
+    # safety cap per year.
+    today = date.today()
+    YEARS = list(range(2022, today.year + 1))  # POVR launched Feb 2022
+    PAGE_SIZE = 100
+    MAX_PAGES_PER_YEAR = 50
 
     out: list[list[str]] = []
-    for cells in raw_rows:
-        if len(cells) < 5:
-            continue
-        breakdown = cells[0]
-        # Trailing "Total (N rows)" summary row — skip
-        if breakdown.lower().startswith("total"):
-            continue
-        # Parse "#5821241 - Hard Wood On Fire"
-        m = re.match(r"#(\d+)\s*-\s*(.+)", breakdown)
-        povr_id = m.group(1) if m else ""
-        title   = m.group(2).strip() if m else breakdown
-        share = cells[4].replace("$", "").replace(",", "").strip()
-        out.append([
-            "",                          # Year — not in the per-video view
-            povr_id,                     # POVR_ID
-            title,                       # Title
-            cells[1].replace(",", ""),   # Premium Views
-            cells[2],                    # Time Streamed (e.g. "14h, 41m")
-            cells[3].replace(",", ""),   # Downloads
-            share,                       # Member Share $ (raw number)
-        ])
+
+    for year in YEARS:
+        d1 = f"{year}-01-01"
+        d2 = today.isoformat() if year == today.year else f"{year}-12-31"
+        year_count = 0
+
+        for p_num in range(1, MAX_PAGES_PER_YEAR + 1):
+            url = (f"https://partners.povr.com/stats?gr=scene&pp={PAGE_SIZE}"
+                   f"&d1={d1}&d2={d2}&p={p_num}")
+            # Per-page retry loop. POVR's CDN intermittently throws
+            # ERR_CONNECTION_TIMED_OUT mid-scrape — single retry usually fixes
+            # it. We also tolerate the no-rows timeout that signals end-of-pagination.
+            page_loaded = False
+            for attempt in (1, 2, 3):
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                    page.wait_for_selector("table tbody tr", timeout=20_000)
+                    page_loaded = True
+                    break
+                except Exception as e:
+                    if attempt < 3:
+                        log.warning(f"POVR: {year} p={p_num} attempt {attempt} failed ({type(e).__name__}); retrying...")
+                        page.wait_for_timeout(3_000)
+                    else:
+                        log.warning(f"POVR: {year} p={p_num} gave up after 3 attempts ({type(e).__name__}: {e}); moving to next year")
+            if not page_loaded:
+                break
+
+            cells_per_row = page.eval_on_selector_all(
+                "table tbody tr",
+                "els => els.map(tr => [...tr.querySelectorAll('td')].map(td => (td.innerText||'').trim()))",
+            )
+
+            page_added = 0
+            for cells in cells_per_row:
+                if len(cells) < 5:
+                    continue
+                breakdown = cells[0]
+                if breakdown.lower().startswith("total"):
+                    continue
+                m = re.match(r"#(\d+)\s*-\s*(.+)", breakdown)
+                if not m:
+                    continue
+                povr_id = m.group(1)
+                title   = m.group(2).strip()
+                share = cells[4].replace("$", "").replace(",", "").strip()
+                out.append([
+                    str(year),                       # Year column = bucket year
+                    povr_id,                         # POVR_ID
+                    title,                           # Title
+                    cells[1].replace(",", ""),       # Premium Views
+                    cells[2],                        # Time Streamed (e.g. "14h, 41m")
+                    cells[3].replace(",", ""),       # Downloads
+                    share,                           # Member Share $
+                ])
+                page_added += 1
+                year_count += 1
+
+            log.info(f"POVR: {year} p={p_num}  +{page_added}  year_total={year_count}")
+            if page_added == 0:
+                break  # empty page — pagination exhausted for this year
+
+    log.info(f"POVR: total (year, video) rows: {len(out)}")
     return out
 
 
