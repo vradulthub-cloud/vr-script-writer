@@ -23798,3 +23798,12 @@ from cta_treatments_pack13_cartoon import PACK13_CARTOON_TREATMENTS  # noqa: E40
 
 TREATMENTS.update(PACK13_CARTOON_TREATMENTS)
 FEATURED_TREATMENTS.update(PACK13_CARTOON_TREATMENTS)
+
+
+# ── Pack 14: Wedding & event (10 treatments) ──────────────────────────────────
+# Wedding invitation, save the date, gala poster, RSVP card, bar mitzvah,
+# baby shower, anniversary, retirement, graduation, holiday card.
+from cta_treatments_pack14_event import PACK14_EVENT_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK14_EVENT_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK14_EVENT_TREATMENTS)
