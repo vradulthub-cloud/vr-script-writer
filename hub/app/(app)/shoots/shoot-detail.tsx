@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { createPortal } from "react-dom"
-import { X, RefreshCcw, Wand2, Check } from "lucide-react"
+import { X, RefreshCcw, Wand2, Check, FileText } from "lucide-react"
+import Link from "next/link"
 import { statusColor, STATUS_LABEL, cellApplies, formatShootDate } from "./shoot-utils"
 import { api, SHOOT_ASSET_LABELS, type Shoot, type BoardShootScene, type AssetType } from "@/lib/api"
 import { revalidateAfterWrite } from "@/lib/cache-actions"
@@ -178,6 +179,44 @@ function SceneAssetTable({
           )}
         </div>
       )}
+
+      <div
+        className="flex items-center gap-2 mb-2"
+        style={{
+          padding: "6px 8px",
+          borderRadius: 4,
+          background: "var(--color-surface)",
+          border: "1px solid var(--color-border)",
+        }}
+      >
+        <span style={{ fontSize: 10, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, flexShrink: 0 }}>
+          Description
+        </span>
+        <span style={{ flex: 1, fontSize: 12, color: scene.has_description ? "var(--color-text)" : "var(--color-text-faint)", fontStyle: scene.has_description ? "normal" : "italic" }}>
+          {scene.has_description ? "Done" : "—"}
+        </span>
+        {!scene.has_description && scene.scene_id && (
+          <Link
+            href={`/descriptions?scene=${encodeURIComponent(scene.scene_id)}`}
+            style={{
+              flexShrink: 0,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: 10,
+              padding: "2px 7px",
+              borderRadius: 3,
+              background: "transparent",
+              color: color,
+              border: `1px solid color-mix(in srgb, ${color} 35%, transparent)`,
+              textDecoration: "none",
+            }}
+          >
+            <FileText size={10} aria-hidden="true" />
+            Write
+          </Link>
+        )}
+      </div>
 
       <table className="w-full" style={{ borderCollapse: "collapse" }}>
         <tbody>

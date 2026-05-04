@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { createPortal } from "react-dom"
-import { X, Wand2, FolderPlus, ImageOff, Maximize2 } from "lucide-react"
+import { X, Wand2, FolderPlus, ImageOff, Maximize2, FileText } from "lucide-react"
+import Link from "next/link"
 import { api, thumbnailUrl, storyboardImageUrl, type Scene, type NamingIssue } from "@/lib/api"
 import { revalidateAfterWrite } from "@/lib/cache-actions"
 import { TAG_SCENES } from "@/lib/cache-tags"
@@ -467,6 +468,61 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
             saveMsg={editingField === "tags" ? saveMsg : ""}
             multiline
           />
+
+          <div>
+            <FieldLabel>Description</FieldLabel>
+            {scene.has_description ? (
+              <div
+                className="rounded"
+                style={{
+                  padding: "7px 10px",
+                  fontSize: 11,
+                  color: "var(--color-ok)",
+                  background: "color-mix(in srgb, var(--color-ok) 8%, transparent)",
+                  border: "1px solid color-mix(in srgb, var(--color-ok) 20%, transparent)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                }}
+              >
+                <span>✓ Description saved to MEGA</span>
+                <Link
+                  href={`/descriptions?scene=${encodeURIComponent(scene.id)}`}
+                  style={{
+                    fontSize: 11,
+                    color: "var(--color-text-muted)",
+                    textDecoration: "none",
+                  }}
+                >
+                  Edit →
+                </Link>
+              </div>
+            ) : (
+              <Link
+                href={`/descriptions?scene=${encodeURIComponent(scene.id)}`}
+                className="rounded transition-colors"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "9px 12px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: color,
+                  background: `color-mix(in srgb, ${color} 10%, transparent)`,
+                  border: `1px solid color-mix(in srgb, ${color} 35%, transparent)`,
+                  textDecoration: "none",
+                }}
+              >
+                <FileText size={13} aria-hidden="true" />
+                <span style={{ flex: 1 }}>Write description</span>
+                <span style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-muted)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                  Not started
+                </span>
+              </Link>
+            )}
+          </div>
 
           {scene.plot && (
             <div>

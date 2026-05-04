@@ -516,6 +516,7 @@ export interface BoardShootScene {
   title: string
   performers: string
   has_thumbnail: boolean
+  has_description: boolean
   mega_path: string
   assets: SceneAssetState[]
 }
@@ -843,6 +844,24 @@ export interface Notification {
   link: string
 }
 
+export type NotificationChannel = "in_app" | "teams" | "email"
+
+export interface NotificationPref {
+  event_type: string
+  label: string
+  description: string
+  default_channels: NotificationChannel[]
+  channels: NotificationChannel[]
+  enabled: boolean
+}
+
+export interface TeamsIntegration {
+  configured: boolean
+  url_preview: string
+  updated_by: string
+  updated_at: string
+}
+
 export interface TaskRow {
   task_id: string
   task_type: string
@@ -980,6 +999,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
     apiFetch<T>(path, token, { method: "POST", body: JSON.stringify(body), ...opts })
   const patch = <T>(path: string, body: unknown) =>
     apiFetch<T>(path, token, { method: "PATCH", body: JSON.stringify(body) })
+  const put = <T>(path: string, body: unknown) =>
+    apiFetch<T>(path, token, { method: "PUT", body: JSON.stringify(body) })
   // For multipart/form-data (file uploads) — do NOT set Content-Type, let the browser set boundary
   const postForm = async <T>(path: string, formData: FormData, signal?: AbortSignal): Promise<T> => {
     // Pass the FormData through in dev mock so route handlers can inspect
@@ -1328,6 +1349,22 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       unreadCount: () => get<{ count: number }>("/notifications/unread-count"),
       markRead: () => post<{ updated: number }>("/notifications/mark-read", {}),
       test: () => post<{ notif_id: string; recipient: string }>("/notifications/test", {}),
+      prefs: () => get<NotificationPref[]>("/notifications/prefs"),
+      updatePref: (body: { event_type: string; channels: string[]; enabled: boolean }) =>
+        put<NotificationPref[]>("/notifications/prefs", body),
+    },
+
+    integrations: {
+      teams: {
+        get: () => get<TeamsIntegration>("/integrations/teams"),
+        update: (url: string) =>
+          put<{ configured: boolean; url_preview: string }>("/integrations/teams", { url }),
+        test: () => post<{ ok: boolean }>("/integrations/teams/test", {}),
+      },
+      hubBaseUrl: {
+        get: () => get<{ url: string; updated_by: string; updated_at: string }>("/integrations/hub-base-url"),
+        update: (url: string) => put<{ url: string }>("/integrations/hub-base-url", { url }),
+      },
     },
 
     calendarEvents: {

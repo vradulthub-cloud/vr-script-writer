@@ -13,6 +13,7 @@ import {
   MOCK_APPROVALS,
   MOCK_SCRIPTS,
   MOCK_NOTIFICATIONS,
+  MOCK_NOTIFICATION_PREFS,
   MOCK_HEALTH,
   MOCK_TICKETS,
   MOCK_TICKET_STATS,
@@ -57,6 +58,12 @@ type MockPhoto = {
   url: string
 }
 const mockPhotosByShoot = new Map<string, MockPhoto[]>()
+
+// In-memory mock state for the integrations admin panel — lets the Save
+// button give visible feedback in dev without a real backend. Resets on
+// hard reload.
+let mockTeamsWebhook = ""
+let mockHubBaseUrl = "http://localhost:3001"
 
 function wait<T>(value: T, ms = MOCK_DELAY): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(value), ms))
@@ -378,6 +385,67 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
     return wait({ count: MOCK_NOTIFICATIONS.filter(n => n.read === 0).length } as unknown as T)
   }
   if (base === "/notifications/mark-read") return wait({ updated: 3 } as unknown as T)
+  if (base === "/notifications/prefs") {
+    const method = (init.method || "GET").toUpperCase()
+    if (method === "GET") return wait(MOCK_NOTIFICATION_PREFS as unknown as T)
+    if (method === "PUT") {
+      // Echo the change back into the in-memory mock so toggles "stick" for
+      // the rest of the session. Best-effort — no parsing on bad bodies.
+      try {
+        const body = JSON.parse((init.body as string) ?? "{}") as { event_type?: string; channels?: string[]; enabled?: boolean }
+        const idx = MOCK_NOTIFICATION_PREFS.findIndex(p => p.event_type === body.event_type)
+        if (idx >= 0 && body.event_type) {
+          MOCK_NOTIFICATION_PREFS[idx] = {
+            ...MOCK_NOTIFICATION_PREFS[idx],
+            channels: body.channels ?? MOCK_NOTIFICATION_PREFS[idx].channels,
+            enabled: body.enabled ?? MOCK_NOTIFICATION_PREFS[idx].enabled,
+          }
+        }
+      } catch { /* fall through and just return current state */ }
+      return wait(MOCK_NOTIFICATION_PREFS as unknown as T)
+    }
+  }
+
+  // ── Integrations (admin) ───────────────────────────────────────────────
+  // In-memory mock state for integrations so the admin panel "Save" buttons
+  // give visible feedback in dev. Resets on hard reload.
+  if (base === "/integrations/teams") {
+    const method = (init.method || "GET").toUpperCase()
+    if (method === "GET") {
+      return wait({
+        configured: !!mockTeamsWebhook,
+        url_preview: mockTeamsWebhook ? mockTeamsWebhook.slice(0, 24) + "…" : "",
+        updated_by: mockTeamsWebhook ? "Dev Admin" : "",
+        updated_at: mockTeamsWebhook ? new Date().toISOString() : "",
+      } as unknown as T)
+    }
+    if (method === "PUT") {
+      try {
+        const body = JSON.parse((init.body as string) ?? "{}") as { url?: string }
+        mockTeamsWebhook = (body.url ?? "").trim()
+      } catch { /* ignore */ }
+      return wait({
+        configured: !!mockTeamsWebhook,
+        url_preview: mockTeamsWebhook ? mockTeamsWebhook.slice(0, 24) + "…" : "",
+      } as unknown as T)
+    }
+  }
+  if (base === "/integrations/teams/test") {
+    return wait({ ok: !!mockTeamsWebhook } as unknown as T)
+  }
+  if (base === "/integrations/hub-base-url") {
+    const method = (init.method || "GET").toUpperCase()
+    if (method === "GET") {
+      return wait({ url: mockHubBaseUrl, updated_by: "Dev Admin", updated_at: "2026-05-03T00:00:00Z" } as unknown as T)
+    }
+    if (method === "PUT") {
+      try {
+        const body = JSON.parse((init.body as string) ?? "{}") as { url?: string }
+        mockHubBaseUrl = (body.url ?? "").trim()
+      } catch { /* ignore */ }
+      return wait({ url: mockHubBaseUrl } as unknown as T)
+    }
+  }
 
   // ── Models ────────────────────────────────────────────────────────────
   if (base === "/models/") return wait(MOCK_MODELS as unknown as T)
