@@ -74,32 +74,62 @@ export function PageHeader({
       )}
 
       <div style={{ minWidth: 0 }}>
-        {eyebrow && (
-          <div
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              fontWeight: 600,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-              color: accent ?? "var(--color-text-faint)",
-              marginBottom: 10,
-            }}
-          >
-            {eyebrow}
+        {/* Compact mode pulls the eyebrow inline with the title on a single
+            row, separated by a thin rule. Reclaims ~30px of vertical space
+            on routes where the real focal element lives below the header
+            (e.g. the dashboard's TodayBriefing). */}
+        {compact && eyebrow ? (
+          <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: accent ?? "var(--color-text-faint)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {eyebrow}
+            </span>
+            <span
+              aria-hidden="true"
+              style={{
+                width: 1,
+                height: 12,
+                background: "var(--color-border)",
+                alignSelf: "center",
+              }}
+            />
+            <h1
+              className="display-hero"
+              style={{ fontSize: "1.375rem", lineHeight: 1.1, letterSpacing: "-0.015em" }}
+            >
+              {title}
+            </h1>
           </div>
-        )}
+        ) : (
+          <>
+            {eyebrow && (
+              <div
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  color: accent ?? "var(--color-text-faint)",
+                  marginBottom: 10,
+                }}
+              >
+                {eyebrow}
+              </div>
+            )}
 
-        <h1
-          className="display-hero"
-          style={
-            compact
-              ? { fontSize: "1.375rem", lineHeight: 1.1, letterSpacing: "-0.015em" }
-              : undefined
-          }
-        >
-          {title}
-        </h1>
+            <h1 className="display-hero">{title}</h1>
+          </>
+        )}
 
         {subtitle && (
           <div

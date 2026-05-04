@@ -337,13 +337,24 @@ function computeBriefing(input: {
 
   if (agingShoots.length > 0) {
     const n = agingShoots.length
+    // For a single stuck shoot, name it directly in the detail line so the
+    // user knows which shoot is the problem without having to click into
+    // /shoots and scan the list. Falls back to a generic line for n > 1.
+    let detail: string
+    if (n === 1) {
+      const s = agingShoots[0]
+      const days = Math.floor(s.aging_hours / 24)
+      const who = [s.female_talent, s.male_talent].filter(Boolean).join(" / ")
+      const subject = who || s.shoot_id
+      detail = `${s.shoot_id} · ${subject} — incomplete ${days} days after wrap.`
+    } else {
+      detail = `${n} shoots have incomplete assets more than three days after wrap.`
+    }
     return {
       tone: toneForCount(n),
       count: n,
       headline: `${n.toLocaleString()} shoot${n === 1 ? "" : "s"} stuck past 72h`,
-      detail: n === 1
-        ? "One shoot has incomplete assets more than three days after wrap."
-        : `${n} shoots have incomplete assets more than three days after wrap.`,
+      detail,
       cta: { href: "/shoots", label: "Open shoots" },
       secondary: secondary.filter(s => !s.includes("stuck")),
     }

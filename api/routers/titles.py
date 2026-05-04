@@ -265,21 +265,69 @@ async def generate_model_name(body: ModelNameRequest, user: CurrentUser):
 _FLUX_TITLE_LORA = "title_card_style_v2-final.safetensors"
 _WORKFLOW_PATH = Path(__file__).resolve().parent.parent / "workflows" / "flux_transparent_title.json"
 
-_FLUX_PROMPT_PREFIX = (
-    "the words \"{text}\" rendered as bold metallic gold typography, "
-    "isolated text only on pure white background, no decorations, no frame, "
+# Photographic material styles. Each entry is a prompt fragment that fills
+# {text} with the title and produces a distinct visual treatment FLUX can
+# render but PIL fundamentally cannot — real metallic reflections, marble
+# veining, holographic chromatic shift, etc. Six curated styles cover the
+# range from premium-classical to retro-futurist without overlapping.
+#
+# Common scaffolding (white background, no decorations, single line, sharp
+# letterforms) is appended to every prompt so RMBG can cleanly extract the
+# foreground regardless of style.
+FluxStyle = Literal[
+    "gold-leaf",
+    "chrome",
+    "marble",
+    "vintage-film",
+    "holographic",
+    "brushed-steel",
+]
+
+_FLUX_STYLE_PROMPTS: dict[str, str] = {
+    "gold-leaf": (
+        "the words \"{text}\" rendered as bold metallic gold typography, "
+        "photographic gold leaf material with subtle imperfections and warm highlights"
+    ),
+    "chrome": (
+        "the words \"{text}\" rendered as polished chrome typography, "
+        "mirror-like reflective metal with sharp specular highlights and cool blue undertones"
+    ),
+    "marble": (
+        "the words \"{text}\" rendered as carved white marble typography, "
+        "natural stone with delicate gold veining, soft diffuse lighting, classical cut letterforms"
+    ),
+    "vintage-film": (
+        "the words \"{text}\" rendered as warm vintage film typography, "
+        "celluloid grain texture, faded amber and cream tones, soft edge bleed, 1970s movie title aesthetic"
+    ),
+    "holographic": (
+        "the words \"{text}\" rendered as iridescent holographic foil typography, "
+        "prismatic chromatic shift across surface, magenta-cyan-yellow shimmer, glossy reflective material"
+    ),
+    "brushed-steel": (
+        "the words \"{text}\" rendered as brushed stainless steel typography, "
+        "directional micro-striations along grain, matte industrial finish, neutral gray tones"
+    ),
+}
+
+_FLUX_PROMPT_SUFFIX = (
+    ", isolated text only on pure white background, no decorations, no frame, "
     "no border, no panels, no objects, centered display lettering, "
-    "photographic gold leaf material, sharp clean letterforms, single line of text"
+    "sharp clean letterforms, single line of text"
 )
 
 
 class FluxLocalRequest(BaseModel):
     text: str
+    # Visual style preset. Each maps to a curated prompt prefix optimised for
+    # FLUX.1 Schnell + RMBG-2.0. PIL's 700+ treatments cover procedural
+    # effects; FLUX styles cover photographic materials PIL can't render.
+    style: FluxStyle = "gold-leaf"
     # Default OFF: the trained title_card_style_v2 LoRA at strength 0.85 +
     # the current prompt produces FULLY-TRANSPARENT output (RMBG strips
     # everything because the LoRA pulls FLUX toward outputs RMBG can't
     # detect as foreground). Empirically: LoRA-on PNGs were ~3.8KB blank,
-    # LoRA-off PNGs were 270-350KB with real photographic gold-leaf text.
+    # LoRA-off PNGs were 270-350KB with real photographic material text.
     use_lora: bool = False
     steps: int = 6                                        # 4 = fast but drops letters, 6-8 = clean spelling
     seed: int = 0                                         # 0 = random
@@ -302,7 +350,8 @@ def _build_flux_workflow(req: FluxLocalRequest, seed: int) -> dict:
     confuse format-spec parsing.
     """
     template = _WORKFLOW_PATH.read_text()
-    prompt_text = _FLUX_PROMPT_PREFIX.replace("{text}", req.text.replace('"', "'"))
+    style_prefix = _FLUX_STYLE_PROMPTS.get(req.style, _FLUX_STYLE_PROMPTS["gold-leaf"])
+    prompt_text = style_prefix.replace("{text}", req.text.replace('"', "'")) + _FLUX_PROMPT_SUFFIX
     width  = req.width  - (req.width  % 64) or 1024
     height = req.height - (req.height % 64) or 512
     subs = {
@@ -430,3 +479,21 @@ async def generate_flux_local(body: FluxLocalRequest, user: CurrentUser):
     except Exception as exc:
         _log.exception("FLUX local generation failed")
         return FluxLocalResponse(data_url="", seed=seed, error=str(exc))
+
+
+# Human-readable labels for the UI dropdown — kept here next to the prompts
+# so adding a new style is one place to edit.
+_FLUX_STYLE_LABELS: dict[str, str] = {
+    "gold-leaf":     "Gold leaf",
+    "chrome":        "Chrome",
+    "marble":        "Marble",
+    "vintage-film":  "Vintage film",
+    "holographic":   "Holographic",
+    "brushed-steel": "Brushed steel",
+}
+
+
+@router.get("/flux-styles")
+async def list_flux_styles(user: CurrentUser):
+    """List the curated FLUX visual styles for the local AI title mode."""
+    return [{"key": k, "label": _FLUX_STYLE_LABELS[k]} for k in _FLUX_STYLE_PROMPTS.keys()]

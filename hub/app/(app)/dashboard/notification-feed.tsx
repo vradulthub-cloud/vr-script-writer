@@ -107,17 +107,16 @@ export function NotificationFeed({
   return (
     <div
       style={{
-        background: "var(--color-surface)",
-        border: "1px solid var(--color-border)",
+        background: "transparent",
+        border: "1px solid var(--color-border-subtle)",
         borderRadius: 6,
         overflow: "hidden",
       }}
     >
-      {/* Header */}
+      {/* Header — no divider; the rail reads as a list, not a card */}
       <div
         style={{
-          padding: "9px 14px",
-          borderBottom: "1px solid var(--color-border)",
+          padding: "9px 14px 4px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -161,7 +160,7 @@ export function NotificationFeed({
             onClick={markAllRead}
             disabled={marking}
             style={{
-              fontSize: 10,
+              fontSize: 11,
               color: "var(--color-text-faint)",
               background: "none",
               border: "none",
@@ -172,7 +171,7 @@ export function NotificationFeed({
               gap: 3,
             }}
           >
-            <Check size={10} />
+            <Check size={11} />
             Mark all read
           </button>
         )}

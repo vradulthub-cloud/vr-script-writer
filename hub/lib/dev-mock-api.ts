@@ -415,6 +415,16 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
       error: null,
     } as unknown as T)
   }
+  if (base === "/titles/flux-styles") {
+    return wait([
+      { key: "gold-leaf",     label: "Gold leaf" },
+      { key: "chrome",        label: "Chrome" },
+      { key: "marble",        label: "Marble" },
+      { key: "vintage-film",  label: "Vintage film" },
+      { key: "holographic",   label: "Holographic" },
+      { key: "brushed-steel", label: "Brushed steel" },
+    ] as unknown as T)
+  }
 
   // ── Descriptions regen ────────────────────────────────────────────
   if (base === "/descriptions/regenerate-paragraph") {

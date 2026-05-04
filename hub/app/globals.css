@@ -593,11 +593,11 @@ button[style*="color-lime"]:hover:not(:disabled) {
 }
 .ec-strip > *:last-child { border-right: none; }
 .ec-strip .label {
-  font-size: 9px; font-weight: 700; letter-spacing: 0.18em;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
   text-transform: uppercase; color: var(--color-text-muted);
 }
 .ec-strip .cell .mono {
-  font-size: 9px; font-weight: 700; letter-spacing: 0.14em;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--color-text-muted);
 }
 .ec-strip .cell .big {
@@ -914,9 +914,20 @@ header[class*="fixed"][class*="top-0"] {
 }
 @media (max-width: 900px) {
   .ec-stats { grid-template-columns: repeat(2, 1fr); }
-  .ec-strip { grid-template-columns: 1fr; }
-  .ec-strip > * { border-right: none; border-bottom: 1px solid var(--color-border-subtle); }
-  .ec-strip > *:last-child { border-bottom: none; }
+  /* Strip collapses to a 2×2 grid of studios with the label spanning the top
+     row. Reclaims ~170px of vertical space vs the previous full-stack which
+     pushed triage content far below the fold on tablet/laptop viewports. */
+  .ec-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ec-strip > * {
+    border-right: 1px solid var(--color-border-subtle);
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+  .ec-strip > *:nth-child(2n) { border-right: none; }
+  .ec-strip .label {
+    grid-column: 1 / -1;
+    border-right: none;
+  }
+  .ec-strip > *:nth-last-child(-n+2) { border-bottom: none; }
   .ec-cal .cal-head { grid-template-columns: 80px repeat(7, minmax(48px, 1fr)); }
   .ec-cal .lane { grid-template-columns: 80px 1fr; }
 }
@@ -927,6 +938,13 @@ header[class*="fixed"][class*="top-0"] {
 }
 @media (max-width: 560px) {
   .ec-stats { grid-template-columns: 1fr; }
+  /* Strip falls back to single column at phone widths. */
+  .ec-strip { grid-template-columns: 1fr; }
+  .ec-strip > * {
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+  .ec-strip > *:last-child { border-bottom: none; }
   /* Scroll-tab behavior for .ec-seg so sub-nav never clips the last tab. */
   .ec-seg {
     overflow-x: auto;

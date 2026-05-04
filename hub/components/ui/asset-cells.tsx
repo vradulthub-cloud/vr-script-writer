@@ -86,21 +86,31 @@ const STATUS_DESC: Record<AssetCellStatus, string> = {
   na: "not applicable",
 }
 
+// Shape-based encoding so the four statuses are distinguishable without color
+// (red/green ambiguity affects ~8% of male users; with a 7-person team there's
+// a realistic chance one user is affected). Color stays as a secondary signal.
+//
+//   ok      → solid fill              (clearly "done")
+//   pending → diagonal half-stripe    (work in progress)
+//   missing → empty / border only     (clearly "not done")
+//   na      → diagonal hatch lines    (out of scope)
 const STYLE_FOR: Record<AssetCellStatus, CSSProperties> = {
   ok: {
     background: "color-mix(in srgb, var(--color-ok) 65%, transparent)",
     border: "1px solid color-mix(in srgb, var(--color-ok) 55%, transparent)",
   },
   pending: {
-    background: "color-mix(in srgb, var(--color-warn) 45%, transparent)",
-    border: "1px solid color-mix(in srgb, var(--color-warn) 50%, transparent)",
+    background:
+      "linear-gradient(135deg, color-mix(in srgb, var(--color-warn) 50%, transparent) 0 50%, transparent 50% 100%)",
+    border: "1px solid color-mix(in srgb, var(--color-warn) 55%, transparent)",
   },
   missing: {
-    background: "color-mix(in srgb, var(--color-err) 35%, transparent)",
-    border: "1px solid color-mix(in srgb, var(--color-err) 55%, transparent)",
+    background: "transparent",
+    border: "1px solid color-mix(in srgb, var(--color-err) 65%, transparent)",
   },
   na: {
-    background: "transparent",
+    background:
+      "repeating-linear-gradient(135deg, var(--color-border) 0 1px, transparent 1px 4px)",
     border: "1px solid var(--color-border)",
   },
 }

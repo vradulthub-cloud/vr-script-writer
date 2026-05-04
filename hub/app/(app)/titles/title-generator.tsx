@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { api, type Treatment, type LocalTitleResult, type FluxLocalResult } from "@/lib/api"
+import { api, type Treatment, type LocalTitleResult, type FluxLocalResult, type FluxStyle, type FluxStyleOption } from "@/lib/api"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { useIdToken } from "@/hooks/use-id-token"
 import { PageHeader } from "@/components/ui/page-header"
@@ -48,12 +48,26 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
   // Local AI state (FLUX + RMBG via Windows ComfyUI)
   // LoRA default OFF — see FluxLocalRequest backend comment: at strength 0.85
   // the trained LoRA + current prompt yields fully-transparent output.
+  const [fluxStyle, setFluxStyle] = useState<FluxStyle>("gold-leaf")
+  const [fluxStyles, setFluxStyles] = useState<FluxStyleOption[]>([])
   const [fluxUseLora, setFluxUseLora] = useState(false)
   const [fluxSteps, setFluxSteps] = useState(6)
   const [fluxBgRemove, setFluxBgRemove] = useState<"rmbg2" | "none">("rmbg2")
   const [fluxResult, setFluxResult] = useState<FluxLocalResult | null>(null)
   const [fluxLoading, setFluxLoading] = useState(false)
   const [fluxError, setFluxError] = useState<string | null>(null)
+
+  // Load FLUX style presets on mount — same pattern as treatments above.
+  useEffect(() => {
+    if (fluxStyles.length > 0) return
+    client.titles.fluxStyles()
+      .then(s => setFluxStyles(Array.isArray(s) ? s : []))
+      .catch((e) => {
+        console.warn("[titles] Failed to load FLUX styles:", e)
+        setFluxStyles([])
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function generateFlux() {
     if (!titleText) return
@@ -63,6 +77,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
     try {
       const data = await client.titles.fluxLocal({
         text: titleText,
+        style: fluxStyle,
         use_lora: fluxUseLora,
         steps: fluxSteps,
         seed: localSeed,
@@ -376,6 +391,26 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
           </p>
 
           <div className="flex gap-2 items-end mb-3 flex-wrap">
+            {/* Style preset — photographic material the prompt locks onto */}
+            <div>
+              <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Style</label>
+              <select
+                value={fluxStyle}
+                onChange={e => setFluxStyle(e.target.value as FluxStyle)}
+                className="px-2 py-1 rounded text-xs"
+                style={{
+                  background: "var(--color-surface)",
+                  color: "var(--color-text)",
+                  border: "1px solid var(--color-border)",
+                  minWidth: 140,
+                }}
+              >
+                {(fluxStyles.length > 0 ? fluxStyles : [{ key: "gold-leaf" as FluxStyle, label: "Gold leaf" }]).map(s => (
+                  <option key={s.key} value={s.key}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+
             {/* LoRA toggle */}
             <div>
               <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Style LoRA</label>

@@ -902,6 +902,19 @@ export interface FluxLocalResult {
   error: string | null
 }
 
+export type FluxStyle =
+  | "gold-leaf"
+  | "chrome"
+  | "marble"
+  | "vintage-film"
+  | "holographic"
+  | "brushed-steel"
+
+export interface FluxStyleOption {
+  key: FluxStyle
+  label: string
+}
+
 export interface CompSceneRow {
   scene_id: string
   scene_num: number
@@ -1172,6 +1185,7 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<{ data_url: string; error?: string | null }>("/titles/model-name", body),
       fluxLocal: (body: {
         text: string
+        style?: FluxStyle
         use_lora?: boolean
         steps?: number
         seed?: number
@@ -1182,6 +1196,7 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         // FLUX cold-start (model load + sampling + RMBG) can take 60-120s
         // on the Windows box; default 30s timeout would kill it.
         post<FluxLocalResult>("/titles/flux-local", body, { timeoutMs: 180_000 }),
+      fluxStyles: () => get<FluxStyleOption[]>("/titles/flux-styles"),
     },
 
     models: {

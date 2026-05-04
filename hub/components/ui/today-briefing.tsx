@@ -31,6 +31,7 @@ export function TodayBriefing({ briefing, cachedAt }: { briefing: Briefing; cach
   const accentColor = toneToAccent(briefing.tone)
   const numeralSize = toneSize(briefing.count)
   const eyebrow = briefing.eyebrow ?? "Today"
+  const container = toneToContainer(briefing.tone, briefing.count > 0)
 
   return (
     <section
@@ -42,8 +43,11 @@ export function TodayBriefing({ briefing, cachedAt }: { briefing: Briefing; cach
         gridTemplateColumns: "auto minmax(0, 1fr) auto",
         alignItems: "center",
         gap: 20,
-        paddingBottom: 20,
-        borderBottom: "1px solid var(--color-border-subtle)",
+        padding: container.padding,
+        borderRadius: container.borderRadius,
+        background: container.background,
+        border: container.border,
+        borderBottom: container.borderBottom,
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -181,6 +185,67 @@ function toneToAccent(tone: BriefingTone): string {
     case "error":     return "var(--color-text-faint)"
     case "calm":
     default:          return "var(--color-text-muted)"
+  }
+}
+
+interface ContainerStyles {
+  background: string
+  border: string
+  borderBottom: string
+  borderRadius: number
+  padding: string
+}
+
+/**
+ * Tone-based container treatment for the briefing card.
+ *
+ * The "all-clear" state (calm + 0 items) keeps the original flat layout — a
+ * routine morning shouldn't shout. As soon as there's something on deck, the
+ * card lifts off the page with a subtle tinted surface so the briefing reads
+ * as *the* item to triage rather than just one of several sections competing
+ * for attention. Tints stay under 7% so the headline and numeral, not the
+ * background, do the work of communicating severity.
+ */
+function toneToContainer(tone: BriefingTone, hasItems: boolean): ContainerStyles {
+  if (tone === "calm" && !hasItems) {
+    return {
+      background: "transparent",
+      border: "1px solid transparent",
+      borderBottom: "1px solid var(--color-border-subtle)",
+      borderRadius: 0,
+      padding: "0 0 20px 0",
+    }
+  }
+  const lifted = {
+    borderBottom: "transparent",
+    borderRadius: 8,
+    padding: "20px 24px",
+  }
+  if (tone === "calm") {
+    return {
+      ...lifted,
+      background: "var(--color-surface)",
+      border: "1px solid var(--color-border-subtle)",
+    }
+  }
+  if (tone === "attention") {
+    return {
+      ...lifted,
+      background: "color-mix(in srgb, var(--color-warn) 5%, var(--color-surface))",
+      border: "1px solid color-mix(in srgb, var(--color-warn) 28%, var(--color-border))",
+    }
+  }
+  if (tone === "urgent") {
+    return {
+      ...lifted,
+      background: "color-mix(in srgb, var(--color-err) 6%, var(--color-surface))",
+      border: "1px solid color-mix(in srgb, var(--color-err) 32%, var(--color-border))",
+    }
+  }
+  return {
+    ...lifted,
+    background: "color-mix(in srgb, var(--color-err) 4%, var(--color-surface))",
+    border: "1px solid color-mix(in srgb, var(--color-err) 24%, var(--color-border))",
   }
 }
 
