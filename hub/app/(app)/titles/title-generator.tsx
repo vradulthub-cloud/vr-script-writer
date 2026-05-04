@@ -46,11 +46,12 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
   }, [])
 
   // Local AI state (FLUX + RMBG via Windows ComfyUI)
-  // LoRA default OFF — see FluxLocalRequest backend comment: at strength 0.85
-  // the trained LoRA + current prompt yields fully-transparent output.
+  // LoRA mode: "auto" trusts the style's `lora_default` (off for the six
+  // photographic presets, on for the trained-style preset). "on"/"off"
+  // forces the override — power-user / debug knob.
   const [fluxStyle, setFluxStyle] = useState<FluxStyle>("gold-leaf")
   const [fluxStyles, setFluxStyles] = useState<FluxStyleOption[]>([])
-  const [fluxUseLora, setFluxUseLora] = useState(false)
+  const [fluxLoraMode, setFluxLoraMode] = useState<"auto" | "on" | "off">("auto")
   const [fluxSteps, setFluxSteps] = useState(6)
   const [fluxBgRemove, setFluxBgRemove] = useState<"rmbg2" | "none">("rmbg2")
   const [fluxResult, setFluxResult] = useState<FluxLocalResult | null>(null)
@@ -78,7 +79,9 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
       const data = await client.titles.fluxLocal({
         text: titleText,
         style: fluxStyle,
-        use_lora: fluxUseLora,
+        // "auto" → omit so backend uses the style's lora_default
+        ...(fluxLoraMode === "on"  ? { use_lora: true } : {}),
+        ...(fluxLoraMode === "off" ? { use_lora: false } : {}),
         steps: fluxSteps,
         seed: localSeed,
         bg_remove: fluxBgRemove,
@@ -411,19 +414,20 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
               </select>
             </div>
 
-            {/* LoRA toggle */}
+            {/* LoRA mode — Auto trusts the style preset, On/Off forces override */}
             <div>
               <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Style LoRA</label>
               <div className="flex gap-1">
-                {([[true, "On"], [false, "Off"]] as const).map(([val, label]) => (
-                  <button key={String(val)} onClick={() => setFluxUseLora(val)}
+                {(["auto", "on", "off"] as const).map(val => (
+                  <button key={val} onClick={() => setFluxLoraMode(val)}
                     className="px-2.5 py-1 rounded text-xs transition-colors"
                     style={{
-                      background: fluxUseLora === val ? "var(--color-elevated)" : "transparent",
-                      color: fluxUseLora === val ? "var(--color-text)" : "var(--color-text-muted)",
-                      border: `1px solid ${fluxUseLora === val ? "var(--color-border)" : "transparent"}`,
+                      background: fluxLoraMode === val ? "var(--color-elevated)" : "transparent",
+                      color: fluxLoraMode === val ? "var(--color-text)" : "var(--color-text-muted)",
+                      border: `1px solid ${fluxLoraMode === val ? "var(--color-border)" : "transparent"}`,
+                      textTransform: "capitalize",
                     }}
-                  >{label}</button>
+                  >{val}</button>
                 ))}
               </div>
             </div>
@@ -499,7 +503,7 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
                 <img src={fluxResult.data_url} alt={`FLUX: ${titleText}`} style={{ width: "100%", display: "block" }} />
               </div>
               <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginBottom: 6 }}>
-                seed {fluxResult.seed} · {fluxUseLora ? "LoRA on" : "no LoRA"} · {fluxSteps} steps · {fluxBgRemove === "rmbg2" ? "RMBG-2" : "no BG removal"}
+                seed {fluxResult.seed} · LoRA {fluxLoraMode} · {fluxSteps} steps · {fluxBgRemove === "rmbg2" ? "RMBG-2" : "no BG removal"}
               </p>
               <button
                 onClick={downloadFlux}

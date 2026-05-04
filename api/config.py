@@ -62,6 +62,15 @@ class Settings(BaseSettings):
     # --- ComfyUI (Windows box, FLUX local title generation) ---
     comfyui_host: str = "http://100.90.90.68:8188"
     comfyui_timeout_seconds: int = 120
+    # Gates the "trained-style" FLUX preset (uses title_card_style_v2 LoRA).
+    # Off by default until the LoRA training run produces a converged
+    # checkpoint (target: epoch 6+). Flip to true via env when ready.
+    flux_trained_style_enabled: bool = False
+    # LoRA strength for the trained-style preset. 0.85 produced fully-
+    # transparent output in earlier tests (RMBG stripped everything because
+    # the LoRA pulled FLUX toward outputs RMBG couldn't detect as foreground).
+    # 0.55 leaves enough photographic signal for RMBG to extract the text.
+    flux_trained_lora_strength: float = 0.55
 
     # --- Sync Engine ---
     sheets_sync_interval_seconds: int = 300  # 5 minutes

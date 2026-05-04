@@ -19,7 +19,7 @@ import json
 import logging
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypedDict
 
 import httpx
 from fastapi import APIRouter
@@ -281,33 +281,103 @@ FluxStyle = Literal[
     "vintage-film",
     "holographic",
     "brushed-steel",
+    "trained-style",
 ]
 
-_FLUX_STYLE_PROMPTS: dict[str, str] = {
-    "gold-leaf": (
-        "the words \"{text}\" rendered as bold metallic gold typography, "
-        "photographic gold leaf material with subtle imperfections and warm highlights"
-    ),
-    "chrome": (
-        "the words \"{text}\" rendered as polished chrome typography, "
-        "mirror-like reflective metal with sharp specular highlights and cool blue undertones"
-    ),
-    "marble": (
-        "the words \"{text}\" rendered as carved white marble typography, "
-        "natural stone with delicate gold veining, soft diffuse lighting, classical cut letterforms"
-    ),
-    "vintage-film": (
-        "the words \"{text}\" rendered as warm vintage film typography, "
-        "celluloid grain texture, faded amber and cream tones, soft edge bleed, 1970s movie title aesthetic"
-    ),
-    "holographic": (
-        "the words \"{text}\" rendered as iridescent holographic foil typography, "
-        "prismatic chromatic shift across surface, magenta-cyan-yellow shimmer, glossy reflective material"
-    ),
-    "brushed-steel": (
-        "the words \"{text}\" rendered as brushed stainless steel typography, "
-        "directional micro-striations along grain, matte industrial finish, neutral gray tones"
-    ),
+
+class _StyleConfig(TypedDict):
+    """Per-style render config. The prompt fragment fills {text} with the
+    title; lora_default decides whether the style needs the trained LoRA
+    by default (overridable per-request); enabled gates the style behind
+    a settings flag so unconverged work isn't user-visible.
+    """
+    label: str
+    prompt: str
+    lora_default: bool
+    lora_strength: float
+    enabled: Literal["always"] | str  # "always" or a settings.* attribute name
+
+
+# Six photographic-material styles + one LoRA-driven preset. Photographic
+# styles describe the surface FLUX should render directly. The trained-style
+# preset hands styling over to the title_card_style_v2 LoRA — its prompt is
+# deliberately neutral so the LoRA can dominate without being overruled by
+# competing material descriptors.
+_FLUX_STYLES: dict[str, _StyleConfig] = {
+    "gold-leaf": {
+        "label": "Gold leaf",
+        "prompt": (
+            "the words \"{text}\" rendered as bold metallic gold typography, "
+            "photographic gold leaf material with subtle imperfections and warm highlights"
+        ),
+        "lora_default": False,
+        "lora_strength": 0.0,
+        "enabled": "always",
+    },
+    "chrome": {
+        "label": "Chrome",
+        "prompt": (
+            "the words \"{text}\" rendered as polished chrome typography, "
+            "mirror-like reflective metal with sharp specular highlights and cool blue undertones"
+        ),
+        "lora_default": False,
+        "lora_strength": 0.0,
+        "enabled": "always",
+    },
+    "marble": {
+        "label": "Marble",
+        "prompt": (
+            "the words \"{text}\" rendered as carved white marble typography, "
+            "natural stone with delicate gold veining, soft diffuse lighting, classical cut letterforms"
+        ),
+        "lora_default": False,
+        "lora_strength": 0.0,
+        "enabled": "always",
+    },
+    "vintage-film": {
+        "label": "Vintage film",
+        "prompt": (
+            "the words \"{text}\" rendered as warm vintage film typography, "
+            "celluloid grain texture, faded amber and cream tones, soft edge bleed, 1970s movie title aesthetic"
+        ),
+        "lora_default": False,
+        "lora_strength": 0.0,
+        "enabled": "always",
+    },
+    "holographic": {
+        "label": "Holographic",
+        "prompt": (
+            "the words \"{text}\" rendered as iridescent holographic foil typography, "
+            "prismatic chromatic shift across surface, magenta-cyan-yellow shimmer, glossy reflective material"
+        ),
+        "lora_default": False,
+        "lora_strength": 0.0,
+        "enabled": "always",
+    },
+    "brushed-steel": {
+        "label": "Brushed steel",
+        "prompt": (
+            "the words \"{text}\" rendered as brushed stainless steel typography, "
+            "directional micro-striations along grain, matte industrial finish, neutral gray tones"
+        ),
+        "lora_default": False,
+        "lora_strength": 0.0,
+        "enabled": "always",
+    },
+    "trained-style": {
+        "label": "Trained style",
+        # Neutral prompt — let the LoRA's learned style do the talking. Any
+        # specific material descriptor here would compete with the LoRA and
+        # produce muddy output. Strength is read from settings, not baked
+        # in, so the threshold can be tuned without redeploys.
+        "prompt": (
+            "the words \"{text}\" rendered as bold display typography, "
+            "high-quality movie title card design"
+        ),
+        "lora_default": True,
+        "lora_strength": 0.0,  # filled from settings.flux_trained_lora_strength at build time
+        "enabled": "flux_trained_style_enabled",
+    },
 }
 
 _FLUX_PROMPT_SUFFIX = (
@@ -322,13 +392,14 @@ class FluxLocalRequest(BaseModel):
     # Visual style preset. Each maps to a curated prompt prefix optimised for
     # FLUX.1 Schnell + RMBG-2.0. PIL's 700+ treatments cover procedural
     # effects; FLUX styles cover photographic materials PIL can't render.
+    # The "trained-style" preset hands styling to the title_card_style_v2
+    # LoRA — the style itself decides whether LoRA is used and at what
+    # strength, so callers don't need to think about it.
     style: FluxStyle = "gold-leaf"
-    # Default OFF: the trained title_card_style_v2 LoRA at strength 0.85 +
-    # the current prompt produces FULLY-TRANSPARENT output (RMBG strips
-    # everything because the LoRA pulls FLUX toward outputs RMBG can't
-    # detect as foreground). Empirically: LoRA-on PNGs were ~3.8KB blank,
-    # LoRA-off PNGs were 270-350KB with real photographic material text.
-    use_lora: bool = False
+    # LoRA override. None = trust the style's `lora_default`. True/False
+    # forces LoRA on/off regardless of style. Power-user / debug knob;
+    # the dropdown UI normally leaves this None.
+    use_lora: bool | None = None
     steps: int = 6                                        # 4 = fast but drops letters, 6-8 = clean spelling
     seed: int = 0                                         # 0 = random
     width: int = 1024                                     # multiple of 64
@@ -342,6 +413,23 @@ class FluxLocalResponse(BaseModel):
     error: str | None = None
 
 
+def _resolve_style_lora(style_key: str, request_override: bool | None) -> tuple[bool, float]:
+    """Decide whether the LoRA is on and at what strength for this render.
+
+    Style config is the source of truth; request can override (debug/power
+    user). For the "trained-style" preset, strength comes from settings so
+    the threshold can be tuned without code changes.
+    """
+    cfg = _FLUX_STYLES.get(style_key, _FLUX_STYLES["gold-leaf"])
+    use_lora = cfg["lora_default"] if request_override is None else request_override
+    if not use_lora:
+        return (False, 0.0)
+    if style_key == "trained-style":
+        return (True, get_settings().flux_trained_lora_strength)
+    # Other styles that opt into LoRA use whatever they declared.
+    return (True, cfg["lora_strength"] or 0.55)
+
+
 def _build_flux_workflow(req: FluxLocalRequest, seed: int) -> dict:
     """Render the workflow JSON template with this request's parameters.
 
@@ -350,16 +438,17 @@ def _build_flux_workflow(req: FluxLocalRequest, seed: int) -> dict:
     confuse format-spec parsing.
     """
     template = _WORKFLOW_PATH.read_text()
-    style_prefix = _FLUX_STYLE_PROMPTS.get(req.style, _FLUX_STYLE_PROMPTS["gold-leaf"])
-    prompt_text = style_prefix.replace("{text}", req.text.replace('"', "'")) + _FLUX_PROMPT_SUFFIX
+    cfg = _FLUX_STYLES.get(req.style, _FLUX_STYLES["gold-leaf"])
+    prompt_text = cfg["prompt"].replace("{text}", req.text.replace('"', "'")) + _FLUX_PROMPT_SUFFIX
+    use_lora, lora_strength = _resolve_style_lora(req.style, req.use_lora)
     width  = req.width  - (req.width  % 64) or 1024
     height = req.height - (req.height % 64) or 512
     subs = {
         "{prompt}":         json.dumps(prompt_text)[1:-1],   # JSON-escape
         "{seed}":           str(seed),
         "{steps}":          str(max(1, min(8, req.steps))),
-        "{lora_name}":      _FLUX_TITLE_LORA if req.use_lora else "",
-        "{lora_strength}":  f"{0.85 if req.use_lora else 0.0:.2f}",
+        "{lora_name}":      _FLUX_TITLE_LORA if use_lora else "",
+        "{lora_strength}":  f"{lora_strength:.2f}",
         "{width}":          str(width),
         "{height}":         str(height),
     }
@@ -373,7 +462,7 @@ def _build_flux_workflow(req: FluxLocalRequest, seed: int) -> dict:
     # When use_lora=False the LoraLoader node validates an empty lora_name and
     # fails. Drop the LoraLoader entirely and rewire CLIPTextEncode / KSampler
     # to the upstream loaders directly.
-    if not req.use_lora:
+    if not use_lora:
         graph["5"]["inputs"]["clip"] = ["2", 0]   # CLIPTextEncode pos -> DualCLIPLoader
         graph["6"]["inputs"]["clip"] = ["2", 0]   # CLIPTextEncode neg -> DualCLIPLoader
         graph["8"]["inputs"]["model"] = ["1", 0]  # KSampler -> UnetLoaderGGUF
@@ -481,19 +570,20 @@ async def generate_flux_local(body: FluxLocalRequest, user: CurrentUser):
         return FluxLocalResponse(data_url="", seed=seed, error=str(exc))
 
 
-# Human-readable labels for the UI dropdown — kept here next to the prompts
-# so adding a new style is one place to edit.
-_FLUX_STYLE_LABELS: dict[str, str] = {
-    "gold-leaf":     "Gold leaf",
-    "chrome":        "Chrome",
-    "marble":        "Marble",
-    "vintage-film":  "Vintage film",
-    "holographic":   "Holographic",
-    "brushed-steel": "Brushed steel",
-}
-
-
 @router.get("/flux-styles")
 async def list_flux_styles(user: CurrentUser):
-    """List the curated FLUX visual styles for the local AI title mode."""
-    return [{"key": k, "label": _FLUX_STYLE_LABELS[k]} for k in _FLUX_STYLE_PROMPTS.keys()]
+    """List the curated FLUX visual styles for the local AI title mode.
+
+    Styles whose `enabled` is a settings attribute are gated — we look the
+    attribute up on the live settings object, so flipping the env var
+    (e.g. FLUX_TRAINED_STYLE_ENABLED=1) makes the preset appear in the
+    dropdown without a code change.
+    """
+    settings = get_settings()
+    out = []
+    for key, cfg in _FLUX_STYLES.items():
+        gate = cfg["enabled"]
+        if gate != "always" and not getattr(settings, gate, False):
+            continue
+        out.append({"key": key, "label": cfg["label"]})
+    return out
