@@ -1721,6 +1721,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<{ urls: PartUrl[] }>("/uploads/multipart/sign-parts", body),
       complete: (body: UploadCompleteRequest) =>
         post<UploadCompleteResponse>("/uploads/multipart/complete", body),
+      verify: (body: { studio: string; key: string; upload_id: string }) =>
+        post<{ alive: boolean }>("/uploads/multipart/verify", body),
       abort: (body: { studio: string; key: string; upload_id: string }) =>
         post<{ ok: boolean; aborted_lingering: number }>("/uploads/multipart/abort", body),
       history: (limit = 50) =>
