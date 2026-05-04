@@ -1,7 +1,7 @@
 import { auth } from "@/auth"
 import { api, type ComplianceShoot } from "@/lib/api"
 import { requireTab } from "@/lib/rbac"
-import { ComplianceView } from "./compliance-view"
+import { ComplianceShell } from "./compliance-shell"
 
 export const dynamic = "force-dynamic"
 
@@ -20,6 +20,9 @@ export default async function CompliancePage({
   // of the Vercel edge node's UTC offset.
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date())
   const initialDate = sp.date ?? today
+  // ?view=database opens the searchable index directly — links from anywhere
+  // (notifications, deep-links from other tabs) can preselect the tab.
+  const initialTab = sp.view === "database" ? "database" : "wizard"
   let shoots: ComplianceShoot[] = []
   let error: string | null = null
 
@@ -30,11 +33,12 @@ export default async function CompliancePage({
   }
 
   return (
-    <ComplianceView
+    <ComplianceShell
       initialShoots={shoots}
       initialDate={initialDate}
       idToken={idToken}
       loadError={error}
+      initialTab={initialTab}
     />
   )
 }

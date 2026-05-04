@@ -41,6 +41,7 @@ from api.config import get_settings
 from api.auth import require_admin
 from api.database import get_db
 from api.compliance_db import (
+    SignatureSearchHit,
     SignedTalent,
     W9Record,
     contract_version,
@@ -48,6 +49,7 @@ from api.compliance_db import (
     is_shoot_complete,
     list_signed_talents,
     list_w9_records,
+    search_signatures,
     upsert_signature,
 )
 from api.compliance_photos_db import (
@@ -3168,6 +3170,237 @@ async def bulk_import_from_drive(
             ))
 
     return result
+
+
+class MegaLegalFile(BaseModel):
+    """One file living inside a MEGA ``{SCENE_ID}/Legal/`` folder.
+
+    Source-of-truth for the Compliance "Database" view's *MEGA Legacy* rows —
+    paperwork that exists on the bucket but was never imported into
+    ``compliance_signatures`` (i.e. no structured row to edit).
+    """
+    studio: str               # canonical 4-letter code, e.g. "VRH"
+    scene_id: str             # canonical scene id, e.g. "VRH0762"
+    key: str                  # full bucket key, e.g. "VRH0762/Legal/foo.pdf"
+    filename: str             # last path segment
+    size: int                 # bytes
+    last_modified: str        # ISO8601 UTC
+
+
+class MegaLegalScanResponse(BaseModel):
+    files: list[MegaLegalFile]
+    scanned_at: str
+    studios_scanned: list[str]
+    total: int
+    truncated: bool = False
+
+
+# Module-level cache. Scans are slow (40k+ keys across 4 buckets), so we
+# cache the result for 1 hour and let the operator hit "Refresh" on demand.
+_MEGA_LEGAL_CACHE: dict[str, tuple[float, MegaLegalScanResponse]] = {}
+_MEGA_LEGAL_TTL = 60 * 60   # 1 hour
+_MEGA_LEGAL_MAX = 50_000    # safety cap on total files returned
+
+
+def _scan_mega_legal_folders(
+    studios: tuple[str, ...],
+    *,
+    max_files: int = _MEGA_LEGAL_MAX,
+) -> tuple[list[MegaLegalFile], bool]:
+    """Walk each studio bucket and yield every key whose path contains
+    ``/Legal/``. Returns ``(files, truncated)``.
+
+    We can't filter server-side (S3 has no contains-style prefix), so we
+    paginate the whole bucket and filter in memory. With ~10k objects per
+    studio this completes in seconds; the result is cached for an hour.
+    """
+    import s4_client
+
+    out: list[MegaLegalFile] = []
+    truncated = False
+    for studio in studios:
+        try:
+            for obj in s4_client.list_objects(studio):
+                key = obj["key"]
+                # Match any nested /Legal/ subfolder (case-insensitive in
+                # case some scenes were migrated with "legal/" lowercase).
+                if "/legal/" not in key.lower():
+                    continue
+                # Skip "directory placeholder" keys ending in / with size 0.
+                if key.endswith("/"):
+                    continue
+                head, _, _ = key.partition("/")
+                try:
+                    scene_id = s4_client.normalize_scene_id(head)
+                except ValueError:
+                    scene_id = head  # non-canonical prefix; surface as-is
+                filename = key.rsplit("/", 1)[-1]
+                lm = obj.get("last_modified")
+                lm_str = ""
+                if lm is not None:
+                    try:
+                        lm_str = lm.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    except Exception:
+                        lm_str = str(lm)
+                out.append(MegaLegalFile(
+                    studio=studio.upper(),
+                    scene_id=scene_id,
+                    key=key,
+                    filename=filename,
+                    size=int(obj.get("size") or 0),
+                    last_modified=lm_str,
+                ))
+                if len(out) >= max_files:
+                    truncated = True
+                    break
+        except Exception as exc:
+            _log.warning("MEGA legal scan failed for %s: %s", studio, exc)
+        if truncated:
+            break
+
+    out.sort(key=lambda f: (f.scene_id, f.filename))
+    return out, truncated
+
+
+@router.get("/admin/legal-folders", response_model=MegaLegalScanResponse)
+async def scan_mega_legal_folders(
+    _admin: dict = Depends(require_admin),
+    refresh: bool = Query(default=False, description="Bypass the 1h cache"),
+    studio: Optional[str] = Query(default=None, description="Restrict to one studio (FPVR/VRH/VRA/NJOI)"),
+):
+    """Scan every MEGA bucket for files inside ``{SCENE_ID}/Legal/`` folders.
+
+    Surfaces all the historical paperwork sitting on the buckets — including
+    scenes that pre-date the Hub's compliance system and never had a
+    ``compliance_signatures`` row imported. The Database view merges this
+    list with the structured-DB results so admins get one searchable index.
+
+    Cached for 1 hour. Pass ``?refresh=1`` to force a re-scan.
+    """
+    import time as _time
+    studios: tuple[str, ...] = (studio.lower(),) if studio else ("fpvr", "vrh", "vra", "njoi")
+    cache_key = "|".join(studios)
+
+    now = _time.time()
+    cached = _MEGA_LEGAL_CACHE.get(cache_key)
+    if cached and not refresh and (now - cached[0]) < _MEGA_LEGAL_TTL:
+        return cached[1]
+
+    files, truncated = _scan_mega_legal_folders(studios)
+    resp = MegaLegalScanResponse(
+        files=files,
+        scanned_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        studios_scanned=[s.upper() for s in studios],
+        total=len(files),
+        truncated=truncated,
+    )
+    _MEGA_LEGAL_CACHE[cache_key] = (now, resp)
+    return resp
+
+
+@router.get("/admin/legal-folders/presign")
+async def presign_mega_legal_file(
+    _admin: dict = Depends(require_admin),
+    studio: str = Query(...),
+    key: str = Query(...),
+):
+    """Generate a presigned download URL for one MEGA legal-folder file.
+
+    Used by the Database view when an admin clicks "Open" on a row that has
+    only a MEGA artifact (no structured signature row to render). 7-day TTL
+    is the SigV4 maximum.
+    """
+    import s4_client
+    if "/legal/" not in key.lower():
+        raise HTTPException(status_code=400, detail="Key must be inside a Legal/ folder")
+    url = s4_client.presign(studio.lower(), key)
+    return {"url": url, "studio": studio.upper(), "key": key}
+
+
+class SignatureSearchHitOut(BaseModel):
+    """Wire format for a single search hit. TIN is masked to last-4 only —
+    the full TIN is loaded on demand when an admin opens the edit modal."""
+    id: int
+    shoot_id: str
+    shoot_date: str
+    scene_id: str = ""
+    studio: str = ""
+    talent_role: str
+    talent_slug: str
+    talent_display: str
+    legal_name: str
+    business_name: str = ""
+    stage_names: str = ""
+    nicknames_aliases: str = ""
+    previous_legal_names: str = ""
+    email: str = ""
+    phone: str = ""
+    city_state_zip: str = ""
+    tin_type: str = ""
+    tin_last4: str = ""
+    dob: str = ""
+    signed_at: str = ""
+    pdf_mega_path: str = ""
+    contract_version: str = ""
+
+
+class SignatureSearchResponse(BaseModel):
+    """Paginated search response. ``total`` reflects the full match count
+    so the UI can render "Showing N of M"."""
+    hits: list[SignatureSearchHitOut]
+    total: int
+    limit: int
+    offset: int
+    query: str = ""
+    date_from: str = ""
+    date_to: str = ""
+    studio: str = ""
+    role: str = ""
+
+
+@router.get("/admin/search", response_model=SignatureSearchResponse)
+async def search_compliance_signatures(
+    _admin: dict = Depends(require_admin),
+    q: Optional[str] = Query(default=None, description="Free-text query (whitespace-tokenized; AND across tokens)"),
+    date_from: Optional[str] = Query(default=None, alias="from"),
+    date_to: Optional[str] = Query(default=None, alias="to"),
+    studio: Optional[str] = Query(default=None),
+    role: Optional[str] = Query(default=None, regex="^(female|male)$"),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+):
+    """Search every paperwork record we have on file (TKT-paperwork-db).
+
+    Powers the Compliance "Database" view — a flat searchable index of
+    every ``compliance_signatures`` row, including legacy Drive imports
+    that were back-filled via the bulk importer.
+
+    Free-text matches against talent display/legal/business name, stage
+    names, aliases, previous legal names, email, phone, address, scene id,
+    shoot id, and studio. TIN is intentionally NOT searchable.
+
+    Admin-only because every row contains personal data.
+    """
+    hits, total = search_signatures(
+        query=q,
+        date_from=date_from,
+        date_to=date_to,
+        studio=studio,
+        role=role,
+        limit=limit,
+        offset=offset,
+    )
+    return SignatureSearchResponse(
+        hits=[SignatureSearchHitOut(**h.__dict__) for h in hits],
+        total=total,
+        limit=limit,
+        offset=offset,
+        query=q or "",
+        date_from=date_from or "",
+        date_to=date_to or "",
+        studio=studio or "",
+        role=role or "",
+    )
 
 
 @router.get("/admin/w9-summary")

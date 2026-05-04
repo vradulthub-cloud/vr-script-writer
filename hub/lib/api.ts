@@ -837,6 +837,72 @@ export interface DriveImportResult {
 }
 
 /**
+ * One row of the searchable Compliance "Database" view.
+ *
+ * Compact projection of compliance_signatures used by the table — TIN is
+ * masked to last-4. Full row (including raw TIN) is loaded on demand via
+ * `getSignature(id)` when the admin opens the edit modal.
+ */
+export interface SignatureSearchHit {
+  id: number
+  shoot_id: string
+  shoot_date: string
+  scene_id: string
+  studio: string
+  talent_role: "female" | "male" | string
+  talent_slug: string
+  talent_display: string
+  legal_name: string
+  business_name: string
+  stage_names: string
+  nicknames_aliases: string
+  previous_legal_names: string
+  email: string
+  phone: string
+  city_state_zip: string
+  tin_type: string
+  tin_last4: string
+  dob: string
+  signed_at: string
+  pdf_mega_path: string
+  contract_version: string
+}
+
+export interface SignatureSearchResponse {
+  hits: SignatureSearchHit[]
+  total: number
+  limit: number
+  offset: number
+  query: string
+  date_from: string
+  date_to: string
+  studio: string
+  role: string
+}
+
+/**
+ * One file inside a MEGA `{SCENE_ID}/Legal/` folder. Surfaced by the
+ * Database view to expose paperwork that lives only on the bucket and was
+ * never imported into compliance_signatures.
+ */
+export interface MegaLegalFile {
+  studio: string         // 4-letter code: "FPVR" / "VRH" / "VRA" / "NJOI"
+  scene_id: string
+  key: string
+  filename: string
+  size: number
+  last_modified: string
+}
+
+export interface MegaLegalScanResponse {
+  files: MegaLegalFile[]
+  scanned_at: string
+  studios_scanned: string[]
+  total: number
+  truncated: boolean
+}
+
+/**
  * Admin W-9 export summary (TKT-0153). Counts only — no PII.
  */
 export interface W9Summary {
@@ -1703,6 +1769,54 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         const qStr = qs.toString()
         return `${API_BASE}/api/compliance/admin/w9-export.xlsx${qStr ? `?${qStr}` : ""}`
       },
+
+      // Searchable Compliance Database view — every signed paperwork record
+      // on file, with full-text query + date/studio/role filters. Admin-only
+      // because every hit contains personal data (the response masks TIN to
+      // last-4; full PII is loaded on demand via getSignature()).
+      search: (params: {
+        q?: string
+        from?: string
+        to?: string
+        studio?: string
+        role?: "female" | "male"
+        limit?: number
+        offset?: number
+      } = {}) => {
+        const qs = new URLSearchParams()
+        if (params.q)      qs.set("q",      params.q)
+        if (params.from)   qs.set("from",   params.from)
+        if (params.to)     qs.set("to",     params.to)
+        if (params.studio) qs.set("studio", params.studio)
+        if (params.role)   qs.set("role",   params.role)
+        if (params.limit !== undefined)  qs.set("limit",  String(params.limit))
+        if (params.offset !== undefined) qs.set("offset", String(params.offset))
+        const qStr = qs.toString()
+        return get<SignatureSearchResponse>(
+          `/compliance/admin/search${qStr ? `?${qStr}` : ""}`,
+        )
+      },
+
+      // Scan every studio's MEGA bucket for files inside `{SCENE_ID}/Legal/`
+      // folders. Cached server-side for 1h. Pass {refresh: true} to force a
+      // re-scan after adding new historical paperwork to the buckets.
+      legalFolders: (params: { studio?: string; refresh?: boolean } = {}) => {
+        const qs = new URLSearchParams()
+        if (params.studio)  qs.set("studio",  params.studio)
+        if (params.refresh) qs.set("refresh", "1")
+        const qStr = qs.toString()
+        return get<MegaLegalScanResponse>(
+          `/compliance/admin/legal-folders${qStr ? `?${qStr}` : ""}`,
+        )
+      },
+
+      // Presigned 7-day download URL for one file inside a MEGA Legal/ folder.
+      // Used by the Database view's MEGA-only rows that have no signature
+      // record to render-as-PDF.
+      legalFolderPresign: (studio: string, key: string) =>
+        get<{ url: string; studio: string; key: string }>(
+          `/compliance/admin/legal-folders/presign?studio=${encodeURIComponent(studio)}&key=${encodeURIComponent(key)}`,
+        ),
     },
 
     // Uploads dashboard — broker presigned multipart URLs against MEGA S4.

@@ -864,6 +864,128 @@ export const MOCK_SHOOTS: Shoot[] = [
 
 // ─── Compliance fixtures ─────────────────────────────────────────────────────
 
+/**
+ * Mock dataset for the searchable Compliance "Database" view.
+ *
+ * Matches the wire format of `SignatureSearchHit` — see lib/api.ts. Includes
+ * a deliberate mix of recent + back-filled (legacy 2019/2020) entries across
+ * all four studios so the UI's date filtering and pagination can be exercised
+ * end-to-end. TIN is masked to last-4 to mirror the real endpoint.
+ */
+export const MOCK_SIGNATURE_HITS = [
+  // Recent — matches the live MOCK_COMPLIANCE_SHOOTS so wizard ↔ database flows agree
+  { id: 1001, shoot_id: "2026-04-24-elena-rivers-ghi11223", shoot_date: "2026-04-24",
+    scene_id: "VRA0512", studio: "VRAllure", talent_role: "female",
+    talent_slug: "ElenaRivers", talent_display: "Elena Rivers",
+    legal_name: "Elena Marie Rivers", business_name: "",
+    stage_names: "Elena Rivers", nicknames_aliases: "Lena", previous_legal_names: "",
+    email: "elena@example.com", phone: "(555) 010-2233",
+    city_state_zip: "Las Vegas, NV 89109",
+    tin_type: "ssn", tin_last4: "4321", dob: "1996-11-04",
+    signed_at: "2026-04-24T09:14:02Z", pdf_mega_path: "vra/VRA0512/Legal/ElenaRivers-042426.pdf",
+    contract_version: "eclatech.v1.abc123def456" },
+  { id: 1002, shoot_id: "2026-04-24-elena-rivers-ghi11223", shoot_date: "2026-04-24",
+    scene_id: "VRA0512", studio: "VRAllure", talent_role: "male",
+    talent_slug: "DannySteele", talent_display: "Danny Steele",
+    legal_name: "Daniel J. Steele", business_name: "Steele Productions LLC",
+    stage_names: "Danny Steele", nicknames_aliases: "", previous_legal_names: "",
+    email: "danny@example.com", phone: "(555) 010-9988",
+    city_state_zip: "Los Angeles, CA 90028",
+    tin_type: "ein", tin_last4: "7788", dob: "1989-03-22",
+    signed_at: "2026-04-24T09:18:55Z", pdf_mega_path: "vra/VRA0512/Legal/DannySteele-042426.pdf",
+    contract_version: "eclatech.v1.abc123def456" },
+  { id: 1003, shoot_id: "2026-04-22-mia-summers-jkl44556", shoot_date: "2026-04-22",
+    scene_id: "VRH0889", studio: "VRHush", talent_role: "female",
+    talent_slug: "MiaSummers", talent_display: "Mia Summers",
+    legal_name: "Mia Catherine Summers", business_name: "",
+    stage_names: "Mia Summers, Mia Summer", nicknames_aliases: "Mimi", previous_legal_names: "",
+    email: "mia@example.com", phone: "(555) 010-5544",
+    city_state_zip: "Miami, FL 33139",
+    tin_type: "ssn", tin_last4: "5544", dob: "2000-07-19",
+    signed_at: "2026-04-22T11:02:14Z", pdf_mega_path: "vrh/VRH0889/Legal/MiaSummers-042226.pdf",
+    contract_version: "eclatech.v1.abc123def456" },
+  { id: 1004, shoot_id: "2026-04-15-natalia-fox-mno77889", shoot_date: "2026-04-15",
+    scene_id: "FPVR1337", studio: "FuckPassVR", talent_role: "female",
+    talent_slug: "NataliaFox", talent_display: "Natalia Fox",
+    legal_name: "Natalia A. Fox", business_name: "",
+    stage_names: "Natalia Fox", nicknames_aliases: "Nat", previous_legal_names: "",
+    email: "natalia@example.com", phone: "(555) 010-7711",
+    city_state_zip: "Brooklyn, NY 11211",
+    tin_type: "ssn", tin_last4: "1234", dob: "1998-02-09",
+    signed_at: "2026-04-15T08:55:00Z", pdf_mega_path: "fpvr/FPVR1337/Legal/NataliaFox-041526.pdf",
+    contract_version: "eclatech.v1.abc123def456" },
+  { id: 1005, shoot_id: "2026-04-08-sofia-red-pqr00112", shoot_date: "2026-04-08",
+    scene_id: "NJOI0203", studio: "NaughtyJOI", talent_role: "female",
+    talent_slug: "SofiaRed", talent_display: "Sofia Red",
+    legal_name: "Sofia Beatriz Reyes", business_name: "",
+    stage_names: "Sofia Red", nicknames_aliases: "", previous_legal_names: "Sofia Reyes",
+    email: "sofia@example.com", phone: "(555) 010-3322",
+    city_state_zip: "Austin, TX 78701",
+    tin_type: "ssn", tin_last4: "9911", dob: "1997-12-30",
+    signed_at: "2026-04-08T15:40:21Z", pdf_mega_path: "njoi/NJOI0203/Legal/SofiaRed-040826.pdf",
+    contract_version: "eclatech.v1.abc123def456" },
+  // Legacy back-fills — older paperwork imported via the bulk Drive importer
+  { id: 901, shoot_id: "2020-06-12-jada-snow-stu33445", shoot_date: "2020-06-12",
+    scene_id: "VRH0214", studio: "VRHush", talent_role: "female",
+    talent_slug: "JadaSnow", talent_display: "Jada Snow",
+    legal_name: "Jada Lynn Snow", business_name: "",
+    stage_names: "Jada Snow", nicknames_aliases: "", previous_legal_names: "",
+    email: "", phone: "",
+    city_state_zip: "Phoenix, AZ 85001",
+    tin_type: "ssn", tin_last4: "0042", dob: "1995-05-17",
+    signed_at: "2020-06-12T00:00:00Z", pdf_mega_path: "vrh/VRH0214/Legal/JadaSnow-061220.pdf",
+    contract_version: "eclatech.v0.legacy" },
+  { id: 902, shoot_id: "2019-11-02-aria-king-vwx66778", shoot_date: "2019-11-02",
+    scene_id: "FPVR0421", studio: "FuckPassVR", talent_role: "female",
+    talent_slug: "AriaKing", talent_display: "Aria King",
+    legal_name: "Aria N. King", business_name: "",
+    stage_names: "Aria King", nicknames_aliases: "", previous_legal_names: "",
+    email: "", phone: "",
+    city_state_zip: "Denver, CO 80203",
+    tin_type: "ssn", tin_last4: "1199", dob: "1994-09-08",
+    signed_at: "2019-11-02T00:00:00Z", pdf_mega_path: "fpvr/FPVR0421/Legal/AriaKing-110219.pdf",
+    contract_version: "eclatech.v0.legacy" },
+  { id: 903, shoot_id: "2018-04-19-luna-day-yz112233", shoot_date: "2018-04-19",
+    scene_id: "VRA0095", studio: "VRAllure", talent_role: "female",
+    talent_slug: "LunaDay", talent_display: "Luna Day",
+    legal_name: "Luna Maria Day", business_name: "",
+    stage_names: "Luna Day", nicknames_aliases: "Moon", previous_legal_names: "",
+    email: "", phone: "",
+    city_state_zip: "Portland, OR 97201",
+    tin_type: "ssn", tin_last4: "7350", dob: "1993-01-25",
+    signed_at: "2018-04-19T00:00:00Z", pdf_mega_path: "vra/VRA0095/Legal/LunaDay-041918.pdf",
+    contract_version: "eclatech.v0.legacy" },
+] as const
+
+/**
+ * Mock dataset for the MEGA legal-folder scanner. Represents historical
+ * paperwork that exists on the bucket but was NEVER imported into
+ * compliance_signatures — the Database view surfaces these as "MEGA Legacy"
+ * rows so the operator can still find and download the artifact.
+ */
+export const MOCK_MEGA_LEGAL_FILES = [
+  { studio: "VRH",  scene_id: "VRH0001", key: "VRH0001/Legal/SignedAgreement-2014.pdf",
+    filename: "SignedAgreement-2014.pdf", size: 1_847_293, last_modified: "2014-06-04T00:00:00Z" },
+  { studio: "VRH",  scene_id: "VRH0001", key: "VRH0001/Legal/2257-Disclosure-2014.pdf",
+    filename: "2257-Disclosure-2014.pdf", size: 412_887, last_modified: "2014-06-04T00:00:00Z" },
+  { studio: "VRH",  scene_id: "VRH0007", key: "VRH0007/Legal/MissyDee-Front.jpg",
+    filename: "MissyDee-Front.jpg", size: 2_204_511, last_modified: "2014-08-21T00:00:00Z" },
+  { studio: "VRH",  scene_id: "VRH0007", key: "VRH0007/Legal/MissyDee-Back.jpg",
+    filename: "MissyDee-Back.jpg", size: 2_018_440, last_modified: "2014-08-21T00:00:00Z" },
+  { studio: "FPVR", scene_id: "FPVR0012", key: "FPVR0012/Legal/Release-Original.pdf",
+    filename: "Release-Original.pdf", size: 945_220, last_modified: "2016-02-17T00:00:00Z" },
+  { studio: "FPVR", scene_id: "FPVR0042", key: "FPVR0042/Legal/W9-2017.pdf",
+    filename: "W9-2017.pdf", size: 287_119, last_modified: "2017-05-09T00:00:00Z" },
+  { studio: "VRA",  scene_id: "VRA0019", key: "VRA0019/Legal/ID-Front.heic",
+    filename: "ID-Front.heic", size: 3_122_001, last_modified: "2017-09-30T00:00:00Z" },
+  { studio: "NJOI", scene_id: "NJOI0033", key: "NJOI0033/Legal/SignedRelease-2018.pdf",
+    filename: "SignedRelease-2018.pdf", size: 1_233_887, last_modified: "2018-12-04T00:00:00Z" },
+  { studio: "VRA",  scene_id: "VRA0095", key: "VRA0095/Legal/LunaDay-Bunny.jpeg",
+    filename: "LunaDay-Bunny.jpeg", size: 1_894_220, last_modified: "2018-04-19T00:00:00Z" },
+  { studio: "VRH",  scene_id: "VRH0214", key: "VRH0214/Legal/JadaSnow-IDFront.jpg",
+    filename: "JadaSnow-IDFront.jpg", size: 2_404_001, last_modified: "2020-06-12T00:00:00Z" },
+] as const
+
 export const MOCK_COMPLIANCE_SHOOTS: ComplianceShoot[] = [
   {
     shoot_id: "2026-04-24-natalia-fox-abc12345",

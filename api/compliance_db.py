@@ -345,6 +345,156 @@ def list_w9_records(
     return out
 
 
+@dataclass(frozen=True)
+class SignatureSearchHit:
+    """Compact row used by the searchable database view (TKT-paperwork-db).
+
+    Returns enough data to render a row + open the edit modal / PDF, but
+    deliberately omits raw TIN — the table is rendered in a list, so we
+    surface only ``tin_last4`` and ``tin_type``. Full PII stays gated
+    behind the per-row edit modal which already loads the full row via
+    :pyfunc:`get_signature`.
+    """
+    id: int
+    shoot_id: str
+    shoot_date: str
+    scene_id: str
+    studio: str
+    talent_role: str
+    talent_slug: str
+    talent_display: str
+    legal_name: str
+    business_name: str
+    stage_names: str
+    nicknames_aliases: str
+    previous_legal_names: str
+    email: str
+    phone: str
+    city_state_zip: str
+    tin_type: str
+    tin_last4: str
+    dob: str
+    signed_at: str
+    pdf_mega_path: str
+    contract_version: str
+
+
+def _split_tokens(query: str) -> list[str]:
+    """Split on whitespace and lowercase. Empty query returns []."""
+    return [t.lower() for t in (query or "").split() if t]
+
+
+def search_signatures(
+    *,
+    query: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    studio: Optional[str] = None,
+    role: Optional[str] = None,
+    limit: int = 500,
+    offset: int = 0,
+) -> tuple[list[SignatureSearchHit], int]:
+    """Search the compliance_signatures table.
+
+    The query is split on whitespace; each token must appear (case-insensitive)
+    in at least one of the searchable text columns. This gives natural
+    "contains all words" behavior so admins can type ``maria 2024 vrh`` and
+    narrow results without learning an operator syntax.
+
+    Returns ``(hits, total)`` so the UI can show "Showing 50 of 1,247".
+    """
+    where: list[str] = []
+    params: list = []
+
+    if date_from:
+        where.append("shoot_date >= ?")
+        params.append(date_from)
+    if date_to:
+        where.append("shoot_date <= ?")
+        params.append(date_to)
+    if studio:
+        where.append("studio = ?")
+        params.append(studio)
+    if role:
+        where.append("talent_role = ?")
+        params.append(role)
+
+    # Per-token LIKE filter across the columns most useful for "find this
+    # talent" lookups. We keep TIN out of the searchable set on purpose —
+    # we don't want the SSN to be reachable by free-text query.
+    SEARCHABLE_COLS = (
+        "talent_display", "legal_name", "business_name",
+        "stage_names", "professional_names", "nicknames_aliases",
+        "previous_legal_names",
+        "email", "phone", "city_state_zip", "place_of_birth",
+        "scene_id", "shoot_id", "studio", "talent_slug",
+    )
+    tokens = _split_tokens(query or "")
+    for tok in tokens:
+        ors = " OR ".join(
+            f"LOWER(COALESCE({col}, '')) LIKE ?" for col in SEARCHABLE_COLS
+        )
+        where.append(f"({ors})")
+        like = f"%{tok}%"
+        params.extend([like] * len(SEARCHABLE_COLS))
+
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+    with get_db() as conn:
+        total_row = conn.execute(
+            f"SELECT COUNT(*) AS c FROM compliance_signatures{where_sql}",
+            params,
+        ).fetchone()
+        total = int(total_row["c"]) if total_row else 0
+
+        rows = conn.execute(
+            f"""SELECT id, shoot_id, shoot_date, scene_id, studio,
+                       talent_role, talent_slug, talent_display,
+                       legal_name, business_name, stage_names,
+                       nicknames_aliases, previous_legal_names,
+                       email, phone, city_state_zip,
+                       tin_type, tin, dob,
+                       signed_at, pdf_mega_path, contract_version
+                  FROM compliance_signatures
+               {where_sql}
+                 ORDER BY shoot_date DESC, signed_at DESC, id DESC
+                 LIMIT ? OFFSET ?""",
+            params + [int(limit), int(offset)],
+        ).fetchall()
+
+    hits: list[SignatureSearchHit] = []
+    for r in rows:
+        d = dict(r)
+        tin = (d.get("tin") or "").replace("-", "").replace(" ", "")
+        last4 = tin[-4:] if len(tin) >= 4 else ""
+        hits.append(SignatureSearchHit(
+            id=int(d.get("id") or 0),
+            shoot_id=d.get("shoot_id", "") or "",
+            shoot_date=d.get("shoot_date", "") or "",
+            scene_id=d.get("scene_id", "") or "",
+            studio=d.get("studio", "") or "",
+            talent_role=d.get("talent_role", "") or "",
+            talent_slug=d.get("talent_slug", "") or "",
+            talent_display=d.get("talent_display", "") or "",
+            legal_name=d.get("legal_name", "") or "",
+            business_name=d.get("business_name", "") or "",
+            stage_names=d.get("stage_names", "") or "",
+            nicknames_aliases=d.get("nicknames_aliases", "") or "",
+            previous_legal_names=d.get("previous_legal_names", "") or "",
+            email=d.get("email", "") or "",
+            phone=d.get("phone", "") or "",
+            city_state_zip=d.get("city_state_zip", "") or "",
+            tin_type=d.get("tin_type", "") or "",
+            tin_last4=last4,
+            dob=d.get("dob", "") or "",
+            signed_at=d.get("signed_at", "") or "",
+            pdf_mega_path=d.get("pdf_mega_path", "") or "",
+            contract_version=d.get("contract_version", "") or "",
+        ))
+
+    return hits, total
+
+
 def is_shoot_complete(shoot_id: str, has_male: bool) -> bool:
     """A shoot is complete when every required talent role has a signature row.
     For a female-only BG, that means 1 row with talent_role='female'.

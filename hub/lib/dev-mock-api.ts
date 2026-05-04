@@ -24,6 +24,8 @@ import {
   MOCK_SCENES,
   MOCK_SHOOTS,
   MOCK_COMPLIANCE_SHOOTS,
+  MOCK_SIGNATURE_HITS,
+  MOCK_MEGA_LEGAL_FILES,
   filterScenes,
 } from "./dev-fixtures"
 
@@ -684,6 +686,106 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
       studio: "",
     } as unknown as T)
   }
+  // GET /compliance/signatures/{id} — full row for the edit modal.
+  // (Used by both the wizard's edit modal and the new Database view.)
+  const sigGet = base.match(/^\/compliance\/signatures\/(\d+)$/)
+  if (sigGet && (init?.method === undefined || init.method === "GET")) {
+    const id = parseInt(sigGet[1], 10)
+    const hit = MOCK_SIGNATURE_HITS.find(h => h.id === id)
+    if (!hit) {
+      throw new Error(`signature ${id} not found`)
+    }
+    return wait({
+      ...hit,
+      // Fields the SignatureRow has that the search hit doesn't:
+      tax_classification: "individual",
+      llc_class: "",
+      other_classification: "",
+      exempt_payee_code: "",
+      fatca_code: "",
+      tin: `XXX-XX-${hit.tin_last4}`,
+      place_of_birth: "United States",
+      street_address: "—",
+      id1_type: "Driver's License",
+      id1_number: "—",
+      id2_type: "Passport",
+      id2_number: "—",
+      professional_names: hit.stage_names,
+      created_at: hit.signed_at,
+    } as unknown as T)
+  }
+  // GET /compliance/signatures/{id}/history — empty audit trail in dev
+  const sigHist = base.match(/^\/compliance\/signatures\/(\d+)\/history$/)
+  if (sigHist) {
+    return wait([] as unknown as T)
+  }
+
+  // Searchable Compliance Database view (TKT-paperwork-db).
+  if (base === "/compliance/admin/search") {
+    const q = (params.get("q") ?? "").trim().toLowerCase()
+    const dateFrom = params.get("from") ?? ""
+    const dateTo   = params.get("to") ?? ""
+    const studio   = params.get("studio") ?? ""
+    const role     = params.get("role") ?? ""
+    const limit    = Math.max(1, Math.min(1000, parseInt(params.get("limit") ?? "200", 10) || 200))
+    const offset   = Math.max(0, parseInt(params.get("offset") ?? "0", 10) || 0)
+
+    const tokens = q ? q.split(/\s+/).filter(Boolean) : []
+    const matchToken = (h: typeof MOCK_SIGNATURE_HITS[number], tok: string): boolean => {
+      const hay = [
+        h.talent_display, h.legal_name, h.business_name,
+        h.stage_names, h.nicknames_aliases, h.previous_legal_names,
+        h.email, h.phone, h.city_state_zip,
+        h.scene_id, h.shoot_id, h.studio, h.talent_slug,
+      ].join(" ").toLowerCase()
+      return hay.includes(tok)
+    }
+
+    let list = MOCK_SIGNATURE_HITS.filter(h => {
+      if (dateFrom && h.shoot_date < dateFrom) return false
+      if (dateTo   && h.shoot_date > dateTo)   return false
+      if (studio   && h.studio !== studio)     return false
+      if (role     && h.talent_role !== role)  return false
+      for (const tok of tokens) if (!matchToken(h, tok)) return false
+      return true
+    })
+    list = [...list].sort((a, b) =>
+      (a.shoot_date < b.shoot_date) ? 1 :
+      (a.shoot_date > b.shoot_date) ? -1 :
+      (a.signed_at < b.signed_at) ? 1 :
+      (a.signed_at > b.signed_at) ? -1 : 0
+    )
+    const total = list.length
+    const hits = list.slice(offset, offset + limit)
+    return wait({
+      hits, total, limit, offset,
+      query: q, date_from: dateFrom, date_to: dateTo, studio, role,
+    } as unknown as T)
+  }
+
+  // MEGA legal-folder scanner.
+  if (base === "/compliance/admin/legal-folders") {
+    const studio = params.get("studio") ?? ""
+    let files: ReadonlyArray<typeof MOCK_MEGA_LEGAL_FILES[number]> = MOCK_MEGA_LEGAL_FILES
+    if (studio) files = files.filter(f => f.studio.toLowerCase() === studio.toLowerCase())
+    return wait({
+      files,
+      scanned_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+      studios_scanned: studio ? [studio.toUpperCase()] : ["FPVR", "VRH", "VRA", "NJOI"],
+      total: files.length,
+      truncated: false,
+    } as unknown as T)
+  }
+  if (base === "/compliance/admin/legal-folders/presign") {
+    const studio = params.get("studio") ?? ""
+    const key    = params.get("key") ?? ""
+    return wait({
+      url: `https://example.s4.mega.io/${studio.toLowerCase()}/${encodeURI(key)}?mock=1`,
+      studio: studio.toUpperCase(),
+      key,
+    } as unknown as T)
+  }
+
   if (base === "/compliance/admin/bulk-import-from-drive" && init?.method === "POST") {
     return wait({
       folders_seen: 18,
