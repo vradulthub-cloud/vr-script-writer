@@ -158,6 +158,8 @@ export function NotificationBell({ idToken: serverToken, disablePolling }: Notif
             borderRadius: 8,
             zIndex: 100,
             boxShadow: "0 8px 24px rgba(0,0,0,.4)",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
           {/* Header */}
@@ -183,7 +185,7 @@ export function NotificationBell({ idToken: serverToken, disablePolling }: Notif
           </div>
 
           {/* List — relative wrapper so the scroll shadow can be positioned inside */}
-          <div style={{ position: "relative" }}>
+          <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           {notifications.length >= 5 && (
             <div
               aria-hidden="true"
@@ -199,7 +201,7 @@ export function NotificationBell({ idToken: serverToken, disablePolling }: Notif
               }}
             />
           )}
-          <div className="overflow-y-auto" style={{ maxHeight: 370 }}>
+          <div className="overflow-y-auto" style={{ flex: 1, minHeight: 0 }}>
             {loading && (
               <div className="py-6 text-center" style={{ color: "var(--color-text-faint)", fontSize: 12 }}>
                 Loading...
@@ -276,6 +278,8 @@ export function NotificationBell({ idToken: serverToken, disablePolling }: Notif
               padding: "8px 12px",
               display: "flex",
               justifyContent: "flex-end",
+              flexShrink: 0,
+              background: "var(--color-surface)",
             }}
           >
             <Link
