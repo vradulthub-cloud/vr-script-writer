@@ -53,7 +53,7 @@ SSH_KEY = str(Path.home() / ".ssh" / "id_ed25519_win")
 # to 1 because the file is already on the right machine.
 SKIP_DEPLOY = os.environ.get("MEGA_SCAN_NO_DEPLOY", "").lower() in ("1", "true", "yes")
 
-_DESC_EXTS = (".doc", ".docx", ".txt", ".rtf")
+_DESC_EXTS = (".doc", ".docx", ".txt", ".rtf", ".pdf")
 
 # Studio site codes — used to filter out non-scene top-level prefixes
 # (Brand/, Dump/, SYNC/, Legal/, etc. that exist in some buckets).
