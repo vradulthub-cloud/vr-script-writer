@@ -152,32 +152,89 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
   const [grailSaving, setGrailSaving] = useState(false)
   const [megaSaving, setMegaSaving] = useState(false)
 
+  // Tracks the most recent autoPopulate request so a slow script-fetch from
+  // a previous click can't overwrite the current scene's fields if the user
+  // switched scenes mid-fetch.
+  const lastRequestedSceneRef = useRef<string | null>(null)
+
+  // Clears every scene-specific input + output so the form is back to a clean
+  // slate. Called before populating from a new scene and on studio change so
+  // stale data from the previous scene can't bleed into the new one. Does NOT
+  // touch `studio` itself so callers can chain a new studio set after.
+  function clearSceneForm() {
+    setSelectedSceneId("")
+    setPerformers("")
+    setPositions("")
+    setSelectedCats([])
+    setKeywords("")
+    setWardrobe("")
+    setModelNotes("")
+    setPlot("")
+    setSceneType("")
+    setEditedParagraphs({})
+    setMetaTitle("")
+    setMetaDesc("")
+    setSeoError(null)
+    setSavedAt(null)
+    setSaveMsg(null)
+    setGenTitle("")
+    setGenTitleSource(null)
+    setGenTitleErr(null)
+    setScriptLoading(false)
+    if (stream.streaming) stream.stop()
+    stream.reset()
+  }
+
+  function hasDirtyDraft(): boolean {
+    return (
+      !!selectedSceneId ||
+      Object.keys(editedParagraphs).length > 0 ||
+      metaTitle !== "" ||
+      metaDesc !== "" ||
+      !!stream.output ||
+      !!performers ||
+      !!positions ||
+      !!keywords ||
+      !!wardrobe ||
+      !!modelNotes ||
+      !!plot
+    )
+  }
+
   async function autoPopulateFromScene(scene: Scene) {
+    // Clicking the currently-selected scene shouldn't re-fetch or clobber
+    // any in-progress edits.
+    if (scene.id === selectedSceneId) return
+
+    lastRequestedSceneRef.current = scene.id
+    clearSceneForm()
     setSelectedSceneId(scene.id)
-    if (scene.performers) setPerformers(scene.performers)
+    setPerformers(scene.performers ?? "")
     if (scene.categories) {
       const cats = scene.categories.split(",").map(c => c.trim()).filter(Boolean)
       setSelectedCats(cats.filter(c => availableCategories.includes(c)))
     }
-    if (scene.tags) setKeywords(scene.tags)
-    if (scene.title && !metaTitle) setMetaTitle(scene.title)
-    // Reset script fields before fetch
-    setPlot("")
-    setSceneType("")
+    setKeywords(scene.tags ?? "")
+    setMetaTitle(scene.title ?? "")
     setScriptLoading(true)
     try {
       const res = await fetch(`${API_BASE_URL}/api/scenes/${scene.id}/script`, {
         headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
       })
+      // Bail if the user clicked another scene while this fetch was in flight.
+      if (lastRequestedSceneRef.current !== scene.id) return
       if (res.ok) {
         const data = await res.json()
-        if (data.plot)       setPlot(data.plot)
-        if (data.theme)      setModelNotes(data.theme)
-        if (data.wardrobe_f) setWardrobe(data.wardrobe_f)
-        if (data.scene_type) setSceneType(data.scene_type)
+        if (lastRequestedSceneRef.current !== scene.id) return
+        setPlot(data.plot ?? "")
+        setModelNotes(data.theme ?? "")
+        setWardrobe(data.wardrobe_f ?? "")
+        setSceneType(data.scene_type ?? "")
       }
     } catch { /* leave fields empty */ }
-    finally { setScriptLoading(false) }
+    finally {
+      if (lastRequestedSceneRef.current === scene.id) setScriptLoading(false)
+    }
   }
 
   const selectedScene = useMemo(
@@ -629,27 +686,17 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
               value={studio}
               onChange={(s) => {
                 if (s === studio) return
-                // Changing studio invalidates any selected scene + paragraph
-                // edits from the previous studio; leaving them in state lets
-                // a user save edits against the wrong studio's scene. Warn
-                // before destroying work the user can see on screen.
-                const hasDirtyDraft =
-                  !!selectedSceneId ||
-                  Object.keys(editedParagraphs).length > 0 ||
-                  metaTitle !== "" ||
-                  metaDesc !== ""
-                if (hasDirtyDraft) {
+                // Switching studios invalidates every scene-specific input + the
+                // generated description. Warn first if there's anything in the
+                // form that the user could lose.
+                if (hasDirtyDraft()) {
                   const ok = window.confirm(
-                    `Switching from ${studioAbbr(studio)} to ${studioAbbr(s)} will clear the selected scene, paragraph edits, and SEO metadata for ${studioAbbr(studio)}. Continue?`,
+                    `Switching from ${studioAbbr(studio)} to ${studioAbbr(s)} will clear the form and any unsaved description. Continue?`,
                   )
                   if (!ok) return
                 }
+                clearSceneForm()
                 setStudio(s)
-                setSelectedCats([])
-                setSelectedSceneId("")
-                setEditedParagraphs({})
-                setMetaTitle("")
-                setMetaDesc("")
               }}
             />
           </div>
