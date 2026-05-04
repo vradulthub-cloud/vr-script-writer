@@ -123,6 +123,12 @@ class CompleteResponse(BaseModel):
     presigned_url: str
 
 
+class VerifyRequest(BaseModel):
+    studio: str
+    key: str
+    upload_id: str
+
+
 class AbortRequest(BaseModel):
     studio: str
     key: str
@@ -523,6 +529,17 @@ async def multipart_complete(req: CompleteRequest, user: CurrentUser):
         etag=final_etag,
         presigned_url=presigned,
     )
+
+
+@router.post("/multipart/verify")
+async def multipart_verify(req: VerifyRequest, user: CurrentUser):
+    """Check whether a multipart upload is still alive on S4.  The browser
+    calls this before resuming a saved upload — if the UploadId has expired
+    we return ``{alive: false}`` and the client starts a fresh upload instead
+    of burning 4 retries per part against a dead ID."""
+    studio = _resolve_studio(req.studio)
+    alive = s4_client.is_multipart_alive(studio, req.key, req.upload_id)
+    return {"alive": alive}
 
 
 @router.post("/multipart/abort")

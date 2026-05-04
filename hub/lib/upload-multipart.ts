@@ -69,29 +69,47 @@ export async function uploadFile(args: StartArgs): Promise<StartResult> {
   const fp = fingerprint(file)
 
   let state: UploadState | null = null
-  let init: UploadInitResponse
+  let init: UploadInitResponse = undefined!
 
   // Try resume — same fingerprint + same destination key.
   const desiredKey = buildDestinationKey(args)
   const resumeId = `${fp}|${desiredKey}`
   const resumed = await load(resumeId)
+  let resumeValid = false
   if (resumed && resumed.key === desiredKey && resumed.size === file.size) {
-    state = resumed
-    init = {
-      upload_id: resumed.upload_id,
-      bucket: "",  // not needed for resume
-      key: resumed.key,
-      part_size: resumed.part_size,
-      part_count: resumed.part_count,
+    // Verify the multipart upload still exists on S4 before reusing its ID.
+    // MEGA S4 can expire or garbage-collect incomplete multiparts — if the
+    // ID is dead every part PUT will 404, wasting 4 retries × N parts.
+    try {
+      const { alive } = await client.uploads.verify({
+        studio: args.studio, key: resumed.key, upload_id: resumed.upload_id,
+      })
+      resumeValid = alive
+    } catch {
+      // API unreachable — assume dead; fresh init will surface the real error.
     }
-    onProgress?.({
-      phase: "uploading",
-      bytesUploaded: state.parts.length * state.part_size,
-      bytesTotal: file.size,
-      partsCompleted: state.parts.length,
-      partsTotal: state.part_count,
-    })
-  } else {
+    if (resumeValid) {
+      state = resumed
+      init = {
+        upload_id: resumed.upload_id,
+        bucket: "",  // not needed for resume
+        key: resumed.key,
+        part_size: resumed.part_size,
+        part_count: resumed.part_count,
+      }
+      onProgress?.({
+        phase: "uploading",
+        bytesUploaded: state.parts.length * state.part_size,
+        bytesTotal: file.size,
+        partsCompleted: state.parts.length,
+        partsTotal: state.part_count,
+      })
+    } else {
+      // Upload expired — drop stale state so we start fresh below.
+      await remove(resumeId)
+    }
+  }
+  if (!resumeValid) {
     onProgress?.({ phase: "init", bytesUploaded: 0, bytesTotal: file.size, partsCompleted: 0, partsTotal: 0 })
     try {
       init = await client.uploads.initMultipart({
@@ -123,10 +141,13 @@ export async function uploadFile(args: StartArgs): Promise<StartResult> {
     await save(state)
   }
 
+  // Both branches above guarantee state + init are assigned.
+  const s = state!
+
   // Determine which parts still need to be uploaded.
-  const completed = new Set(state.parts.map(p => p.part_number))
+  const completed = new Set(s.parts.map(p => p.part_number))
   const todo: number[] = []
-  for (let i = 1; i <= state.part_count; i++) {
+  for (let i = 1; i <= s.part_count; i++) {
     if (!completed.has(i)) todo.push(i)
   }
 
@@ -137,8 +158,8 @@ export async function uploadFile(args: StartArgs): Promise<StartResult> {
     if (missing.length === 0) return
     const resp = await client.uploads.signParts({
       studio:      args.studio,
-      key:         state!.key,
-      upload_id:   state!.upload_id,
+      key:         s.key,
+      upload_id:   s.upload_id,
       part_numbers: missing,
     })
     for (const u of resp.urls as PartUrl[]) partUrls.set(u.part_number, u.url)
@@ -154,24 +175,24 @@ export async function uploadFile(args: StartArgs): Promise<StartResult> {
   let aborted = false
 
   const partETag = new Map<number, string>()
-  for (const p of state.parts) partETag.set(p.part_number, p.etag)
+  for (const p of s.parts) partETag.set(p.part_number, p.etag)
 
   function emit() {
     const partsCompleted = partETag.size
-    const bytesUploaded = Math.min(file.size, partsCompleted * state!.part_size)
+    const bytesUploaded = Math.min(file.size, partsCompleted * s.part_size)
     onProgress?.({
       phase: aborted ? "aborted" : (failed ? "error" : "uploading"),
       bytesUploaded,
       bytesTotal: file.size,
       partsCompleted,
-      partsTotal: state!.part_count,
+      partsTotal: s.part_count,
       error: failed?.message,
     })
   }
 
   async function uploadOnePart(partNumber: number): Promise<void> {
-    const start = (partNumber - 1) * state!.part_size
-    const end = Math.min(start + state!.part_size, file.size)
+    const start = (partNumber - 1) * s.part_size
+    const end = Math.min(start + s.part_size, file.size)
     const blob = file.slice(start, end)
     let attempts = 0
     while (true) {
@@ -183,19 +204,33 @@ export async function uploadFile(args: StartArgs): Promise<StartResult> {
         url = partUrls.get(partNumber)
       }
       if (!url) throw new Error(`No presigned URL for part ${partNumber}`)
-      const res = await fetch(url, { method: "PUT", body: blob, signal })
+      let res: Response
+      try {
+        res = await fetch(url, { method: "PUT", body: blob, signal })
+      } catch (fetchErr) {
+        // Network-level failure (DNS, CORS, connection reset). Retry with
+        // backoff — same cadence as HTTP errors below.
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+        if (attempts >= 4) {
+          throw new Error(`Part ${partNumber} failed after ${attempts} attempts (network: ${(fetchErr as Error).message})`)
+        }
+        await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempts - 1)))
+        partUrls.delete(partNumber)
+        continue
+      }
       if (res.ok) {
         // ETag comes back quoted by S3; strip quotes for the complete payload.
         const raw = res.headers.get("ETag") ?? res.headers.get("etag") ?? ""
         const etag = raw.replace(/^"|"$/g, "")
         partETag.set(partNumber, etag)
-        state!.parts.push({ part_number: partNumber, etag })
-        await save(state!)
+        s.parts.push({ part_number: partNumber, etag })
+        await save(s)
         emit()
         return
       }
-      if (res.status === 403 || res.status === 401) {
-        // URL likely expired — drop & re-sign on next attempt.
+      if (res.status === 403 || res.status === 401 || res.status === 404) {
+        // 403/401: URL likely expired. 404: upload_id may have been reaped
+        // by S4. Either way, drop the cached URL and re-sign on next attempt.
         partUrls.delete(partNumber)
       }
       if (attempts >= 4) {
@@ -242,25 +277,27 @@ export async function uploadFile(args: StartArgs): Promise<StartResult> {
   if (aborted) {
     // User-cancelled: tear down the multipart on S4 + drop our resume state.
     try {
-      await client.uploads.abort({ studio: args.studio, key: state.key, upload_id: state.upload_id })
+      await client.uploads.abort({ studio: args.studio, key: s.key, upload_id: s.upload_id })
     } catch { /* ignore */ }
-    await remove(state.id)
-    onProgress?.({ phase: "aborted", bytesUploaded: 0, bytesTotal: file.size, partsCompleted: partETag.size, partsTotal: state.part_count })
+    await remove(s.id)
+    onProgress?.({ phase: "aborted", bytesUploaded: 0, bytesTotal: file.size, partsCompleted: partETag.size, partsTotal: s.part_count })
     return { ok: false, error: "aborted" }
   }
   if (failed) {
-    // KEEP the resume state on transient failures — every part already
-    // uploaded is preserved on S4, and a follow-up retry with the same file +
-    // destination will pick up from where we left off via the resume path
-    // above. The orphaned multipart is reaped by upload-storage.pruneOld()
-    // (7-day default) or by an explicit user dismiss → cleanupUpload().
     const msg = (failed as Error).message
+    // If parts failed with 404 the upload_id is dead on S4 — clear saved
+    // state so the next retry starts a fresh multipart instead of resuming
+    // into the same dead ID.  For other (transient) errors we keep the state
+    // so the resume path can skip already-uploaded parts.
+    if (msg.includes("(HTTP 404)")) {
+      await remove(s.id)
+    }
     onProgress?.({
       phase: "error",
-      bytesUploaded: partETag.size * state.part_size,
+      bytesUploaded: partETag.size * s.part_size,
       bytesTotal: file.size,
       partsCompleted: partETag.size,
-      partsTotal: state.part_count,
+      partsTotal: s.part_count,
       error: msg,
     })
     return { ok: false, error: msg }
@@ -270,22 +307,22 @@ export async function uploadFile(args: StartArgs): Promise<StartResult> {
     phase: "completing",
     bytesUploaded: file.size,
     bytesTotal: file.size,
-    partsCompleted: state.part_count,
-    partsTotal: state.part_count,
+    partsCompleted: s.part_count,
+    partsTotal: s.part_count,
   })
 
   try {
     const resp = await client.uploads.complete({
       studio:    args.studio,
-      key:       state.key,
-      upload_id: state.upload_id,
+      key:       s.key,
+      upload_id: s.upload_id,
       parts:     [...partETag.entries()]
         .sort((a, b) => a[0] - b[0])
         .map(([n, etag]) => ({ part_number: n, etag })),
       size:      file.size,
       subfolder: args.subfolder,
     })
-    await remove(state.id)
+    await remove(s.id)
     // Bust the dashboard's scene caches so the new asset's `has_*` flag
     // reflects on the next render instead of waiting out the 20s TTL.
     void revalidateAfterWrite([TAG_SCENES, TAG_SCENE_STATS])
@@ -293,15 +330,15 @@ export async function uploadFile(args: StartArgs): Promise<StartResult> {
       phase: "done",
       bytesUploaded: file.size,
       bytesTotal: file.size,
-      partsCompleted: state.part_count,
-      partsTotal: state.part_count,
+      partsCompleted: s.part_count,
+      partsTotal: s.part_count,
       key: resp.key,
       presignedUrl: resp.presigned_url,
     })
     return { ok: true, key: resp.key, presignedUrl: resp.presigned_url }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    onProgress?.({ phase: "error", bytesUploaded: file.size, bytesTotal: file.size, partsCompleted: state.part_count, partsTotal: state.part_count, error: msg })
+    onProgress?.({ phase: "error", bytesUploaded: file.size, bytesTotal: file.size, partsCompleted: s.part_count, partsTotal: s.part_count, error: msg })
     return { ok: false, error: msg }
   }
 }

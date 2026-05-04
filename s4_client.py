@@ -383,6 +383,22 @@ def complete_multipart_upload(studio: str, key: str, upload_id: str,
     )
 
 
+def is_multipart_alive(studio: str, key: str, upload_id: str) -> bool:
+    """Check whether *upload_id* still exists on S4 (hasn't expired or been
+    aborted).  Uses ``ListMultipartUploads`` filtered to *key* and scans for a
+    matching UploadId.  Returns False on any error — caller treats that as
+    'expired, start fresh'."""
+    bucket = _studio_to_bucket(studio)
+    try:
+        resp = _client().list_multipart_uploads(Bucket=bucket, Prefix=key)
+        for u in resp.get("Uploads", []) or []:
+            if u["Key"] == key and u["UploadId"] == upload_id:
+                return True
+    except ClientError:
+        pass
+    return False
+
+
 def abort_multipart_upload(studio: str, key: str, upload_id: str) -> None:
     bucket = _studio_to_bucket(studio)
     _client().abort_multipart_upload(
