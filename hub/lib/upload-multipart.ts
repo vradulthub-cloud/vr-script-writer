@@ -240,6 +240,7 @@ export async function uploadFile(args: StartArgs): Promise<StartResult> {
   })
 
   if (aborted) {
+    // User-cancelled: tear down the multipart on S4 + drop our resume state.
     try {
       await client.uploads.abort({ studio: args.studio, key: state.key, upload_id: state.upload_id })
     } catch { /* ignore */ }
@@ -248,12 +249,20 @@ export async function uploadFile(args: StartArgs): Promise<StartResult> {
     return { ok: false, error: "aborted" }
   }
   if (failed) {
-    try {
-      await client.uploads.abort({ studio: args.studio, key: state.key, upload_id: state.upload_id })
-    } catch { /* ignore */ }
-    await remove(state.id)
+    // KEEP the resume state on transient failures — every part already
+    // uploaded is preserved on S4, and a follow-up retry with the same file +
+    // destination will pick up from where we left off via the resume path
+    // above. The orphaned multipart is reaped by upload-storage.pruneOld()
+    // (7-day default) or by an explicit user dismiss → cleanupUpload().
     const msg = (failed as Error).message
-    onProgress?.({ phase: "error", bytesUploaded: 0, bytesTotal: file.size, partsCompleted: partETag.size, partsTotal: state.part_count, error: msg })
+    onProgress?.({
+      phase: "error",
+      bytesUploaded: partETag.size * state.part_size,
+      bytesTotal: file.size,
+      partsCompleted: partETag.size,
+      partsTotal: state.part_count,
+      error: msg,
+    })
     return { ok: false, error: msg }
   }
 
@@ -299,4 +308,39 @@ export async function uploadFile(args: StartArgs): Promise<StartResult> {
 
 function buildDestinationKey(args: { scene_id: string; subfolder: string; filename: string }): string {
   return `${args.scene_id}/${args.subfolder}/${args.filename}`
+}
+
+/** Compute the IndexedDB key the orchestrator would use for these args. */
+function resumeIdFor(file: File, args: Pick<StartArgs, "scene_id" | "subfolder" | "filename">): string {
+  return `${fingerprint(file)}|${buildDestinationKey(args)}`
+}
+
+/** Return resumable progress for a file+destination, or null if nothing saved.
+ *  Used by the UI to show "Resume from N%" labels on errored rows. */
+export async function getResumableProgress(file: File, args: Pick<StartArgs, "scene_id" | "subfolder" | "filename">): Promise<{
+  partsCompleted: number
+  partsTotal: number
+  bytesUploaded: number
+} | null> {
+  const id = resumeIdFor(file, args)
+  const s = await load(id)
+  if (!s || s.size !== file.size) return null
+  return {
+    partsCompleted: s.parts.length,
+    partsTotal: s.part_count,
+    bytesUploaded: s.parts.length * s.part_size,
+  }
+}
+
+/** Tear down a saved upload — abort the S4 multipart, drop the resume state.
+ *  Call when the user dismisses an errored row instead of retrying. */
+export async function cleanupUpload(file: File, args: Pick<StartArgs, "studio" | "scene_id" | "subfolder" | "filename" | "idToken">): Promise<void> {
+  const id = resumeIdFor(file, args)
+  const s = await load(id)
+  if (!s) return
+  try {
+    const client = api(args.idToken)
+    await client.uploads.abort({ studio: args.studio, key: s.key, upload_id: s.upload_id })
+  } catch { /* ignore — best-effort cleanup */ }
+  await remove(id)
 }
