@@ -909,6 +909,7 @@ export type FluxStyle =
   | "vintage-film"
   | "holographic"
   | "brushed-steel"
+  | "trained-style"
 
 export interface FluxStyleOption {
   key: FluxStyle

@@ -416,14 +416,21 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
     } as unknown as T)
   }
   if (base === "/titles/flux-styles") {
-    return wait([
+    // Mirror the backend gate: trained-style only appears when the env var
+    // is set, matching FLUX_TRAINED_STYLE_ENABLED on the FastAPI side.
+    const trainedEnabled =
+      typeof process !== "undefined" &&
+      process.env.NEXT_PUBLIC_FLUX_TRAINED_STYLE_ENABLED === "1"
+    const styles = [
       { key: "gold-leaf",     label: "Gold leaf" },
       { key: "chrome",        label: "Chrome" },
       { key: "marble",        label: "Marble" },
       { key: "vintage-film",  label: "Vintage film" },
       { key: "holographic",   label: "Holographic" },
       { key: "brushed-steel", label: "Brushed steel" },
-    ] as unknown as T)
+      ...(trainedEnabled ? [{ key: "trained-style", label: "Trained style" }] : []),
+    ]
+    return wait(styles as unknown as T)
   }
 
   // ── Descriptions regen ────────────────────────────────────────────
