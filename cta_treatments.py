@@ -23676,3 +23676,12 @@ _TEXTURE_TREATMENTS = {
 }
 TREATMENTS.update(_TEXTURE_TREATMENTS)
 FEATURED_TREATMENTS.update(_TEXTURE_TREATMENTS)
+
+
+# ── Expansion: distinct aesthetics that filled real coverage gaps ─────────────
+# Editorial / brutalist / blueprint / stencil / riso / terminal / magazine /
+# bauhaus / kraft / vintage-poster. Hand-crafted, not parametric variants.
+from cta_treatments_expansion import EXPANSION_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(EXPANSION_TREATMENTS)
+FEATURED_TREATMENTS.update(EXPANSION_TREATMENTS)

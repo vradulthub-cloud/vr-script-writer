@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { api, type Treatment, type LocalTitleResult, type FluxLocalResult, type FluxStyle, type FluxStyleOption } from "@/lib/api"
+import { api, type Treatment, type LocalTitleResult } from "@/lib/api"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { useIdToken } from "@/hooks/use-id-token"
 import { PageHeader } from "@/components/ui/page-header"
@@ -44,67 +44,6 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // Local AI state (FLUX + RMBG via Windows ComfyUI)
-  // LoRA mode: "auto" trusts the style's `lora_default` (off for the six
-  // photographic presets, on for the trained-style preset). "on"/"off"
-  // forces the override — power-user / debug knob.
-  const [fluxStyle, setFluxStyle] = useState<FluxStyle>("gold-leaf")
-  const [fluxStyles, setFluxStyles] = useState<FluxStyleOption[]>([])
-  const [fluxLoraMode, setFluxLoraMode] = useState<"auto" | "on" | "off">("auto")
-  const [fluxSteps, setFluxSteps] = useState(6)
-  const [fluxBgRemove, setFluxBgRemove] = useState<"rmbg2" | "none">("rmbg2")
-  const [fluxResult, setFluxResult] = useState<FluxLocalResult | null>(null)
-  const [fluxLoading, setFluxLoading] = useState(false)
-  const [fluxError, setFluxError] = useState<string | null>(null)
-
-  // Load FLUX style presets on mount — same pattern as treatments above.
-  useEffect(() => {
-    if (fluxStyles.length > 0) return
-    client.titles.fluxStyles()
-      .then(s => setFluxStyles(Array.isArray(s) ? s : []))
-      .catch((e) => {
-        console.warn("[titles] Failed to load FLUX styles:", e)
-        setFluxStyles([])
-      })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  async function generateFlux() {
-    if (!titleText) return
-    setFluxLoading(true)
-    setFluxError(null)
-    setFluxResult(null)
-    try {
-      const data = await client.titles.fluxLocal({
-        text: titleText,
-        style: fluxStyle,
-        // "auto" → omit so backend uses the style's lora_default
-        ...(fluxLoraMode === "on"  ? { use_lora: true } : {}),
-        ...(fluxLoraMode === "off" ? { use_lora: false } : {}),
-        steps: fluxSteps,
-        seed: localSeed,
-        bg_remove: fluxBgRemove,
-      })
-      if (data.error) {
-        setFluxError(data.error)
-      } else {
-        setFluxResult(data)
-      }
-    } catch (e) {
-      setFluxError(e instanceof Error ? e.message : "FLUX generation failed")
-    } finally {
-      setFluxLoading(false)
-    }
-  }
-
-  function downloadFlux() {
-    if (!fluxResult?.data_url) return
-    const a = document.createElement("a")
-    a.href = fluxResult.data_url
-    a.download = `flux-${titleText.toLowerCase().replace(/\s+/g, "-").slice(0, 30)}-${fluxResult.seed}.png`
-    a.click()
-  }
 
   // Model name generator state
   const [mnName, setMnName] = useState("")
@@ -384,137 +323,10 @@ export function TitleGenerator({ idToken: serverIdToken }: Props) {
           </div>
         )}
 
-        {/* ── Local AI (FLUX + RMBG) ── */}
-        <div style={{ borderTop: "1px solid var(--color-border)", paddingTop: 20 }}>
-          <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
-            Local AI · FLUX + RMBG
-          </p>
-          <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginBottom: 12 }}>
-            Generates via FLUX.1 Schnell on the Windows box, strips background with RMBG-2.0. Uses the title text from above. Requires ComfyUI running.
-          </p>
-
-          <div className="flex gap-2 items-end mb-3 flex-wrap">
-            {/* Style preset — photographic material the prompt locks onto */}
-            <div>
-              <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Style</label>
-              <select
-                value={fluxStyle}
-                onChange={e => setFluxStyle(e.target.value as FluxStyle)}
-                className="px-2 py-1 rounded text-xs"
-                style={{
-                  background: "var(--color-surface)",
-                  color: "var(--color-text)",
-                  border: "1px solid var(--color-border)",
-                  minWidth: 140,
-                }}
-              >
-                {(fluxStyles.length > 0 ? fluxStyles : [{ key: "gold-leaf" as FluxStyle, label: "Gold leaf" }]).map(s => (
-                  <option key={s.key} value={s.key}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* LoRA mode — Auto trusts the style preset, On/Off forces override */}
-            <div>
-              <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Style LoRA</label>
-              <div className="flex gap-1">
-                {(["auto", "on", "off"] as const).map(val => (
-                  <button key={val} onClick={() => setFluxLoraMode(val)}
-                    className="px-2.5 py-1 rounded text-xs transition-colors"
-                    style={{
-                      background: fluxLoraMode === val ? "var(--color-elevated)" : "transparent",
-                      color: fluxLoraMode === val ? "var(--color-text)" : "var(--color-text-muted)",
-                      border: `1px solid ${fluxLoraMode === val ? "var(--color-border)" : "transparent"}`,
-                      textTransform: "capitalize",
-                    }}
-                  >{val}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Steps */}
-            <div>
-              <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Steps</label>
-              <div className="flex gap-1">
-                {[2, 4, 6, 8].map(n => (
-                  <button key={n} onClick={() => setFluxSteps(n)}
-                    className="px-2 py-1 rounded text-xs transition-colors"
-                    style={{
-                      background: fluxSteps === n ? "var(--color-elevated)" : "transparent",
-                      color: fluxSteps === n ? "var(--color-text)" : "var(--color-text-muted)",
-                      border: `1px solid ${fluxSteps === n ? "var(--color-border)" : "transparent"}`,
-                    }}
-                  >{n}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* BG remove */}
-            <div>
-              <label className="block mb-1" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>BG remove</label>
-              <div className="flex gap-1">
-                {([["rmbg2", "RMBG-2"], ["none", "Off"]] as const).map(([val, label]) => (
-                  <button key={val} onClick={() => setFluxBgRemove(val)}
-                    className="px-2.5 py-1 rounded text-xs transition-colors"
-                    style={{
-                      background: fluxBgRemove === val ? "var(--color-elevated)" : "transparent",
-                      color: fluxBgRemove === val ? "var(--color-text)" : "var(--color-text-muted)",
-                      border: `1px solid ${fluxBgRemove === val ? "var(--color-border)" : "transparent"}`,
-                    }}
-                  >{label}</button>
-                ))}
-              </div>
-            </div>
-
-            <button
-              onClick={generateFlux}
-              disabled={fluxLoading || !titleText}
-              className="px-3 py-1.5 rounded text-xs font-semibold transition-colors"
-              style={{
-                background: fluxLoading ? "var(--color-elevated)" : "var(--color-lime)",
-                color: fluxLoading ? "var(--color-text-muted)" : "var(--color-lime-ink)",
-                cursor: fluxLoading ? "wait" : "pointer",
-                opacity: (!titleText && !fluxLoading) ? 0.5 : 1,
-              }}
-            >
-              {fluxLoading ? "Rendering…" : !titleText ? "Enter title" : "Generate FLUX"}
-            </button>
-          </div>
-
-          {fluxError && <ErrorAlert className="mb-2 text-xs">{fluxError}</ErrorAlert>}
-
-          {fluxLoading && (
-            <div className="rounded flex items-center justify-center"
-              style={{ height: 220, border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text-muted)", fontSize: 12 }}
-            >
-              FLUX inference on the Windows box — typically 8–20s
-            </div>
-          )}
-
-          {fluxResult && fluxResult.data_url && !fluxLoading && (
-            <div style={{ maxWidth: 720 }}>
-              <div className="rounded overflow-hidden mb-1.5"
-                style={{
-                  border: "1px solid var(--color-border)",
-                  background: "repeating-conic-gradient(#1a1a1a 0% 25%, #111 0% 50%) 0 0 / 16px 16px",
-                }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={fluxResult.data_url} alt={`FLUX: ${titleText}`} style={{ width: "100%", display: "block" }} />
-              </div>
-              <p style={{ fontSize: 10, color: "var(--color-text-faint)", marginBottom: 6 }}>
-                seed {fluxResult.seed} · LoRA {fluxLoraMode} · {fluxSteps} steps · {fluxBgRemove === "rmbg2" ? "RMBG-2" : "no BG removal"}
-              </p>
-              <button
-                onClick={downloadFlux}
-                className="px-2 py-1 rounded text-xs transition-colors"
-                style={{ background: "var(--color-lime)", color: "var(--color-lime-ink)", fontWeight: 600 }}
-              >
-                Download
-              </button>
-            </div>
-          )}
-        </div>
+        {/* The FLUX + RMBG "Local AI" section was removed: outputs were
+            consistently low-quality vs the PIL pipeline. Backend route and
+            workflow JSON are still in place — no UI surface area for now.
+            Decision: invest entirely in expanding the PIL treatment library. */}
 
         {/* ── Model Name Generator ── */}
         <div style={{ borderTop: "1px solid var(--color-border)", paddingTop: 20 }}>
