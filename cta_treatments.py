@@ -23685,3 +23685,51 @@ from cta_treatments_expansion import EXPANSION_TREATMENTS  # noqa: E402
 
 TREATMENTS.update(EXPANSION_TREATMENTS)
 FEATURED_TREATMENTS.update(EXPANSION_TREATMENTS)
+
+
+# ── Pack 2: Genre cinema (10 treatments) ──────────────────────────────────────
+# Noir, grindhouse, giallo, blaxploitation, drive-in, lobby card, hammer
+# horror, spaghetti western, hong kong kungfu, hitchcock silhouette.
+from cta_treatments_pack2_cinema import PACK2_CINEMA_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK2_CINEMA_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK2_CINEMA_TREATMENTS)
+
+
+# ── Pack 3: Music genre archetypes (10 treatments) ────────────────────────────
+# Blue Note jazz, punk zine, hip-hop graffiti, prog rock fantasy,
+# metal blackletter, country ornate, minimal techno, indie folk hand-drawn,
+# Motown soul, reggae woodcut.
+from cta_treatments_pack3_music import PACK3_MUSIC_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK3_MUSIC_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK3_MUSIC_TREATMENTS)
+
+
+# ── Pack 4: Era pastiche (10 treatments) ──────────────────────────────────────
+# Saul Bass 50s, Push Pin 60s, WPA 30s, Memphis 80s, 90s zine xerox,
+# Y2K chrome, Victorian playbill, Art Nouveau, Belle Époque, AmTrad tattoo.
+from cta_treatments_pack4_eras import PACK4_ERAS_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK4_ERAS_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK4_ERAS_TREATMENTS)
+
+
+# ── Pack 5: International poster schools (8 treatments) ───────────────────────
+# Russian constructivist, Italian futurist, Polish poster school, Swiss
+# international, Japanese mid-century, Dutch De Stijl, Mexican mural,
+# Cuban silkscreen.
+from cta_treatments_pack5_international import PACK5_INTERNATIONAL_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK5_INTERNATIONAL_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK5_INTERNATIONAL_TREATMENTS)
+
+
+# ── Pack 6: Mutant heritage / 2026 trends (10 treatments) ─────────────────────
+# Per Creative Bloq's 2026 forecast: classic forms hacked for the present,
+# expressive personality, hand-drawn rawness, dynamic angles. Not nostalgia —
+# heritage tech-tuned.
+from cta_treatments_pack6_mutant import PACK6_MUTANT_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK6_MUTANT_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK6_MUTANT_TREATMENTS)
