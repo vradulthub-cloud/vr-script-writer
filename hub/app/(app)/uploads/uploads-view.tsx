@@ -1,8 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { RotateCw } from "lucide-react"
 import { UploadCloud, Pencil, X, Check, AlertCircle, Copy, Link as LinkIcon } from "lucide-react"
-import { uploadFile, type UploadProgress } from "@/lib/upload-multipart"
+import { uploadFile, cleanupUpload, getResumableProgress, type UploadProgress } from "@/lib/upload-multipart"
 import {
   classify,
   formatBytes,
@@ -16,7 +17,7 @@ import {
 } from "@/lib/upload-classifier"
 import { api, type UploadHistoryRow } from "@/lib/api"
 
-type RowState = "pending" | "uploading" | "done" | "error" | "aborted"
+type RowState = "pending" | "queued" | "uploading" | "done" | "error" | "aborted"
 
 interface UploadRow {
   id: string
@@ -27,6 +28,8 @@ interface UploadRow {
   controller: AbortController | null
   result?: { key: string; presigned_url: string }
   error?: string
+  /** Resumable progress detected on the row (e.g. after a failure). */
+  resumable?: { partsCompleted: number; partsTotal: number; bytesUploaded: number } | null
 }
 
 const studioColorVar: Record<StudioCode, string> = {
@@ -48,6 +51,12 @@ function relativeTime(tsSec: number): string {
   return `${Math.round(diff / 86400)}d ago`
 }
 
+// Cap concurrent file uploads. Each in-flight upload itself runs up to 4
+// parallel part PUTs, so MAX_CONCURRENT_UPLOADS × 4 ≈ S4 fan-out.
+// 2 keeps us within MEGA S4's polite rate ceiling and stays under most
+// browsers' 6-conn-per-origin cap when paired with the API + S4 hostnames.
+const MAX_CONCURRENT_UPLOADS = 2
+
 export function UploadsView({
   idToken,
   initialHistory,
@@ -60,6 +69,13 @@ export function UploadsView({
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const folderInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Queue + worker-pool state. Refs so handlers don't capture stale snapshots
+  // and we don't churn renders on every dequeue. Queue stores row references
+  // directly because reading rows from `setRows(prev => ...)` is async (React
+  // batches updater callbacks) and would race the dequeue.
+  const uploadQueueRef = useRef<UploadRow[]>([])
+  const inFlightRef = useRef<Set<string>>(new Set())
 
   const client = useMemo(() => api(idToken), [idToken])
 
@@ -121,15 +137,31 @@ export function UploadsView({
   }, [])
 
   const removeRow = useCallback((id: string) => {
+    // Drop from the queue if it never started, abort if it's mid-upload.
+    uploadQueueRef.current = uploadQueueRef.current.filter(r => r.id !== id)
+    let target: UploadRow | undefined
     setRows(prev => {
-      const r = prev.find(x => x.id === id)
-      r?.controller?.abort()
+      target = prev.find(x => x.id === id)
+      target?.controller?.abort()
       return prev.filter(x => x.id !== id)
     })
-  }, [])
+    // If the row was an unresumed failure with saved partial progress, tell
+    // S4 to abandon the multipart and free the parts. Best-effort.
+    if (target && target.state === "error" && target.decision.studio
+        && target.decision.scene_id && target.decision.subfolder) {
+      void cleanupUpload(target.file, {
+        studio:    target.decision.studio,
+        scene_id:  target.decision.scene_id,
+        subfolder: target.decision.subfolder,
+        filename:  target.decision.filename,
+        idToken,
+      })
+    }
+  }, [idToken])
 
   // ── Uploading ──────────────────────────────────────────────────────────
-  const startUpload = useCallback(async (row: UploadRow) => {
+  // Run a single file end-to-end. Caller is responsible for queue accounting.
+  const runUpload = useCallback(async (row: UploadRow) => {
     if (!row.decision.studio || !row.decision.scene_id || !row.decision.subfolder) return
     const controller = new AbortController()
     setRows(prev => prev.map(r => r.id === row.id ? { ...r, state: "uploading", controller } : r))
@@ -157,15 +189,87 @@ export function UploadsView({
     }
   }, [idToken, refreshHistory])
 
+  // Worker-pool drain: pull rows off the queue and run up to
+  // MAX_CONCURRENT_UPLOADS in parallel. Each completion triggers another pump.
+  const pumpQueue = useCallback(() => {
+    while (inFlightRef.current.size < MAX_CONCURRENT_UPLOADS) {
+      const next = uploadQueueRef.current.shift()
+      if (!next) return
+      // removeRow filters cancelled rows out of the queue, so anything left
+      // here is fair game — run it.
+      inFlightRef.current.add(next.id)
+      void runUpload(next).finally(() => {
+        inFlightRef.current.delete(next.id)
+        pumpQueue()
+      })
+    }
+  }, [runUpload])
+
+  // Helper: is this row already queued or in-flight?
+  const isAlreadyScheduled = (id: string) =>
+    uploadQueueRef.current.some(r => r.id === id) || inFlightRef.current.has(id)
+
+  // Single-row trigger — used by per-row Upload button and "Upload all ready".
+  const startUpload = useCallback((row: UploadRow) => {
+    if (!row.decision.studio || !row.decision.scene_id || !row.decision.subfolder) return
+    if (isAlreadyScheduled(row.id)) return
+    // Mark as queued in UI so user sees it move out of "ready".
+    setRows(prev => prev.map(r => r.id === row.id ? { ...r, state: "queued" } : r))
+    uploadQueueRef.current.push(row)
+    pumpQueue()
+  }, [pumpQueue])
+
   const uploadAllReady = useCallback(() => {
-    rows
-      .filter(r => r.state === "pending" && r.decision.confidence >= 1)
-      .forEach(r => void startUpload(r))
-  }, [rows, startUpload])
+    const ready = rows.filter(r => r.state === "pending" && r.decision.confidence >= 1)
+    if (ready.length === 0) return
+    setRows(prev => prev.map(r =>
+      ready.some(x => x.id === r.id) ? { ...r, state: "queued" } : r
+    ))
+    for (const r of ready) {
+      if (!isAlreadyScheduled(r.id)) uploadQueueRef.current.push(r)
+    }
+    pumpQueue()
+  }, [rows, pumpQueue])
+
+  // Retry a failed row — re-enqueue it. uploadFile() will see saved IndexedDB
+  // state for this (file fingerprint + destination) and skip already-uploaded
+  // parts, so progress resumes from where it failed.
+  const retryUpload = useCallback((row: UploadRow) => {
+    if (!row.decision.studio || !row.decision.scene_id || !row.decision.subfolder) return
+    if (isAlreadyScheduled(row.id)) return
+    setRows(prev => prev.map(r => r.id === row.id
+      ? { ...r, state: "queued", error: undefined, progress: null }
+      : r))
+    uploadQueueRef.current.push(row)
+    pumpQueue()
+  }, [pumpQueue])
+
+  // After a row enters "error", check IndexedDB to see how much progress was
+  // saved — used by the UI to show "Resume from N%" on the row.
+  useEffect(() => {
+    const errored = rows.filter(r => r.state === "error" && r.resumable === undefined)
+    if (errored.length === 0) return
+    let cancelled = false
+    void (async () => {
+      for (const r of errored) {
+        if (!r.decision.scene_id || !r.decision.subfolder) continue
+        const resumable = await getResumableProgress(r.file, {
+          scene_id:  r.decision.scene_id,
+          subfolder: r.decision.subfolder,
+          filename:  r.decision.filename,
+        })
+        if (cancelled) return
+        setRows(prev => prev.map(x => x.id === r.id ? { ...x, resumable } : x))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [rows])
 
   // ── Render ─────────────────────────────────────────────────────────────
   const pending = rows.filter(r => r.state === "pending")
-  const active = rows.filter(r => r.state === "uploading")
+  // Queued rows are sitting in the worker-pool waiting for a slot — render
+  // them alongside actively-uploading rows so the user sees the full pipeline.
+  const active = rows.filter(r => r.state === "uploading" || r.state === "queued")
   const completed = rows.filter(r => r.state === "done" || r.state === "error" || r.state === "aborted")
   const readyCount = pending.filter(r => r.decision.confidence >= 1).length
 
@@ -276,7 +380,12 @@ export function UploadsView({
       {completed.length > 0 && (
         <Block title="Just finished" count={completed.length}>
           {completed.map(row => (
-            <CompletedRow key={row.id} row={row} onDismiss={() => removeRow(row.id)} />
+            <CompletedRow
+              key={row.id}
+              row={row}
+              onDismiss={() => removeRow(row.id)}
+              onRetry={() => retryUpload(row)}
+            />
           ))}
         </Block>
       )}
@@ -476,6 +585,7 @@ const inputStyle: React.CSSProperties = {
 }
 
 function ActiveRow({ row, onCancel }: { row: UploadRow; onCancel: () => void }) {
+  const isQueued = row.state === "queued"
   const p = row.progress
   const pct = p ? Math.min(100, Math.round((p.bytesUploaded / Math.max(1, p.bytesTotal)) * 100)) : 0
   const studio = row.decision.studio
@@ -487,18 +597,24 @@ function ActiveRow({ row, onCancel }: { row: UploadRow; onCancel: () => void }) 
         padding: "12px 16px",
         borderBottom: "1px solid var(--color-border-subtle)",
         borderLeft: `3px solid ${tint}`,
+        opacity: isQueued ? 0.6 : 1,
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <span style={{ fontWeight: 500, fontSize: 13 }}>{row.file.name}</span>
           <span style={{ fontSize: 11, color: "var(--color-text-muted)", fontFamily: "var(--font-mono)" }}>
-            {formatBytes(p?.bytesUploaded ?? 0)} / {formatBytes(row.file.size)} · {pct}%
-            {p && p.partsTotal > 0 && <> · part {p.partsCompleted}/{p.partsTotal}</>}
+            {isQueued
+              ? <span style={{ textTransform: "uppercase", letterSpacing: "0.08em" }}>queued</span>
+              : <>
+                  {formatBytes(p?.bytesUploaded ?? 0)} / {formatBytes(row.file.size)} · {pct}%
+                  {p && p.partsTotal > 0 && <> · part {p.partsCompleted}/{p.partsTotal}</>}
+                </>
+            }
           </span>
         </div>
         <div style={{ marginTop: 6, height: 4, background: "var(--color-base)" }}>
-          <div style={{ width: `${pct}%`, height: 4, background: "var(--color-lime)", transition: "width 120ms ease" }} />
+          <div style={{ width: `${isQueued ? 0 : pct}%`, height: 4, background: "var(--color-lime)", transition: "width 120ms ease" }} />
         </div>
         <div style={{ marginTop: 4, fontSize: 11, color: "var(--color-text-faint)", fontFamily: "var(--font-mono)" }}>
           {studio?.toLowerCase()} / {row.decision.scene_id} / {row.decision.subfolder} / {row.decision.filename}
@@ -511,10 +627,20 @@ function ActiveRow({ row, onCancel }: { row: UploadRow; onCancel: () => void }) 
   )
 }
 
-function CompletedRow({ row, onDismiss }: { row: UploadRow; onDismiss: () => void }) {
+function CompletedRow({ row, onDismiss, onRetry }: {
+  row: UploadRow
+  onDismiss: () => void
+  onRetry: () => void
+}) {
   const ok = row.state === "done"
   const studio = row.decision.studio
   const tint = studio ? studioColorVar[studio] : "var(--color-text-faint)"
+  // Show resume affordance when this row failed mid-upload AND we still have
+  // saved part progress in IndexedDB. uploadFile() will reuse those parts.
+  const hasResume = row.state === "error" && row.resumable && row.resumable.partsCompleted > 0
+  const resumePct = hasResume
+    ? Math.round((row.resumable!.partsCompleted / Math.max(1, row.resumable!.partsTotal)) * 100)
+    : 0
   return (
     <div
       style={{
@@ -522,11 +648,11 @@ function CompletedRow({ row, onDismiss }: { row: UploadRow; onDismiss: () => voi
         padding: "10px 16px",
         borderBottom: "1px solid var(--color-border-subtle)",
         borderLeft: `3px solid ${tint}`,
-        opacity: ok ? 1 : 0.7,
+        opacity: ok ? 1 : 0.85,
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {ok
             ? <Check size={14} style={{ color: "var(--color-ok)" }} />
             : <AlertCircle size={14} style={{ color: row.state === "aborted" ? "var(--color-text-muted)" : "var(--color-err)" }} />
@@ -535,6 +661,18 @@ function CompletedRow({ row, onDismiss }: { row: UploadRow; onDismiss: () => voi
           <span style={{ fontSize: 11, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             {row.state}
           </span>
+          {hasResume && (
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "var(--color-lime)",
+              padding: "1px 6px",
+              border: "1px solid var(--color-lime)",
+              borderRadius: 2,
+            }}>
+              Resumable · {resumePct}% saved
+            </span>
+          )}
         </div>
         {row.error && (
           <div style={{ marginTop: 2, fontSize: 11, color: "var(--color-err)" }}>{row.error}</div>
@@ -545,7 +683,19 @@ function CompletedRow({ row, onDismiss }: { row: UploadRow; onDismiss: () => voi
           </div>
         )}
       </div>
-      <button type="button" onClick={onDismiss} className="ec-btn ghost" style={{ padding: "5px 8px" }}>
+      {row.state === "error" && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="ec-btn molten"
+          style={{ padding: "5px 12px", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}
+          title={hasResume ? `Resume from ${resumePct}%` : "Retry upload"}
+        >
+          <RotateCw size={12} />
+          {hasResume ? "Resume" : "Retry"}
+        </button>
+      )}
+      <button type="button" onClick={onDismiss} className="ec-btn ghost" style={{ padding: "5px 8px" }} title="Dismiss & abandon">
         <X size={13} />
       </button>
     </div>
