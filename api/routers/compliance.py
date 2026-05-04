@@ -3365,7 +3365,7 @@ async def search_compliance_signatures(
     date_from: Optional[str] = Query(default=None, alias="from"),
     date_to: Optional[str] = Query(default=None, alias="to"),
     studio: Optional[str] = Query(default=None),
-    role: Optional[str] = Query(default=None, regex="^(female|male)$"),
+    role: Optional[str] = Query(default=None, pattern="^(female|male)$"),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ):
