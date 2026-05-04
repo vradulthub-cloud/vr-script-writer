@@ -454,6 +454,31 @@ CREATE TABLE IF NOT EXISTS compliance_photos (
 CREATE INDEX IF NOT EXISTS idx_photos_shoot ON compliance_photos(shoot_id);
 CREATE INDEX IF NOT EXISTS idx_photos_scene ON compliance_photos(scene_id);
 CREATE INDEX IF NOT EXISTS idx_photos_date  ON compliance_photos(shoot_date);
+
+-- Per-user notification preferences. One row per (user_email, event_type).
+-- Channels are stored as a comma-separated subset of "in_app,email,teams".
+-- Missing rows fall back to the defaults defined in api.notification_dispatcher.
+CREATE TABLE IF NOT EXISTS user_notification_prefs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_email TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    channels TEXT NOT NULL DEFAULT 'in_app',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(user_email, event_type)
+);
+CREATE INDEX IF NOT EXISTS idx_unp_email ON user_notification_prefs(user_email);
+CREATE INDEX IF NOT EXISTS idx_unp_event ON user_notification_prefs(event_type);
+
+-- Application-wide settings (admin-managed). Used for integration secrets
+-- like Teams webhook URLs that we don't want to bake into code or leak to
+-- the frontend. One row per setting key.
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT '',
+    updated_by TEXT DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
 """
 
 

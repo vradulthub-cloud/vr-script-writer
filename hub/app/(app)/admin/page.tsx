@@ -8,6 +8,7 @@ import { AuditLogPanel } from "./audit-log-panel"
 import { TasksPanel } from "./tasks-panel"
 import { PromptsPanel } from "./prompts-panel"
 import { ComplianceW9Panel } from "./compliance-w9-panel"
+import { IntegrationsPanel } from "./integrations-panel"
 import { AdminTabs } from "./admin-tabs"
 import { StatStrip, type StatTile } from "./stat-strip"
 
@@ -132,6 +133,7 @@ export default async function AdminPage() {
           ),
           prompts: <PromptsPanel idToken={idToken} />,
           compliance: <ComplianceW9Panel idToken={idToken} />,
+          integrations: <IntegrationsPanel idToken={idToken} />,
         }}
       />
     </div>

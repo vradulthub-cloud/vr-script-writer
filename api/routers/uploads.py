@@ -19,9 +19,13 @@ ETag from each, and posts the {part_number, etag} list to /complete.
 """
 from __future__ import annotations
 
+import io
 import logging
 import math
+import os
 import re
+import threading
+import zipfile
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -30,6 +34,7 @@ from pydantic import BaseModel, Field
 from api.auth import CurrentUser
 from api.database import get_db
 from api import uploads_log
+from api import notification_dispatcher
 import s4_client
 
 _log = logging.getLogger(__name__)
@@ -226,6 +231,181 @@ def _bump_scene_flag(scene_id: str, subfolder: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# ZIP → Storyboard extraction (background, after Photos upload)
+# ---------------------------------------------------------------------------
+
+class _S3RangeReader(io.RawIOBase):
+    """Seekable file-like backed by S3 Range GET requests.
+
+    Only the central directory + selected entries are fetched — not the
+    full archive. Borrowed from backfill_storyboard_from_photos.py."""
+
+    def __init__(self, bucket: str, key: str, size: int) -> None:
+        self._bucket = bucket
+        self._key = key
+        self._size = size
+        self._pos = 0
+        self._cache: bytes | None = None
+        self._cache_start = 0
+        self._cache_end = 0
+        self._client = s4_client._client()
+
+    def readable(self) -> bool: return True
+    def seekable(self) -> bool: return True
+    def tell(self) -> int: return self._pos
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence == io.SEEK_SET:
+            self._pos = offset
+        elif whence == io.SEEK_CUR:
+            self._pos += offset
+        elif whence == io.SEEK_END:
+            self._pos = self._size + offset
+        self._pos = max(self._pos, 0)
+        return self._pos
+
+    def read(self, size: int = -1) -> bytes:
+        if self._pos >= self._size:
+            return b""
+        if size is None or size < 0:
+            size = self._size - self._pos
+        end = min(self._pos + size, self._size)
+        if self._cache and self._cache_start <= self._pos and end <= self._cache_end:
+            data = self._cache[self._pos - self._cache_start : end - self._cache_start]
+            self._pos = end
+            return data
+        block = max(end - self._pos, 65536)
+        block_start = self._pos
+        block_end = min(block_start + block, self._size) - 1
+        resp = self._client.get_object(
+            Bucket=self._bucket, Key=self._key,
+            Range=f"bytes={block_start}-{block_end}",
+        )
+        body = resp["Body"].read()
+        self._cache = body
+        self._cache_start = block_start
+        self._cache_end = block_start + len(body)
+        data = body[: end - block_start]
+        self._pos = end
+        return data
+
+
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+def _extract_web_storyboard(studio: str, scene_id: str, zip_key: str) -> None:
+    """Read a Photos ZIP from S4 via range requests, pull every image inside
+    the Web/ folder, and upload each one to {scene_id}/Storyboard/."""
+    bucket = s4_client.STUDIO_BUCKETS[studio]
+    head = s4_client.head_object(studio, zip_key)
+    if not head:
+        _log.warning("storyboard-extract: ZIP not found key=%s", zip_key)
+        return
+    size = head["size"]
+
+    reader = _S3RangeReader(bucket, zip_key, size)
+    try:
+        zf = zipfile.ZipFile(reader)
+    except zipfile.BadZipFile:
+        _log.warning("storyboard-extract: bad zip key=%s", zip_key)
+        return
+
+    def _is_web_storyboard(name: str) -> bool:
+        parts = [p.lower() for p in name.replace("\\", "/").split("/")]
+        for i in range(len(parts) - 1):
+            if parts[i] == "web" and parts[i + 1] == "storyboard":
+                return True
+        return False
+
+    web_images = [
+        info for info in zf.infolist()
+        if not info.is_dir()
+        and os.path.splitext(info.filename)[1].lower() in _IMAGE_EXTS
+        and _is_web_storyboard(info.filename)
+    ]
+
+    if not web_images:
+        _log.info("storyboard-extract: no Web/Storyboard/ images in %s", zip_key)
+        return
+
+    client = s4_client._client()
+    uploaded = 0
+    for info in web_images:
+        basename = os.path.basename(info.filename)
+        if not basename or basename.startswith("."):
+            continue
+        dest_key = f"{scene_id}/Storyboard/{basename}"
+        try:
+            data = zf.read(info)
+            client.put_object(
+                Bucket=bucket, Key=dest_key, Body=data,
+                ContentType="image/jpeg",
+            )
+            uploaded += 1
+        except Exception:
+            _log.exception("storyboard-extract: failed to upload %s", dest_key)
+
+    if uploaded:
+        _bump_scene_flag(scene_id, "Storyboard")
+        _log.info(
+            "storyboard-extract: %d images from Web/ → %s/Storyboard/",
+            uploaded, scene_id,
+        )
+
+
+def _maybe_extract_storyboard_bg(
+    studio: str, scene_id: str, subfolder: str, key: str,
+) -> None:
+    """If the completed upload is a ZIP in Photos/, fire off background
+    extraction of the Web/ folder → Storyboard/."""
+    if subfolder != "Photos" or not key.lower().endswith(".zip"):
+        return
+    def _run():
+        try:
+            _extract_web_storyboard(studio, scene_id, key)
+        except Exception:
+            _log.exception("storyboard-extract background failed key=%s", key)
+    threading.Thread(target=_run, daemon=True).start()
+
+
+# Subfolder → notification event type. Anything not listed (e.g. Video
+# Thumbnail) doesn't fire a notification on its own.
+_SUBFOLDER_EVENT_TYPES: dict[str, str] = {
+    "Photos":      "photos_uploaded",
+    "Videos":      "video_uploaded",
+    "Description": "description_uploaded",
+    "Storyboard":  "storyboard_uploaded",
+    "Legal":       "legal_uploaded",
+}
+
+
+def _dispatch_upload_event(
+    user: dict, studio: str, scene_id: str, subfolder: str, filename: str,
+) -> None:
+    """Fan a completed upload out via the notification dispatcher. Best-
+    effort — never raises, since the upload already succeeded."""
+    event_type = _SUBFOLDER_EVENT_TYPES.get(subfolder)
+    if not event_type:
+        return
+    label = subfolder.lower()
+    actor = user.get("name") or user.get("email") or "someone"
+    title = f"{subfolder} uploaded — {scene_id}"
+    message = f"{actor} uploaded {filename} to {scene_id}/{subfolder} ({studio})."
+    link = f"/missing?scene={scene_id}"
+    try:
+        notification_dispatcher.dispatch(
+            notification_dispatcher.NotificationEvent(
+                event_type=event_type,
+                title=title,
+                message=message,
+                link=link,
+            ),
+        )
+    except Exception:
+        _log.exception("dispatch %s failed scene=%s", event_type, scene_id)
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -333,6 +513,8 @@ async def multipart_complete(req: CompleteRequest, user: CurrentUser):
     except Exception:
         _log.exception("presign post-complete failed (non-fatal) key=%s", req.key)
 
+    _maybe_extract_storyboard_bg(studio, scene_id, subfolder, req.key)
+    _dispatch_upload_event(user, studio, scene_id, subfolder, filename)
     _log.info("upload complete user=%s key=%s size=%s", user.get("name"), req.key, req.size)
     return CompleteResponse(
         ok=True,

@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
-import { Bell, Ticket, RefreshCw, UserCheck, Pin } from "lucide-react"
+import { Bell, Ticket, RefreshCw, UserCheck, Pin, Settings } from "lucide-react"
+import Link from "next/link"
 import { signOut } from "next-auth/react"
 import { api, ApiError, type Notification } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
@@ -269,6 +270,30 @@ export function NotificationBell({ idToken: serverToken, disablePolling }: Notif
             ))}
           </div>
           </div>{/* end scroll shadow wrapper */}
+          <div
+            style={{
+              borderTop: "1px solid var(--color-border-subtle, var(--color-border))",
+              padding: "8px 12px",
+              display: "flex",
+              justifyContent: "flex-end",
+            }}
+          >
+            <Link
+              href="/settings/notifications"
+              onClick={() => setOpen(false)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                fontSize: 11,
+                color: "var(--color-text-muted)",
+                textDecoration: "none",
+              }}
+            >
+              <Settings size={11} aria-hidden="true" />
+              Manage preferences
+            </Link>
+          </div>
         </div>
       )}
 

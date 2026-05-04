@@ -99,6 +99,42 @@ async def mark_all_read(user: CurrentUser):
     return {"updated": updated}
 
 
+# ---------------------------------------------------------------------------
+# Per-user notification preferences
+# ---------------------------------------------------------------------------
+
+class PrefUpdate(BaseModel):
+    event_type: str
+    channels: list[str]
+    enabled: bool
+
+
+@router.get("/prefs")
+async def get_prefs(user: CurrentUser):
+    """Return the current user's notification preferences. Always returns
+    one entry per registered event type, falling back to event defaults
+    when the user hasn't customized that type yet."""
+    from api import notification_dispatcher
+    return notification_dispatcher.get_user_prefs(user["email"])
+
+
+@router.put("/prefs")
+async def update_prefs(req: PrefUpdate, user: CurrentUser):
+    """Upsert one event-type preference. Returns the refreshed full list."""
+    from api import notification_dispatcher
+    try:
+        notification_dispatcher.set_user_pref(
+            user_email=user["email"],
+            event_type=req.event_type,
+            channels=req.channels,
+            enabled=req.enabled,
+        )
+    except ValueError as exc:
+        from fastapi import HTTPException, status as st
+        raise HTTPException(status_code=st.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return notification_dispatcher.get_user_prefs(user["email"])
+
+
 @router.get("/diagnostic")
 async def diagnostic(user: CurrentUser):
     """Admin-only health check — counts and recent activity for the

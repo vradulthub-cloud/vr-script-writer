@@ -115,6 +115,7 @@ class BoardShootScene(BaseModel):
     title: str = ""
     performers: str = ""
     has_thumbnail: bool = False
+    has_description: bool = False
     mega_path: str = ""
     assets: list[SceneAssetState]
 
@@ -962,6 +963,7 @@ def _load_shoots_window(from_date: date, to_date: date, include_cancelled: bool)
                     title=(scene_row or {}).get("title", "") or "",
                     performers=f"{female}{(' / ' + male) if male else ''}",
                     has_thumbnail=bool((scene_row or {}).get("has_thumbnail")),
+                    has_description=bool((scene_row or {}).get("has_description")),
                     mega_path="",
                     assets=assets,
                 ))
