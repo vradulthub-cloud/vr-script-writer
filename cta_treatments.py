@@ -23733,3 +23733,40 @@ from cta_treatments_pack6_mutant import PACK6_MUTANT_TREATMENTS  # noqa: E402
 
 TREATMENTS.update(PACK6_MUTANT_TREATMENTS)
 FEATURED_TREATMENTS.update(PACK6_MUTANT_TREATMENTS)
+
+
+# ── Pack 7: Sport / athletic (10 treatments) ──────────────────────────────────
+# NFL crest, MLB jersey, college varsity, racing livery, basketball jersey,
+# X-games, Olympics rings, motorsport carbon, esports, soccer kit.
+from cta_treatments_pack7_sport import PACK7_SPORT_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK7_SPORT_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK7_SPORT_TREATMENTS)
+
+
+# ── Pack 8: Food & drink (10 treatments) ──────────────────────────────────────
+# Cocktail menu, diner sign, French bistro, sushi bar, ramen shop, bakery,
+# coffee roaster, craft beer, wine label, fine dining.
+from cta_treatments_pack8_food import PACK8_FOOD_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK8_FOOD_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK8_FOOD_TREATMENTS)
+
+
+# ── Pack 9: Tech / Sci-fi (10 treatments) ─────────────────────────────────────
+# HUD overlay, cyberpunk neon kanji, AI/ML aesthetic, cassette futurism,
+# vector wireframe, mainframe terminal, glitch corruption, synthwave grid,
+# satellite tracking, holographic packaging.
+from cta_treatments_pack9_tech import PACK9_TECH_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK9_TECH_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK9_TECH_TREATMENTS)
+
+
+# ── Pack 10: Nature / outdoor (10 treatments) ─────────────────────────────────
+# Botanical, ranger badge, national parks, mountain ridge, ocean depth,
+# sunset gradient, forest pine, desert dust, arctic frost, tropical paradise.
+from cta_treatments_pack10_nature import PACK10_NATURE_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK10_NATURE_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK10_NATURE_TREATMENTS)
