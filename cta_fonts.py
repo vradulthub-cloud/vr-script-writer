@@ -182,6 +182,49 @@ _GFONTS = {
     "Tomorrow-Bold.ttf":              "https://github.com/google/fonts/raw/main/ofl/tomorrow/Tomorrow-Bold.ttf",
     "K2D-ExtraBold.ttf":              "https://github.com/google/fonts/raw/main/ofl/k2d/K2D-ExtraBold.ttf",
     "Sixtyfour-Regular.ttf":          "https://github.com/google/fonts/raw/main/ofl/sixtyfour/Sixtyfour%5BBLED%2CSCAN%5D.ttf",
+
+    # ── Expansion: 30 hand-picked fresh additions (avoiding reflex picks). ────
+    # Distinctive display
+    "BowlbyOne-Regular.ttf":          "https://github.com/google/fonts/raw/main/ofl/bowlbyone/BowlbyOne-Regular.ttf",
+    "Honk-Variable.ttf":              "https://github.com/google/fonts/raw/main/ofl/honk/Honk%5BMORF%2CSHLN%5D.ttf",
+    "Caprasimo-Regular.ttf":          "https://github.com/google/fonts/raw/main/ofl/caprasimo/Caprasimo-Regular.ttf",
+    "Plaster-Regular.ttf":            "https://github.com/google/fonts/raw/main/ofl/plaster/Plaster-Regular.ttf",
+    "RubikMonoOne-Regular.ttf":       "https://github.com/google/fonts/raw/main/ofl/rubikmonoone/RubikMonoOne-Regular.ttf",
+    "Fascinate-Regular.ttf":          "https://github.com/google/fonts/raw/main/ofl/fascinate/Fascinate-Regular.ttf",
+    "Foldit-Variable.ttf":            "https://github.com/google/fonts/raw/main/ofl/foldit/Foldit%5Bwght%5D.ttf",
+    "ClimateCrisis-Variable.ttf":     "https://github.com/google/fonts/raw/main/ofl/climatecrisis/ClimateCrisis%5BYEAR%5D.ttf",
+    "Bungee-Inline.ttf":              "https://github.com/google/fonts/raw/main/ofl/bungeeinline/BungeeInline-Regular.ttf",
+    "BungeeShade-Regular.ttf":        "https://github.com/google/fonts/raw/main/ofl/bungeeshade/BungeeShade-Regular.ttf",
+
+    # Vintage / book serifs (distinct from the existing luxury cluster)
+    "CinzelDecorative-Bold.ttf":      "https://github.com/google/fonts/raw/main/ofl/cinzeldecorative/CinzelDecorative-Bold.ttf",
+    "IMFellEnglishSC-Regular.ttf":    "https://github.com/google/fonts/raw/main/ofl/imfellenglishsc/IMFELLEnglishSC-Regular.ttf",
+    "IMFellDoublePica-Regular.ttf":   "https://github.com/google/fonts/raw/main/ofl/imfelldoublepica/IMFELLDoublePica-Regular.ttf",
+    "DellaRespira-Regular.ttf":       "https://github.com/google/fonts/raw/main/ofl/dellarespira/DellaRespira-Regular.ttf",
+    "Lustria-Regular.ttf":            "https://github.com/google/fonts/raw/main/ofl/lustria/Lustria-Regular.ttf",
+    "PinyonScript-Regular.ttf":       "https://github.com/google/fonts/raw/main/ofl/pinyonscript/PinyonScript-Regular.ttf",
+
+    # Modern / variable sans (avoiding banned reflex picks)
+    "BricolageGrotesque-Variable.ttf": "https://github.com/google/fonts/raw/main/ofl/bricolagegrotesque/BricolageGrotesque%5Bopsz%2Cwdth%2Cwght%5D.ttf",
+    "FunnelDisplay-Variable.ttf":     "https://github.com/google/fonts/raw/main/ofl/funneldisplay/FunnelDisplay%5Bwght%5D.ttf",
+    "SansitaSwashed-Variable.ttf":    "https://github.com/google/fonts/raw/main/ofl/sansitaswashed/SansitaSwashed%5Bwght%5D.ttf",
+
+    # Mono with character (no IBM Plex per impeccable rules)
+    "Doto-Variable.ttf":              "https://github.com/google/fonts/raw/main/ofl/doto/Doto%5BROND%2Cwght%5D.ttf",
+    "MajorMonoDisplay-Regular.ttf":   "https://github.com/google/fonts/raw/main/ofl/majormonodisplay/MajorMonoDisplay-Regular.ttf",
+    "VT323-Regular.ttf":              "https://github.com/google/fonts/raw/main/ofl/vt323/VT323-Regular.ttf",
+
+    # Hand-drawn / script
+    "Zeyada-Regular.ttf":             "https://github.com/google/fonts/raw/main/ofl/zeyada/Zeyada-Regular.ttf",
+    "Caveat-Variable.ttf":            "https://github.com/google/fonts/raw/main/ofl/caveat/Caveat%5Bwght%5D.ttf",
+    "HomemadeApple-Regular.ttf":      "https://github.com/google/fonts/raw/main/apache/homemadeapple/HomemadeApple-Regular.ttf",
+    "RougeScript-Regular.ttf":        "https://github.com/google/fonts/raw/main/ofl/rougescript/RougeScript-Regular.ttf",
+    "DrSugiyama-Regular.ttf":         "https://github.com/google/fonts/raw/main/ofl/drsugiyama/DrSugiyama-Regular.ttf",
+    "ReenieBeanie-Regular.ttf":       "https://github.com/google/fonts/raw/main/ofl/reeniebeanie/ReenieBeanie-Regular.ttf",
+
+    # Specialty
+    "UnifrakturCook-Bold.ttf":        "https://github.com/google/fonts/raw/main/ofl/unifrakturcook/UnifrakturCook-Bold.ttf",
+    "Rye-Regular.ttf":                "https://github.com/google/fonts/raw/main/ofl/rye/Rye-Regular.ttf",
 }
 
 # Font role → candidate paths (ALL valid ones are collected; rng picks from the pool)
@@ -218,6 +261,13 @@ _FONT_ROLES = {
         FONT_CACHE / "Koulen-Regular.ttf",
         FONT_CACHE / "Mohave-Bold.ttf",
         FONT_CACHE / "AlfaSlabOne-Regular.ttf",
+        # Expansion
+        FONT_CACHE / "BowlbyOne-Regular.ttf",
+        FONT_CACHE / "Caprasimo-Regular.ttf",
+        FONT_CACHE / "FunnelDisplay-Variable.ttf",
+        FONT_CACHE / "BricolageGrotesque-Variable.ttf",
+        FONT_CACHE / "BungeeShade-Regular.ttf",
+        FONT_CACHE / "Bungee-Inline.ttf",
         "/System/Library/Fonts/Supplemental/Impact.ttf",
         "/System/Library/Fonts/Supplemental/Arial Black.ttf",
         "/Users/andrewninn/Library/Fonts/Hamilton-Bold.otf",
@@ -279,6 +329,11 @@ _FONT_ROLES = {
         FONT_CACHE / "Monoton-Regular.ttf",
         FONT_CACHE / "Quantico-Bold.ttf",
         FONT_CACHE / "BarlowCond-ExtraBold.ttf",
+        # Expansion — mono/dot/CRT character
+        FONT_CACHE / "MajorMonoDisplay-Regular.ttf",
+        FONT_CACHE / "VT323-Regular.ttf",
+        FONT_CACHE / "Doto-Variable.ttf",
+        FONT_CACHE / "RubikMonoOne-Regular.ttf",
         "/System/Library/Fonts/Supplemental/DIN Condensed Bold.ttf",
     ],
     "retro": [
@@ -295,6 +350,11 @@ _FONT_ROLES = {
         FONT_CACHE / "StardosStencil-Bold.ttf",
         FONT_CACHE / "Nunito-ExtraBold.ttf",
         FONT_CACHE / "Anton-Regular.ttf",
+        # Expansion — distinctive retro/display
+        FONT_CACHE / "Caprasimo-Regular.ttf",
+        FONT_CACHE / "Fascinate-Regular.ttf",
+        FONT_CACHE / "Plaster-Regular.ttf",
+        FONT_CACHE / "BungeeShade-Regular.ttf",
     ],
     "rounded": [
         FONT_CACHE / "Fredoka-SemiBold.ttf",
@@ -317,6 +377,14 @@ _FONT_ROLES = {
         FONT_CACHE / "Yellowtail-Regular.ttf",
         FONT_CACHE / "GreatVibes-Regular.ttf",
         FONT_CACHE / "Sacramento-Regular.ttf",
+        # Expansion — hand-written variety
+        FONT_CACHE / "PinyonScript-Regular.ttf",
+        FONT_CACHE / "Zeyada-Regular.ttf",
+        FONT_CACHE / "Caveat-Variable.ttf",
+        FONT_CACHE / "HomemadeApple-Regular.ttf",
+        FONT_CACHE / "RougeScript-Regular.ttf",
+        FONT_CACHE / "DrSugiyama-Regular.ttf",
+        FONT_CACHE / "ReenieBeanie-Regular.ttf",
         "/System/Library/Fonts/Supplemental/Brush Script.ttf",
         "/System/Library/Fonts/Supplemental/Bradley Hand Bold.ttf",
     ],
@@ -352,6 +420,11 @@ _FONT_ROLES = {
         FONT_CACHE / "CormorantGaramond-Bold.ttf",
         FONT_CACHE / "Yeseva-Regular.ttf",
         FONT_CACHE / "Marcellus-Regular.ttf",
+        # Expansion — vintage book/title serifs
+        FONT_CACHE / "IMFellEnglishSC-Regular.ttf",
+        FONT_CACHE / "IMFellDoublePica-Regular.ttf",
+        FONT_CACHE / "DellaRespira-Regular.ttf",
+        FONT_CACHE / "Lustria-Regular.ttf",
         "/System/Library/Fonts/Supplemental/Georgia Bold.ttf",
     ],
     "luxury": [
@@ -368,6 +441,10 @@ _FONT_ROLES = {
         FONT_CACHE / "PlayfairDisplay-Bold.ttf",
         FONT_CACHE / "Corben-Bold.ttf",
         FONT_CACHE / "Raleway-ExtraBold.ttf",
+        # Expansion
+        FONT_CACHE / "CinzelDecorative-Bold.ttf",
+        FONT_CACHE / "DellaRespira-Regular.ttf",
+        FONT_CACHE / "Lustria-Regular.ttf",
     ],
     "gothic": [
         FONT_CACHE / "UnifrakturMaguntia-Regular.ttf",
@@ -376,6 +453,9 @@ _FONT_ROLES = {
         FONT_CACHE / "PirataOne-Regular.ttf",
         FONT_CACHE / "Sancreek-Regular.ttf",
         FONT_CACHE / "MetalMania-Regular.ttf",
+        # Expansion — second blackletter, first Western
+        FONT_CACHE / "UnifrakturCook-Bold.ttf",
+        FONT_CACHE / "Rye-Regular.ttf",
     ],
     "brush": [
         FONT_CACHE / "Caveat-Bold.ttf",
