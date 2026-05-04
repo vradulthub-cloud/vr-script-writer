@@ -496,6 +496,64 @@ export interface UploadHistoryRow {
   mode: string
 }
 
+// ---------------------------------------------------------------------------
+// Revenue (Premium Breakdowns sheet) — admin-only, $ figures across platforms
+// ---------------------------------------------------------------------------
+export interface RevenuePlatformTotal {
+  platform: string                  // "slr" | "povr" | "vrporn"
+  all_time: number
+  ytd: number
+  yearly: Record<string, number>    // year-string → revenue
+}
+
+export interface RevenueMonthlyPoint {
+  month: string                     // "2026-03"
+  slr: number
+  povr: number
+  vrporn: number
+  total: number
+  mom_pct: number | null            // null on first point
+}
+
+export interface RevenueCatalogIntel {
+  platform: string
+  total_scenes: number
+  avg_revenue_per_scene: number
+  top_scene_revenue: number
+}
+
+export interface RevenueDashboard {
+  grand_total: number
+  ytd_total: number
+  platforms: RevenuePlatformTotal[]
+  monthly_trend: RevenueMonthlyPoint[]   // up to 12 months
+  catalog: RevenueCatalogIntel[]
+  refreshed_at: string                   // ISO timestamp
+}
+
+export interface SceneRevenueRow {
+  platform: string
+  studio: string
+  video_id: string
+  title: string
+  year: string
+  views: number
+  revenue: number
+}
+
+export interface CrossPlatformRevenueRow {
+  title: string
+  studio: string
+  platforms: string[]
+  lifetime_total: number
+  slr_total: number
+  povr_total: number
+  vrporn_total: number
+  povr_views: number
+  slr_id: string
+  povr_id: string
+}
+
 export type AssetStatus = "not_present" | "available" | "validated" | "stuck"
 
 export interface SceneAssetState {
@@ -1667,6 +1725,29 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         post<{ ok: boolean; aborted_lingering: number }>("/uploads/multipart/abort", body),
       history: (limit = 50) =>
         get<UploadHistoryRow[]>(`/uploads/history?limit=${limit}`),
+    },
+
+    // Revenue — admin-only. Backed by the Premium Breakdowns Google Sheet
+    // (consolidated SLR/POVR/VRPorn partner-portal exports).
+    revenue: {
+      dashboard: (refresh = false) =>
+        get<RevenueDashboard>(`/revenue/dashboard${refresh ? "?refresh=true" : ""}`),
+      scenes: (opts?: { platform?: string; studio?: string; order?: "top" | "bottom"; limit?: number }) => {
+        const q = new URLSearchParams()
+        if (opts?.platform) q.set("platform", opts.platform)
+        if (opts?.studio)   q.set("studio", opts.studio)
+        if (opts?.order)    q.set("order", opts.order)
+        if (opts?.limit)    q.set("limit", String(opts.limit))
+        return get<SceneRevenueRow[]>(`/revenue/scenes${q.toString() ? `?${q}` : ""}`)
+      },
+      crossPlatform: (limit = 100) =>
+        get<CrossPlatformRevenueRow[]>(`/revenue/cross-platform?limit=${limit}`),
+      lookupScene: (opts: { title?: string; studio?: string }) => {
+        const q = new URLSearchParams()
+        if (opts.title)  q.set("title", opts.title)
+        if (opts.studio) q.set("studio", opts.studio)
+        return get<SceneRevenueRow[]>(`/revenue/scene/lookup?${q}`)
+      },
     },
   }
 }
