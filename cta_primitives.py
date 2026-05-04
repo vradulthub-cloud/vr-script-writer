@@ -14,6 +14,43 @@ except ImportError:
 
 from cta_fonts import F, FONT_CACHE, _resolve_fonts
 
+
+# ── Layout engine ─────────────────────────────────────────────────────────────
+# Pillow ships with two text layout engines: BASIC (legacy, no kerning, no
+# ligatures, no OpenType features) and RAQM (HarfBuzz + FriBidi — proper
+# shaping, kerning, ligatures, RTL/CTL scripts, OT features). RAQM requires
+# libraqm to be available at Pillow build/install time. On systems where it
+# isn't, we silently fall back to BASIC so nothing breaks.
+#
+# Default Pillow uses BASIC unless told otherwise — that's why default text
+# rendering looks slightly cheap (no real kerning). Using LAYOUT_ENGINE
+# everywhere lifts every existing treatment to professional letterspacing
+# for free.
+try:
+    if hasattr(ImageFont, "Layout") and hasattr(ImageFont.Layout, "RAQM"):
+        _test_path = None
+        for _p in [
+            FONT_CACHE / "PlayfairDisplay-Bold.ttf",
+            FONT_CACHE / "Anton-Regular.ttf",
+            FONT_CACHE / "Cinzel-Bold.ttf",
+        ]:
+            if Path(_p).exists():
+                _test_path = str(_p)
+                break
+        if _test_path is None:
+            LAYOUT_ENGINE = ImageFont.Layout.BASIC
+        else:
+            try:
+                ImageFont.truetype(_test_path, 24, layout_engine=ImageFont.Layout.RAQM)
+                LAYOUT_ENGINE = ImageFont.Layout.RAQM
+            except (OSError, ValueError):
+                LAYOUT_ENGINE = ImageFont.Layout.BASIC
+    else:
+        LAYOUT_ENGINE = 0  # BASIC literal for older Pillow
+except Exception:
+    LAYOUT_ENGINE = 0
+
+
 # ── Colour palettes ───────────────────────────────────────────────────────────
 
 VIVID_BANKS = [
@@ -128,7 +165,7 @@ def make_mask(text: str, font, pad: int = 80, max_width: int = 3600,
             pass
     if supersample > 1:
         try:
-            big_font = ImageFont.truetype(font.path, font.size * supersample)
+            big_font = ImageFont.truetype(font.path, font.size * supersample, layout_engine=LAYOUT_ENGINE)
             big_w, big_h, big_top = measure(dummy, text, big_font)
             big_pad = pad * supersample
             big = Image.new("L", (big_w + big_pad * 2, big_h + big_pad * 2), 0)
@@ -166,13 +203,13 @@ def make_mask_hd(text: str, font, pad: int = 100, max_width: int = 3840,
         try:
             scale = max_width / w
             new_size = max(80, int(font.size * scale))
-            font = ImageFont.truetype(font.path, new_size)
+            font = ImageFont.truetype(font.path, new_size, layout_engine=LAYOUT_ENGINE)
             w, h, top = measure(dummy, text, font)
         except Exception:
             pass
     if supersample > 1:
         try:
-            big_font = ImageFont.truetype(font.path, font.size * supersample)
+            big_font = ImageFont.truetype(font.path, font.size * supersample, layout_engine=LAYOUT_ENGINE)
             big_w, big_h, big_top = measure(dummy, text, big_font)
             big_pad = pad * supersample
             big = Image.new("L", (big_w + big_pad * 2, big_h + big_pad * 2), 0)
@@ -1095,4 +1132,207 @@ def texture_modulate(mask: Image.Image, base_rgba: Image.Image,
 
 
 # screen_blend / multiply_blend are defined earlier in this file (~line 197).
+
+
+# ── Advanced primitives (Pack 1+ expansion) ───────────────────────────────────
+# These compound: every treatment that adopts them looks more polished, and
+# every new treatment can reach for them as building blocks.
+
+
+def bevel_emboss(mask: Image.Image,
+                 depth: int = 6,
+                 angle_deg: float = 135.0,
+                 smoothness: float = 1.4,
+                 highlight_color: tuple = (255, 255, 255),
+                 highlight_alpha: int = 210,
+                 shadow_color: tuple = (0, 0, 0),
+                 shadow_alpha: int = 200) -> Image.Image:
+    """Photoshop-style bevel & emboss. Returns RGBA layer to composite OVER
+    the colored face. Computes a normal-map approximation from the mask
+    distance field, then lights it with a directional light.
+
+    smoothness >1 softens the bevel (more Gaussian); <1 keeps it sharper.
+    """
+    m = np.array(mask, dtype=np.float32) / 255.0
+    if m.max() <= 0:
+        return Image.new("RGBA", mask.size, (0, 0, 0, 0))
+
+    # Smooth the mask so the gradient (used as a normal proxy) reads as a
+    # surface, not as binary edges. depth controls Gaussian radius.
+    blurred = mask.filter(ImageFilter.GaussianBlur(max(0.5, depth * smoothness)))
+    b = np.array(blurred, dtype=np.float32) / 255.0
+
+    # Gradient = surface slope. Use Sobel-ish kernels.
+    gx = np.zeros_like(b)
+    gy = np.zeros_like(b)
+    gx[:, 1:-1] = (b[:, 2:] - b[:, :-2]) * 0.5
+    gy[1:-1, :] = (b[2:, :] - b[:-2, :]) * 0.5
+
+    # Light direction in 2D (angle 0 = right, 90 = down per image coords).
+    rad = math.radians(angle_deg)
+    lx, ly = math.cos(rad), math.sin(rad)
+    # Dot product between negative gradient (inward-pointing normal) and light.
+    dot = -(gx * lx + gy * ly)
+    # Normalise: peak slope is at the edge of the mask
+    dot = dot / (np.abs(dot).max() + 1e-6)
+
+    hi = np.clip(dot, 0, 1) ** 1.4   # highlight side
+    sh = np.clip(-dot, 0, 1) ** 1.4  # shadow side
+
+    out = np.zeros((*mask.size[::-1], 4), dtype=np.float32)
+    out[..., 0] = highlight_color[0] * hi + shadow_color[0] * sh
+    out[..., 1] = highlight_color[1] * hi + shadow_color[1] * sh
+    out[..., 2] = highlight_color[2] * hi + shadow_color[2] * sh
+    out[..., 3] = (hi * highlight_alpha + sh * shadow_alpha) * m
+    return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), "RGBA")
+
+
+def fresnel_metallic(mask: Image.Image,
+                     base_color: tuple = (220, 200, 120),
+                     rim_color: tuple = (255, 250, 220),
+                     rim_power: float = 2.4,
+                     light_angle_deg: float = 75.0) -> Image.Image:
+    """Photographic metallic with grazing-angle (Fresnel) rim brightening.
+    Real polished metals brighten dramatically at low view angles — flat
+    gradient fills don't capture that and look plastic. This does."""
+    m = np.array(mask, dtype=np.float32) / 255.0
+    if m.max() <= 0:
+        return Image.new("RGBA", mask.size, (0, 0, 0, 0))
+
+    # Distance from edge of mask (interior toward edge approximation).
+    blurred = mask.filter(ImageFilter.GaussianBlur(8))
+    b = np.array(blurred, dtype=np.float32) / 255.0
+    # "Edge proximity": 1 at rim, 0 at deep interior.
+    edge = np.clip(1.0 - b * 1.4, 0, 1) ** rim_power
+
+    # Vertical light gradient — brightens upper half, slightly darkens lower.
+    rad = math.radians(light_angle_deg)
+    h, w = m.shape
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    grad = (xx * math.cos(rad) - yy * math.sin(rad))
+    grad = (grad - grad.min()) / (grad.max() - grad.min() + 1e-6)
+    light = 0.7 + 0.6 * grad  # 0.7..1.3 multiplier
+
+    out = np.zeros((h, w, 4), dtype=np.float32)
+    base = np.array(base_color, dtype=np.float32)
+    rim  = np.array(rim_color,  dtype=np.float32)
+    for c in range(3):
+        face = base[c] * light
+        face = face * (1.0 - edge) + rim[c] * edge
+        out[..., c] = face
+    out[..., 3] = m * 255
+    return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), "RGBA")
+
+
+def motion_blur_chrome(mask: Image.Image,
+                       angle_deg: float = 90.0,
+                       length: int = 28,
+                       stops: list = None) -> Image.Image:
+    """Photoshop's chrome trick: blur the alpha mask along an axis, then
+    treat the blurred grayscale as a chrome reflection lookup. Produces
+    streaky horizontal-band reflections you can't get from a static gradient.
+
+    `stops` is the chrome reflection palette (default: dramatic mirror).
+    """
+    if stops is None:
+        stops = CHROME_STOPS
+
+    # Build a directional motion blur via successive shifts.
+    rad = math.radians(angle_deg)
+    dx, dy = math.cos(rad), math.sin(rad)
+    h, w = mask.size[1], mask.size[0]
+    accum = np.zeros((h, w), dtype=np.float32)
+    weight = 0.0
+    for step in range(-length, length + 1):
+        ox = int(round(dx * step))
+        oy = int(round(dy * step))
+        a = math.exp(-((step / (length * 0.6)) ** 2))  # Gaussian weight
+        m_arr = np.array(mask, dtype=np.float32) / 255.0
+        shifted = np.zeros_like(m_arr)
+        ys = slice(max(0, oy), min(h, h + oy))
+        xs = slice(max(0, ox), min(w, w + ox))
+        ys_src = slice(max(0, -oy), min(h, h - oy))
+        xs_src = slice(max(0, -ox), min(w, w - ox))
+        shifted[ys, xs] = m_arr[ys_src, xs_src]
+        accum += shifted * a
+        weight += a
+    accum /= max(weight, 1e-6)
+
+    # Map accum (0..1) into the chrome palette.
+    n = len(stops)
+    idx = np.clip((accum * (n - 1)).astype(np.int32), 0, n - 2)
+    frac = (accum * (n - 1)) - idx
+    c0 = np.array([stops[i] for i in idx.flatten()], dtype=np.float32).reshape(h, w, 3)
+    c1 = np.array([stops[min(i + 1, n - 1)] for i in idx.flatten()], dtype=np.float32).reshape(h, w, 3)
+    rgb = c0 * (1 - frac[..., None]) + c1 * frac[..., None]
+
+    out = np.zeros((h, w, 4), dtype=np.uint8)
+    out[..., :3] = np.clip(rgb, 0, 255).astype(np.uint8)
+    out[..., 3] = (np.array(mask, dtype=np.uint8))
+    return Image.fromarray(out, "RGBA")
+
+
+def holographic_shift(mask: Image.Image,
+                      hue_range: tuple = (0.55, 1.05),
+                      saturation: float = 0.85,
+                      value: float = 0.95,
+                      bands: int = 6) -> Image.Image:
+    """Iridescent holographic foil — chromatic shift across the surface in
+    bands. Used for Y2K, holographic packaging, and cyberpunk treatments.
+
+    hue_range is in HSV hue (0..1); >1 wraps. bands controls density of the
+    iridescent stripes — fewer bands = wider color zones.
+    """
+    h, w = mask.size[1], mask.size[0]
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    # Diagonal banding feels more dynamic than vertical.
+    diag = (xx + yy * 0.6) / (w + h * 0.6)
+    # Wrapping with sine creates smooth bands; modulate hue across them.
+    band = (np.sin(diag * bands * 2 * math.pi) + 1.0) * 0.5
+    hue_lo, hue_hi = hue_range
+    hue = (hue_lo + (hue_hi - hue_lo) * band) % 1.0
+
+    # Vectorised HSV→RGB.
+    v = np.full_like(hue, value)
+    s = np.full_like(hue, saturation)
+    i = (hue * 6).astype(np.int32)
+    f = hue * 6 - i
+    p = v * (1 - s)
+    q = v * (1 - f * s)
+    t = v * (1 - (1 - f) * s)
+    r = np.choose(i % 6, [v, q, p, p, t, v])
+    g = np.choose(i % 6, [t, v, v, q, p, p])
+    b = np.choose(i % 6, [p, p, t, v, v, q])
+
+    out = np.zeros((h, w, 4), dtype=np.uint8)
+    out[..., 0] = np.clip(r * 255, 0, 255).astype(np.uint8)
+    out[..., 1] = np.clip(g * 255, 0, 255).astype(np.uint8)
+    out[..., 2] = np.clip(b * 255, 0, 255).astype(np.uint8)
+    out[..., 3] = np.array(mask, dtype=np.uint8)
+    return Image.fromarray(out, "RGBA")
+
+
+def ink_bleed(mask: Image.Image,
+              radius: float = 1.4,
+              strength: float = 0.5,
+              irregularity: float = 0.6) -> Image.Image:
+    """Simulate paper absorption — ink wicks outward unevenly from the
+    letter edges. Returns a NEW grayscale alpha mask suitable for feeding
+    into flat_color/colorize/etc.
+
+    radius   = Gaussian bleed distance in px
+    strength = how much of the bleed is added back (0=clean, 1=heavy bleed)
+    irregularity = noise modulation on the bleed (0=smooth, 1=very textured)
+    """
+    base = np.array(mask, dtype=np.float32) / 255.0
+    bled = mask.filter(ImageFilter.GaussianBlur(max(0.3, radius)))
+    b = np.array(bled, dtype=np.float32) / 255.0
+
+    # Per-pixel noise so the bleed isn't perfectly uniform.
+    rng = np.random.default_rng(seed=int(radius * 1000) + int(strength * 100))
+    noise = rng.random(base.shape).astype(np.float32)
+    noise = (noise - 0.5) * 2.0 * irregularity   # ±irregularity
+    bleed_amt = np.clip(b - base, 0, 1) * strength * (1.0 + noise * 0.5)
+    out = np.clip(base + bleed_amt, 0, 1)
+    return Image.fromarray((out * 255).astype(np.uint8), "L")
 

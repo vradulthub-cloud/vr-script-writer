@@ -556,7 +556,9 @@ def F(role: str, size: int, rng: random.Random = None) -> ImageFont.FreeTypeFont
     if paths:
         path = rng.choice(paths) if (rng and len(paths) > 1) else paths[0]
         try:
-            font = ImageFont.truetype(path, size)
+            # Lazy-import to avoid a circular import at module load time.
+            from cta_primitives import LAYOUT_ENGINE
+            font = ImageFont.truetype(path, size, layout_engine=LAYOUT_ENGINE)
             fname = Path(path).name
             if fname in _VAR_FONT_WEIGHT:
                 try:
@@ -565,6 +567,16 @@ def F(role: str, size: int, rng: random.Random = None) -> ImageFont.FreeTypeFont
                     pass
             return font
         except Exception:
-            pass
+            try:
+                font = ImageFont.truetype(path, size)
+                fname = Path(path).name
+                if fname in _VAR_FONT_WEIGHT:
+                    try:
+                        font.set_variation_by_axes([_VAR_FONT_WEIGHT[fname]])
+                    except Exception:
+                        pass
+                return font
+            except Exception:
+                pass
     return ImageFont.load_default()
 
