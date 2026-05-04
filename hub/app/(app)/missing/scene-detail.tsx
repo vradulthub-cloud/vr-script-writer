@@ -12,6 +12,8 @@ import { formatApiError } from "@/lib/errors"
 import { useIdToken } from "@/hooks/use-id-token"
 import { StudioBadge } from "@/components/ui/studio-badge"
 import { studioColor } from "@/lib/studio-colors"
+import { SceneUploadZone } from "./scene-upload-zone"
+import type { Subfolder } from "@/lib/upload-classifier"
 
 const ASSET_COLS = [
   { key: "has_description" as const, label: "Description" },
@@ -553,6 +555,31 @@ export function SceneDetail({ scene: initialScene, idToken: serverToken, onClose
             </div>
           </>
         )}
+
+        {/* ── Zone: Upload ──────────────────────────────────────────── */}
+        <SectionLabel>Upload to this scene</SectionLabel>
+        <div style={{ marginBottom: 18 }}>
+          <SceneUploadZone
+            sceneId={scene.id}
+            studio={scene.studio}
+            idToken={idToken}
+            onUploaded={(subfolder: Subfolder) => {
+              const flagMap: Partial<Record<Subfolder, keyof Scene>> = {
+                Description: "has_description",
+                Videos: "has_videos",
+                Photos: "has_photos",
+                Storyboard: "has_storyboard",
+                "Video Thumbnail": "has_thumbnail",
+              }
+              const flagKey = flagMap[subfolder]
+              if (flagKey) {
+                const updated = { ...scene, [flagKey]: true } as Scene
+                setScene(updated)
+                onSceneUpdate(updated)
+              }
+            }}
+          />
+        </div>
 
         {/* ── Zone: Naming & Folder ──────────────────────────────────── */}
         <SectionLabel>Naming &amp; Folder</SectionLabel>
