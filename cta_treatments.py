@@ -23770,3 +23770,31 @@ from cta_treatments_pack10_nature import PACK10_NATURE_TREATMENTS  # noqa: E402
 
 TREATMENTS.update(PACK10_NATURE_TREATMENTS)
 FEATURED_TREATMENTS.update(PACK10_NATURE_TREATMENTS)
+
+
+# ── Pack 11: Gaming / RPG fantasy (10 treatments) ─────────────────────────────
+# Dragon scale, MMO logo, retro pixel, sword steel, magic scroll, neon
+# arcade, console titanium, dungeon blackletter, fantasy calligraphy,
+# eldritch glow.
+from cta_treatments_pack11_gaming import PACK11_GAMING_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK11_GAMING_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK11_GAMING_TREATMENTS)
+
+
+# ── Pack 12: Fashion / luxury (10 treatments) ─────────────────────────────────
+# Fashion masthead, Hermès orange, Chanel serif, YSL minimal, Gucci emboss,
+# Dior couture, perfume bottle, runway caption, glossy magazine, jewelry box.
+from cta_treatments_pack12_fashion import PACK12_FASHION_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK12_FASHION_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK12_FASHION_TREATMENTS)
+
+
+# ── Pack 13: Cartoon / children's (10 treatments) ─────────────────────────────
+# Saturday morning, anime battle, lego brick, picture book, candy funhouse,
+# retro cereal, comic pop, kids show logo, sticker bomb, fairground carnival.
+from cta_treatments_pack13_cartoon import PACK13_CARTOON_TREATMENTS  # noqa: E402
+
+TREATMENTS.update(PACK13_CARTOON_TREATMENTS)
+FEATURED_TREATMENTS.update(PACK13_CARTOON_TREATMENTS)

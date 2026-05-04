@@ -137,23 +137,31 @@ def render_grindhouse_grain(title: str, rng: random.Random) -> Image.Image:
 # ─── 3. Giallo red void ───────────────────────────────────────────────────────
 
 def render_giallo_red_void(title: str, rng: random.Random) -> Image.Image:
-    """Italian horror (Argento/Bava) — ornate serif, deep blood red on
-    near-black, dramatic isolation."""
+    """Italian horror (Argento/Bava) — heavy serif, deep blood red on
+    near-black, dramatic isolation. Now uses a HEAVY serif so the form
+    has presence, plus a stronger inner glow so the red feels lit from
+    within rather than thin/neon."""
     n     = len(title)
-    size  = 130 if n <= 14 else (98 if n <= 24 else 78)
-    font  = F("luxury", size, rng) or F("serif", size, rng)
-    lines = wrap_chars(title.upper(), 18)
+    size  = 138 if n <= 14 else (108 if n <= 24 else 84)
+    # Heavy serif comes first — luxury gave us a hairline weight that read
+    # as a thin neon outline. Prefer Bodoni / Abril / Cinzel weight.
+    font  = F("serif", size, rng) or F("luxury", size, rng) or F("heavy", size, rng)
+    lines = wrap_chars(title.upper(), 16)
 
     text_layers = []
     for ln in lines:
-        mask = make_mask(ln, font, pad=22)
-        sh   = drop_shadow(mask, 0, 0, blur=18, alpha=200)
-        # Deep blood gradient
-        face = colorize(mask, [(220, 36, 28), (140, 8, 6), (60, 0, 0)])
-        bev  = bevel_emboss(mask, depth=5, angle_deg=110,
-                            highlight_color=(255, 200, 195), highlight_alpha=180,
-                            shadow_color=(30, 0, 0), shadow_alpha=200)
-        img  = composite(sh, face, bev, size=mask.size)
+        mask = make_mask(ln, font, pad=24)
+        # Outer red bloom — wider and warmer than the previous version
+        bloom = mask.filter(ImageFilter.GaussianBlur(22))
+        bloom_layer = flat_color(bloom, (220, 30, 24))
+        bloom_a = bloom_layer.split()[3].point(lambda p: int(p * 0.85))
+        bloom_layer.putalpha(bloom_a)
+        sh   = drop_shadow(mask, 0, 0, blur=10, alpha=220)
+        face = colorize(mask, [(232, 60, 50), (180, 14, 12), (90, 0, 0)])
+        bev  = bevel_emboss(mask, depth=6, angle_deg=110, smoothness=1.5,
+                            highlight_color=(255, 200, 195), highlight_alpha=200,
+                            shadow_color=(30, 0, 0), shadow_alpha=220)
+        img  = composite(bloom_layer, sh, face, bev, size=mask.size)
         text_layers.append(img)
 
     text_w = max(t.width for t in text_layers)
@@ -405,28 +413,32 @@ def render_hong_kong_kungfu(title: str, rng: random.Random) -> Image.Image:
     lines = wrap_chars(title.upper(), 14)
     shear = 0.12
 
+    # Saturated jewel palettes only — these were too muted in the first cut.
     palettes = [
-        ((255, 220, 30),  (220, 30, 30)),    # gold on red
-        ((255, 130, 30),  (60, 0, 60)),      # orange on plum
-        ((255, 90, 60),   (255, 220, 30)),   # red-orange on gold
+        ((255, 230, 0),    (210, 20, 20)),    # bright gold on bright red
+        ((255, 110, 20),   (50, 0, 60)),      # vivid orange on deep plum
+        ((255, 50, 50),    (255, 220, 0)),    # bright red on bright gold
     ]
     face_c, stroke_c = palettes[rng.randrange(len(palettes))]
 
     line_imgs = []
     for ln in lines:
         mask = make_mask(ln, font, pad=22)
-        sm   = dilate(mask, 9)
+        sm   = dilate(mask, 11)                                # thicker stroke
         sl   = flat_color(sm, stroke_c)
         face = flat_color(mask, face_c)
-        ext  = extrude(sm, 9, 135,
-                       tuple(max(0, c - 60) for c in stroke_c),
-                       tuple(max(0, c - 120) for c in stroke_c))
-        sh   = drop_shadow(mask, 8, 12, blur=6, alpha=220)
-        bev  = bevel_emboss(mask, depth=5, angle_deg=130,
-                            highlight_color=(255, 255, 220), highlight_alpha=200,
-                            shadow_color=tuple(max(0, c - 100) for c in face_c),
-                            shadow_alpha=150)
-        img  = composite(sh, ext, sl, face, bev, size=mask.size)
+        # Multi-tone extrusion — depth + saturation kicker
+        ext_near = stroke_c
+        ext_far  = tuple(max(0, c - 100) for c in stroke_c)
+        ext  = extrude(sm, 12, 135, ext_near, ext_far)
+        sh   = drop_shadow(mask, 10, 14, blur=6, alpha=240)
+        bev  = bevel_emboss(mask, depth=6, angle_deg=130, smoothness=1.6,
+                            highlight_color=(255, 255, 240), highlight_alpha=220,
+                            shadow_color=tuple(max(0, c - 120) for c in face_c),
+                            shadow_alpha=180)
+        # Specular kicker — small bright sliver near the top
+        hl = highlight(mask, 0.55)
+        img  = composite(sh, ext, sl, face, bev, hl, size=mask.size)
         img  = shear_image(img, shear)
         line_imgs.append(img)
 
