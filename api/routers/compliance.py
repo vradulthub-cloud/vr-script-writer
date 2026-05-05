@@ -3803,6 +3803,156 @@ async def rename_legal_file(
     )
 
 
+# ─── Legal-folder rename (TKT-0182, follow-up) ────────────────────────────────
+
+class LegalFolderRenameRequest(BaseModel):
+    """Move every file under one MEGA prefix to another.
+
+    Use case: fix a typo'd scene-id folder, rename ``Legal/`` casing,
+    consolidate stray subfolders. Both prefixes must contain ``/Legal/``
+    so this can't be used to move paperwork outside the compliance area.
+
+    ``dry_run=True`` returns the planned src→dst pairs without doing
+    anything — recommended first call so the operator can sanity-check
+    the move before it's permanent.
+    """
+    studio: str
+    src_prefix: str
+    dst_prefix: str
+    dry_run: bool = False
+
+
+class LegalFolderRenameResult(BaseModel):
+    ok: bool
+    moved: int
+    planned: list[dict] = []          # [{"src": "...", "dst": "..."}, ...]
+    errors: list[str] = []
+    conflict_count: int = 0
+    signatures_updated: int = 0
+    dry_run: bool = False
+
+
+@router.post("/admin/legal-folders/rename", response_model=LegalFolderRenameResult)
+async def rename_legal_folder(
+    body: LegalFolderRenameRequest,
+    request: Request,
+    _admin: dict = Depends(require_admin),
+):
+    """Move every key under ``src_prefix`` to ``dst_prefix`` server-side.
+
+    Refuses to run if any destination key already exists (would clobber
+    paperwork). Use ``dry_run=true`` to preview the planned moves.
+    """
+    import s4_client
+
+    studio = (body.studio or "").lower()
+    src = (body.src_prefix or "").strip()
+    dst = (body.dst_prefix or "").strip()
+
+    # Both prefixes must touch /Legal/ (case-insensitive) — locks this
+    # endpoint to compliance-area renames only. A typo bringing src into
+    # /Videos/ shouldn't accidentally move scene videos.
+    if "/legal/" not in src.lower() or "/legal/" not in dst.lower():
+        raise HTTPException(
+            status_code=400,
+            detail="Both prefixes must contain /Legal/",
+        )
+    if src == dst:
+        raise HTTPException(status_code=400, detail="src_prefix == dst_prefix")
+
+    try:
+        result = await asyncio.to_thread(
+            s4_client.rename_prefix,
+            studio, src, dst,
+            dry_run=bool(body.dry_run),
+        )
+    except Exception as exc:
+        _log.exception("legal-folder rename failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"rename failed: {exc}")
+
+    if not result["ok"] and result.get("conflict_count"):
+        # Conflicts are user-fixable — return as 409 with the planned moves
+        return LegalFolderRenameResult(
+            ok=False,
+            moved=0,
+            planned=result["planned"],
+            errors=result["errors"],
+            conflict_count=result["conflict_count"],
+            dry_run=False,
+        )
+
+    if result["dry_run"]:
+        return LegalFolderRenameResult(
+            ok=True, moved=0,
+            planned=result["planned"],
+            dry_run=True,
+        )
+
+    # Update the compliance_legal_files index + compliance_signatures
+    # rows in one DB transaction. The same suffix-replacement logic
+    # used on the bucket applies here.
+    audit_user = (request.client.host if request.client else "?") + ":legal-folder-rename"
+    src_norm = src if src.endswith("/") else src + "/"
+    dst_norm = dst if dst.endswith("/") else dst + "/"
+    studio_upper = studio.upper()
+
+    sigs_updated = 0
+    with get_db() as conn:
+        # Index: read each old row, INSERT a new row with the rewritten key,
+        # then DELETE the old. Use a temp table approach to avoid PK collisions.
+        old_rows = conn.execute(
+            "SELECT * FROM compliance_legal_files WHERE studio=? AND key LIKE ?",
+            (studio_upper, src_norm + "%"),
+        ).fetchall()
+        for row in old_rows:
+            d = dict(row)
+            new_key = dst_norm + d["key"][len(src_norm):]
+            d["key"] = new_key
+            d["filename"] = new_key.rsplit("/", 1)[-1]
+            d["scene_id"] = (new_key.split("/", 1)[0] or d["scene_id"])
+            d["indexed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%fZ")
+            conn.execute(
+                """INSERT INTO compliance_legal_files
+                       (studio, scene_id, key, filename, size, last_modified,
+                        guessed_talent, doc_kind, imported_signature_id, indexed_at)
+                   VALUES (:studio, :scene_id, :key, :filename, :size, :last_modified,
+                           :guessed_talent, :doc_kind, :imported_signature_id, :indexed_at)
+                   ON CONFLICT(studio, key) DO UPDATE SET
+                       scene_id=excluded.scene_id, filename=excluded.filename,
+                       size=excluded.size, last_modified=excluded.last_modified,
+                       guessed_talent=excluded.guessed_talent,
+                       doc_kind=excluded.doc_kind,
+                       imported_signature_id=excluded.imported_signature_id,
+                       indexed_at=excluded.indexed_at""",
+                d,
+            )
+        conn.execute(
+            "DELETE FROM compliance_legal_files WHERE studio=? AND key LIKE ?",
+            (studio_upper, src_norm + "%"),
+        )
+
+        # Signatures pointing at any key under the old prefix
+        cur = conn.execute(
+            """UPDATE compliance_signatures
+                  SET pdf_mega_path = REPLACE(pdf_mega_path, ?, ?),
+                      signed_by_user = COALESCE(NULLIF(signed_by_user, ''), '') || ' | ' || ?
+                WHERE pdf_mega_path LIKE '%' || ?""",
+            (src_norm, dst_norm, audit_user, src_norm + "%"),
+        )
+        sigs_updated = cur.rowcount or 0
+        conn.commit()
+
+    return LegalFolderRenameResult(
+        ok=result["ok"],
+        moved=result["moved"],
+        planned=result["planned"],
+        errors=result["errors"],
+        conflict_count=0,
+        signatures_updated=sigs_updated,
+        dry_run=False,
+    )
+
+
 class SignatureSearchHitOut(BaseModel):
     """Wire format for a single search hit. TIN is masked to last-4 only —
     the full TIN is loaded on demand when an admin opens the edit modal."""

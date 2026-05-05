@@ -1875,6 +1875,36 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
           { studio, src_key, new_filename },
         ),
 
+      // Rename every file under a MEGA prefix. Both src + dst must touch
+      // /Legal/. ``dry_run=true`` returns the planned src→dst pairs without
+      // executing — recommended first call so the operator can sanity-check.
+      // Refuses to run if any dst key already exists (would clobber).
+      legalFolderRename: (
+        studio: string,
+        src_prefix: string,
+        dst_prefix: string,
+        opts: { dry_run?: boolean } = {},
+      ) =>
+        post<{
+          ok: boolean
+          moved: number
+          planned: { src: string; dst: string }[]
+          errors: string[]
+          conflict_count: number
+          signatures_updated: number
+          dry_run: boolean
+        }>(
+          "/compliance/admin/legal-folders/rename",
+          {
+            studio,
+            src_prefix,
+            dst_prefix,
+            dry_run: !!opts.dry_run,
+          },
+          // Multi-key COPY+DELETE on big folders can take a while.
+          { timeoutMs: 30 * 60_000 },
+        ),
+
       // Bulk-import MEGA legal-folder PDFs into compliance_signatures.
       // Walks every shoot in the date window, lists its {SCENE_ID}/Legal/
       // folder, downloads each matched PDF, extracts AcroForm fields, and
