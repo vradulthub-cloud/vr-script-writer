@@ -881,6 +881,29 @@ export interface SignatureSearchResponse {
 }
 
 /**
+ * Result of bulk-importing MEGA legal-folder PDFs into compliance_signatures.
+ * Mirrors the wire format from /admin/import-from-mega-legal — see
+ * api/routers/compliance.py.
+ */
+export interface MegaImportShootResult {
+  shoot_id: string
+  shoot_date: string
+  scene_id: string
+  studio: string
+  talents_imported: number
+  talents_skipped: number
+  skipped_reason: string
+}
+
+export interface MegaImportResult {
+  shoots_seen: number
+  shoots_processed: number
+  total_imported: number
+  shoots: MegaImportShootResult[]
+  errors: string[]
+}
+
+/**
  * One file inside a MEGA `{SCENE_ID}/Legal/` folder. Surfaced by the
  * Database view to expose paperwork that lives only on the bucket and was
  * never imported into compliance_signatures.
@@ -1823,6 +1846,24 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       legalFolderPresign: (studio: string, key: string) =>
         get<{ url: string; studio: string; key: string }>(
           `/compliance/admin/legal-folders/presign?studio=${encodeURIComponent(studio)}&key=${encodeURIComponent(key)}`,
+        ),
+
+      // Bulk-import MEGA legal-folder PDFs into compliance_signatures.
+      // Walks every shoot in the date window, lists its {SCENE_ID}/Legal/
+      // folder, downloads each matched PDF, extracts AcroForm fields, and
+      // upserts a signature row per matched talent. Long-running — bumped
+      // timeout to 30 min for large back-fill ranges.
+      importFromMegaLegal: (body: {
+        date_from: string
+        date_to: string
+        studio?: string
+        overwrite_existing?: boolean
+        imported_from_label?: string
+      }) =>
+        post<MegaImportResult>(
+          "/compliance/admin/import-from-mega-legal",
+          body,
+          { timeoutMs: 30 * 60_000 },
         ),
     },
 

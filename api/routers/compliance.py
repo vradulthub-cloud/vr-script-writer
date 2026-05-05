@@ -3308,6 +3308,275 @@ async def scan_mega_legal_folders(
     return resp
 
 
+class MegaImportRequest(BaseModel):
+    """Bulk-import already-signed paperwork sitting in MEGA legal folders.
+
+    Walks every shoot in the date window, lists its ``{SCENE_ID}/Legal/``
+    folder, matches each PDF to a talent by filename prefix, downloads the
+    bytes, extracts AcroForm fields, and upserts a ``compliance_signatures``
+    row. This is the parallel of /admin/bulk-import-from-drive but for
+    paperwork that lives natively on MEGA (the migration path going forward).
+
+    Set ``overwrite_existing=True`` to re-import shoots that already have
+    rows — useful when a PDF was edited after the initial import.
+    """
+    date_from: str                        # YYYY-MM-DD inclusive
+    date_to: str                          # YYYY-MM-DD inclusive
+    studio: Optional[str] = None          # restrict to one canonical studio (FuckPassVR/VRHush/VRAllure/NaughtyJOI)
+    overwrite_existing: bool = False
+    imported_from_label: str = ""         # recorded in audit trail
+
+
+class MegaImportShootResult(BaseModel):
+    shoot_id: str
+    shoot_date: str
+    scene_id: str
+    studio: str
+    talents_imported: int = 0
+    talents_skipped: int = 0
+    skipped_reason: str = ""
+
+
+class MegaImportResult(BaseModel):
+    shoots_seen: int = 0
+    shoots_processed: int = 0
+    total_imported: int = 0
+    shoots: list[MegaImportShootResult] = []
+    errors: list[str] = []
+
+
+def _download_mega_object_bytes(studio: str, key: str) -> bytes:
+    """Pull one object's bytes out of MEGA into memory (no /tmp dance).
+
+    The caller is responsible for sizing — we cap reads at 50MB to protect
+    the FastAPI process from a runaway allocation if a Legal/ folder ever
+    contains an unexpected mega-file.
+    """
+    import s4_client
+    bucket = s4_client._studio_to_bucket(studio)
+    resp = s4_client._client().get_object(Bucket=bucket, Key=key)
+    body = resp["Body"]
+    MAX_BYTES = 50 * 1024 * 1024
+    data = body.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
+        raise ValueError(f"Object exceeds {MAX_BYTES} bytes safety cap")
+    return data
+
+
+@router.post("/admin/import-from-mega-legal", response_model=MegaImportResult)
+async def import_from_mega_legal(
+    request: Request,
+    body: MegaImportRequest,
+    _admin: dict = Depends(require_admin),
+):
+    """Bulk-populate ``compliance_signatures`` from MEGA legal folders.
+
+    For each BG/SOLO/JOI shoot in the date window:
+      1. Look up the scene's MEGA bucket key prefix (``{SCENE_ID}/Legal/``).
+      2. List the PDFs and match each to female/male by filename prefix
+         ``{TalentSlug}-`` (the prepare-flow naming convention).
+      3. Download bytes via S4, extract AcroForm fields, and upsert one
+         signature row per matched talent.
+
+    Skips shoots that already have signature rows unless
+    ``overwrite_existing=True``. Errors on individual shoots don't abort
+    the batch — they're collected and returned in ``errors``.
+    """
+    from_d = _parse_shoot_date(body.date_from)
+    to_d = _parse_shoot_date(body.date_to)
+    if not from_d or not to_d or from_d > to_d:
+        raise HTTPException(status_code=400, detail="Invalid date range")
+
+    shoots = _load_shoots_window(from_d, to_d, include_cancelled=False)
+    studio_filter = body.studio or ""
+
+    placeholder_png = _import_placeholder_signature_png()
+    audit_user = (
+        f"legacy_import:mega"
+        + (f":{body.imported_from_label}" if body.imported_from_label else "")
+    )
+    result = MegaImportResult()
+
+    # Pre-check: which shoots already have rows? Cheaper than per-shoot
+    # round-tripping the upsert helper.
+    existing = list_signed_talents([s.shoot_id for s in shoots])
+
+    for shoot in shoots:
+        result.shoots_seen += 1
+        bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in COMPLIANCE_SCENE_TYPES]
+        if not bg_scenes:
+            continue
+
+        primary = bg_scenes[0]
+        scene_id = primary.scene_id or ""
+        studio = primary.studio or ""
+
+        if not scene_id or not studio:
+            result.shoots.append(MegaImportShootResult(
+                shoot_id=shoot.shoot_id, shoot_date=shoot.shoot_date,
+                scene_id=scene_id, studio=studio,
+                skipped_reason="Missing scene_id or studio",
+            ))
+            continue
+        if studio_filter and studio != studio_filter:
+            continue
+
+        prior = existing.get(shoot.shoot_id, [])
+        prior_roles = {t.talent_role for t in prior}
+        if prior and not body.overwrite_existing:
+            result.shoots.append(MegaImportShootResult(
+                shoot_id=shoot.shoot_id, shoot_date=shoot.shoot_date,
+                scene_id=scene_id, studio=studio,
+                talents_skipped=len(prior),
+                skipped_reason=f"Already has {len(prior)} row(s); set overwrite to re-import",
+            ))
+            continue
+
+        # List the Legal/ folder for this scene. Try uppercase first, then
+        # the lowercase fallback (the migration left ~23 VRH scenes lowercase).
+        import s4_client
+        prefix = f"{scene_id}/Legal/"
+        files: list[dict] = []
+        try:
+            files = list(s4_client.list_objects(studio, prefix))
+            if not files:
+                # lowercase fallback
+                files = list(s4_client.list_objects(studio, prefix.lower()))
+        except Exception as exc:
+            result.errors.append(f"{shoot.shoot_id}: list failed — {exc}")
+            continue
+
+        pdfs = [f for f in files if (f["key"] or "").lower().endswith(".pdf")]
+        if not pdfs:
+            result.shoots.append(MegaImportShootResult(
+                shoot_id=shoot.shoot_id, shoot_date=shoot.shoot_date,
+                scene_id=scene_id, studio=studio,
+                skipped_reason="No PDFs in Legal/ folder",
+            ))
+            continue
+
+        # Match each PDF to female / male by slug prefix (prepare-flow
+        # convention is `{TalentSlug}-{date}.pdf`).
+        female_slug = shoot.female_talent.replace(" ", "")
+        male_slug = (shoot.male_talent or "").replace(" ", "")
+        matches: dict[str, dict] = {}
+        for f in pdfs:
+            name = (f["key"].rsplit("/", 1)[-1] or "").replace(" ", "")
+            low = name.lower()
+            if female_slug and low.startswith(female_slug.lower()):
+                matches.setdefault("female", f)
+            elif male_slug and low.startswith(male_slug.lower()):
+                matches.setdefault("male", f)
+            elif female_slug and female_slug.lower() in low:
+                matches.setdefault("female", f)
+            elif male_slug and male_slug.lower() in low:
+                matches.setdefault("male", f)
+
+        if not matches:
+            result.shoots.append(MegaImportShootResult(
+                shoot_id=shoot.shoot_id, shoot_date=shoot.shoot_date,
+                scene_id=scene_id, studio=studio,
+                skipped_reason=(
+                    f"No PDFs matched talent slugs ({female_slug!r}, {male_slug or '—'!r})"
+                ),
+            ))
+            continue
+
+        # If overwriting, skip roles that already have a row of the same
+        # talent_slug — we don't want to clobber an actively edited row.
+        if body.overwrite_existing:
+            for prior_t in prior:
+                if prior_t.talent_role in matches and prior_t.talent_slug != (
+                    female_slug if prior_t.talent_role == "female" else male_slug
+                ):
+                    matches.pop(prior_t.talent_role, None)
+
+        shoot_date_obj = _parse_shoot_date(shoot.shoot_date)
+        if not shoot_date_obj:
+            result.errors.append(f"{shoot.shoot_id}: invalid shoot_date")
+            continue
+        date_code = shoot_date_obj.strftime("%m%d%y")
+        imported_here = 0
+        for role, mega_file in matches.items():
+            slug = female_slug if role == "female" else male_slug
+            display = shoot.female_talent if role == "female" else (shoot.male_talent or "")
+            key = mega_file["key"]
+            try:
+                pdf_bytes = await asyncio.to_thread(_download_mega_object_bytes, studio, key)
+            except Exception as exc:
+                result.errors.append(f"{shoot.shoot_id}/{role}: download failed — {exc}")
+                continue
+
+            # Save locally so render-pdf can serve a stable artifact.
+            pdf_name = f"{slug}-{date_code}.pdf"
+            pdf_path = _legal_pdf_dir() / shoot.shoot_date / pdf_name
+            pdf_path.parent.mkdir(parents=True, exist_ok=True)
+            pdf_path.write_bytes(pdf_bytes)
+
+            # Placeholder signature image (we can't recover the original).
+            sig_path = _signature_dir() / f"{shoot.shoot_date}-{slug}-{role}.png"
+            sig_path.write_bytes(placeholder_png)
+
+            extracted = _extract_pdf_fields_for_import(pdf_bytes)
+            mega_remote = (
+                f"s3://{s4_client._studio_to_bucket(studio)}/{key}"
+            )
+
+            upsert_signature(
+                shoot_id=shoot.shoot_id,
+                shoot_date=shoot.shoot_date,
+                scene_id=scene_id,
+                studio=studio,
+                talent_role=role,
+                talent_slug=slug,
+                talent_display=display,
+                legal_name=extracted.get("legal_name", display),
+                business_name=extracted.get("business_name", ""),
+                tax_classification="individual",
+                llc_class="",
+                other_classification="",
+                exempt_payee_code="",
+                fatca_code="",
+                tin_type="ssn",
+                tin="",
+                dob=extracted.get("dob", ""),
+                place_of_birth=extracted.get("place_of_birth", ""),
+                street_address=extracted.get("street_address", ""),
+                city_state_zip=extracted.get("city_state_zip", ""),
+                phone=extracted.get("phone", ""),
+                email=extracted.get("email", ""),
+                id1_type=extracted.get("id1_type", ""),
+                id1_number=extracted.get("id1_number", ""),
+                id2_type=extracted.get("id2_type", ""),
+                id2_number=extracted.get("id2_number", ""),
+                stage_names=extracted.get("stage_names", display),
+                professional_names="",
+                nicknames_aliases="",
+                previous_legal_names="",
+                signature_image_path=str(sig_path.relative_to(get_settings().base_dir)),
+                signed_ip=request.client.host if request.client else "",
+                signed_user_agent="legacy-import-mega-bulk",
+                signed_by_user=audit_user,
+                pdf_local_path=str(pdf_path),
+                pdf_mega_path=mega_remote,
+            )
+            imported_here += 1
+
+        result.shoots.append(MegaImportShootResult(
+            shoot_id=shoot.shoot_id, shoot_date=shoot.shoot_date,
+            scene_id=scene_id, studio=studio,
+            talents_imported=imported_here,
+            skipped_reason="" if imported_here else "No PDFs matched talent slug",
+        ))
+        result.shoots_processed += 1
+        result.total_imported += imported_here
+
+    # Bust the legal-folders cache so the Database view re-counts MEGA
+    # files vs. DB rows on the next refresh.
+    _MEGA_LEGAL_CACHE.clear()
+    return result
+
+
 @router.get("/admin/legal-folders/presign")
 async def presign_mega_legal_file(
     _admin: dict = Depends(require_admin),
