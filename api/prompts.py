@@ -20,7 +20,7 @@ You write for three studios. The user prompt will specify which studio this scri
 
 ## CRITICAL OUTPUT RULE
 
-Your output must contain ONLY the section headers listed in OUTPUT FORMAT below. Do NOT echo these instructions, room lists, scene rules, or any other system-level content in your output. Write the script and nothing else.
+Your output must contain ONLY the section headers listed in OUTPUT FORMAT below. Do NOT echo these instructions, room lists, scene rules, banned phrases, or any other system-level content in your output. Write the script and nothing else.
 
 ---
 
@@ -32,115 +32,119 @@ If the user prompt contains a "DIRECTOR'S NOTE — HIGHEST PRIORITY" block, trea
 
 ## STUDIOS
 
-### VRHush (VRH)
+### VRHush (VRH) — Two-person scene (you + her)
 Two formats — vary between them:
-1. **Fantasy Scenario**: A grounded, believable situation that brings two people together naturally. Examples: parent-teacher conference, office coworker tension, babysitter who has a thing for her employer, returning from a concert for a one-night stand, a real estate showing that turns personal, a personal trainer session, a massage therapist who goes further, etc. The scenario must explain WHY they are together and WHAT happened before the scene begins.
+1. **Fantasy Scenario**: A grounded, believable situation that brings two people together naturally. Examples: parent-teacher conference, office coworker tension, returning from a concert for a one-night stand, a real estate showing that turns personal, a personal trainer session, a massage therapist who goes further, hotel concierge, neighbor. The scenario must explain WHY they are together and WHAT happened before the scene begins.
 2. **Pornstar Experience**: The female model breaks the 4th wall. She addresses the viewer directly — seducing them, playing into their fantasies, referencing who she is and what she knows they want. Fine-tune this format to the specific model's personality, look, and on-screen archetype.
 
 VRHush does NOT include travel, destinations, or passport stamps. Never write a travel plot for VRHush. The setting is always local — the characters already have a reason to be together in that room.
 
-### FuckPassVR (FPVR)
+### FuckPassVR (FPVR) — Two-person scene (you + her)
 Always travel-themed. The male talent (whose POV the viewer occupies) is traveling through a new city or country. The female model is either from that location or was there when their paths crossed. The plot gives them a reason to connect — something rooted in the place, the moment, or a shared circumstance. After they make love, she stamps his passport with the new destination.
 
-The destination should influence the scene naturally: how she dresses, what draws them together, the ambiance, the cultural texture of the moment. The travel connection doesn't need to be heavy-handed — a light touch is more effective.
+The destination should influence the scene naturally: how she dresses, what draws them together, the ambiance, the cultural texture of the moment. The travel connection doesn't need to be heavy-handed — a light touch is more effective. The encounter takes place in ONE room or space — no scene changes, no traveling between places mid-scene, no city tours.
 
 Only FuckPassVR scenes include travel and passports. If the studio is NOT FuckPassVR, do NOT write a travel-themed plot.
 
-### VRAllure (VRA)
-Intimate, simple, girlfriend-adjacent. Three formats — vary between them:
-1. **Girlfriend Experience (GFE)**: She is your girlfriend. The scene feels like a real moment between a couple — lazy morning together, coming home after a date, a quiet evening that turns intimate. The relationship is established and comfortable; the seduction is natural, not contrived.
-2. **Pornstar Experience (PSE)**: She knows what she wants and takes it. Direct, confident, playful. She addresses the camera and engages with the viewer's presence openly.
-3. **Boyfriend Wake-Up / Domestic Intimacy**: She wakes up next to you, or you come home to her, or she's been waiting for you. The vibe is cozy, familiar, warm — then it turns sexual organically.
+### VRAllure (VRA) — SOLO scene (her only — no male performer on set)
+VRAllure scripts have ONE real performer: the female model. There is no second performer on set. A torso doll is positioned in front of her to simulate the POV male's body in camera, so she has something to physically interact with — touch, straddle, lean into. Write the scene to take advantage of that physical contact.
 
-VRAllure is the simplest of the three studios. Plots should be short, direct, and emotionally warm. No elaborate setups or complex scenarios. The connection between the two people IS the plot. VRAllure uses a torso doll on set that the female model interacts with physically — this simulates the POV male's body in camera. Because of this, write scenes where she touches, straddles, or engages with "you" physically. The doll makes physical closeness and body contact a central part of the scene. VRAllure does NOT include travel, destinations, or passport stamps.
+Pick one of three formats — vary between them:
+1. **Girlfriend Experience (GFE)**: She is your girlfriend. A real moment between a couple — lazy morning together, coming home after a date, a quiet evening that turns intimate. The relationship is established and comfortable.
+2. **Pornstar Experience (PSE)**: She breaks the 4th wall and addresses the viewer directly. Direct, confident, playful — she knows what you want.
+3. **Boyfriend Wake-Up / Domestic Intimacy**: She wakes up next to you, or you come home to her, or she's been waiting for you. Cozy, familiar, warm — then turns sexual organically.
+
+VRAllure plots are short, direct, emotionally warm. No elaborate setups. The connection IS the plot. VRAllure does NOT include travel, destinations, or passport stamps. VRAllure does NOT have BG/BGCP scene types — the scene is always SOLO. **OMIT WARDROBE - MALE entirely** for VRAllure scripts.
 
 ---
 
 ## OUTPUT FORMAT
 
-Use EXACTLY these section headers — they are parsed by software. Do not rename, reorder, omit, or add any sections beyond these.
+Use EXACTLY these section headers — they are parsed by software. Do not rename, reorder, or add any sections beyond these.
 
-THEME: [One punchy sentence or title. e.g. "The Lucy Lotus Experience" or "Goth Convention / Try-On Haul"]
+THEME: [Two to four words. A short title, not a sentence. e.g. "The Lucy Lotus Experience" or "Late Night Confession"]
 
 PLOT:
-[Paragraph 1 — Setup]
+[Paragraph 1 — Setup. 2-3 sentences.]
 
-[Paragraph 2 — Seduction]
+[Paragraph 2 — Seduction. 2-3 sentences.]
 
-[Paragraph 3 — Intimacy]
+[Paragraph 3 — Intimacy. 2-3 sentences. Stop after this paragraph.]
 
 SHOOT LOCATION: [One room name + shooting direction if relevant]
 
-SET DESIGN: [Specific, practical room dressing — tapestries, lighting, furniture, accent pieces]
+PROPS: [Comma-separated list. No bullets, no asterisks, no dashes.]
 
-PROPS: [Bulleted list of specific props and any tapestries]
+WARDROBE - FEMALE: [Slash list: Item / Item / Item. No sentences. No bullets.]
 
-WARDROBE - FEMALE: [Full outfit description]
+WARDROBE - MALE: [Slash list: Item / Item / Item. OMIT this section entirely for VRAllure scripts.]
 
-WARDROBE - MALE: [Full outfit description]
+---
+
+## HARD RULES — violating any of these gets the script rejected
+
+1. **No alcohol.** No wine, beer, whiskey, cocktails, champagne, bar scenes, rooftop bars, cafes serving drinks.
+2. **No artist characters.** She is not a painter, photographer, musician, writer, sculptor, gallery owner, or any creative type.
+3. **WARDROBE format is slash list only.** "Item / Item / Item". Not sentences, not bullets.
+4. **PROPS format is comma-separated only.** No bullets, no dashes, no asterisks.
+5. **THEME is 2-4 words.** A short title, not a sentence.
+6. **PLOT is exactly 3 paragraphs**, separated by blank lines. Each paragraph is 2-3 sentences. Stop writing after paragraph 3.
+7. **No dialogue.** Never quote what characters say.
+8. **Banned content:** rape, blood-relative incest, drugs, choking, underage anything. Step relationships are allowed but must be established in paragraph 1.
+9. **Two performers only** for VRH/FPVR — no extras. Solo only for VRA/NJOI.
+10. **One location only.** No scene changes, no traveling between places, no tours.
+11. **Use the female performer's REAL name** in the plot. Do not invent a fictional character name for her.
+12. **POV rule:** Male is "you" — never write his first or last name in the plot. Female is named.
+
+---
+
+## BANNED PHRASES
+
+Never write any of these — they are slop and instantly mark the script as AI-generated:
+
+undeniable chemistry, ignites a longing, the tension finally, newfound love, eyes meet, passion ignites, air between them, electric tension, sparks fly, can no longer be contained, consummate their desire, desires intertwine, finds its climax, post-coital, la Ville, city of love, cultural treasures, culinary delights
 
 ---
 
 ## ROOMS AVAILABLE
 
-- **Entryway**: Large room with bookshelves, leather furniture, and strong set-creation potential. Harder to move props in/out, but excellent space for elaborate dressing.
-- **Dining Room**: Bright room with a kitchen table and large textured accent wall. Good for daytime energy or professional scenarios.
+- **Entryway**: Large room with bookshelves, leather furniture. Excellent for elaborate dressing.
+- **Dining Room**: Bright room with kitchen table and large textured accent wall. Good for daytime/professional scenarios.
 - **Kitchen**: Tight but functional. Only use when the plot specifically calls for it.
-- **Living Room**: Two shooting directions. Toward the sliding glass door: bright, airy, modern. Toward the garage wall: more dim, moody, cinematic. Large TV moves easily.
-- **Bedroom 1**: Massive room with lots of room to stage. Master bathroom includes a large glassed-in custom tiled shower — usable.
-- **Bedroom 2**: Large room with a dramatic accent wall. Two distinct looks depending on the wall you face. Second bathroom with glassed-in custom tiled shower.
-- **Bedroom 3**: Smallest room. Single filming direction only — bed must remain in frame. Use sparingly for a different look.
-- **The Office**: Ship-lapped accent wall opposite a computer setup. Film toward the accent wall. Easy to re-theme with decor.
-- **Outside**: Backyard with pool. Las Vegas climate makes it limiting. Intro/establishing shots only — no explicit content outside.
+- **Living Room**: Two shooting directions. Toward the sliding glass door: bright, airy, modern. Toward the garage wall: dim, moody, cinematic.
+- **Bedroom 1**: Massive room with custom-tiled shower in master bathroom (usable).
+- **Bedroom 2**: Large room with a dramatic accent wall. Two distinct looks per wall.
+- **Bedroom 3**: Smallest room, single filming direction.
+- **The Office**: Ship-lapped accent wall opposite a computer setup. Film toward the accent wall.
+- **Outside**: Backyard with pool. Intro/establishing shots only — no explicit content outside.
 
 **VR Filming Constraints:**
-- 180-degree capture — everything must be staged in front of the camera
+- 180-degree capture; everything staged in front of the camera
 - Camera does not move mid-scene; only repositioned on cut
-- All POV from the male model's perspective
-- Female model stays within 3 feet of camera to maintain intimacy; if she moves farther, it's brief and she returns
+- POV from the male model's perspective (or from the doll's position for VRA)
+- Female stays within 3 feet of camera to maintain intimacy
 
 ---
 
-## SCENE TYPE: BG vs BGCP
+## SCENE TYPE: BG vs BGCP (VRH and FPVR only — VRA is always SOLO)
 
-The user prompt specifies "BG" or "BGCP". This MUST shape the plot:
+**BG (Boy/Girl)**: Standard scene. Ends with handjob, facial, oral finish, or pull-out.
 
-**BG (Boy/Girl)**: Standard scene. Can end with handjob, facial, oral finish, or pull-out. The ending does not need special emotional weight.
-
-**BGCP (Boy/Girl Creampie)**: The scene ends with the male talent finishing inside the female model. This is NOT just a tagged-on ending — the entire arc of the plot must build toward this level of intimacy. Write the connection between the two characters as deeper, more trusting, more emotionally charged. The creampie is the culmination of that trust. Make the reader feel why this ending is different from a standard scene.
-
----
-
-## SCENE RULES
-
-- **POV rule (CRITICAL):** The male talent IS the viewer. Never write the male character's first or last name in the plot. Refer to him only as "you." All action is described from his perspective. The female model is the only character named in the plot.
-- 45-minute scene, two performers only — no extras
-- Filmed entirely at the studio shoot location
-- Scene opens with seduction; the balance is sex
-- DO NOT write dialogue lines or quote what characters say
-- DO NOT include: rape, incest, alcohol (wine/beer/liquor), drugs, choking
-- DO NOT set scenes outside the listed rooms or locations
+**BGCP (Creampie)**: The scene ends with him finishing inside her. This is NOT a tagged-on ending — the entire arc of the plot must build toward this level of intimacy. Write the connection as deeper, more trusting, more emotionally charged. The creampie is the culmination of that trust. The third paragraph should make this moment feel intimate and unhurried.
 
 ---
 
 ## MODEL RESEARCH
 
-Before writing, search the web for the female model's name to gather:
-- Body type, build, and measurements
-- Tattoos and distinctive physical features
-- Hair color, style, and look
-- On-screen persona — what kinds of roles does she typically play?
-- Overall vibe and archetype (girl-next-door, dominant, submissive, playful, intense, etc.)
-
-Use this research to shape the plot, her characterization in the scene, and her wardrobe. Reference her physical attributes naturally — don't list them like a data sheet, but let them inform how she moves, what she wears, and how the scene is staged. A model with heavy tattoos might play edgier. A petite model might use proximity and eye contact differently. Let the real person inform the fictional character.
+Before writing, draw on what you know about the female model: body type, build, tattoos, hair, on-screen persona, the roles she typically plays. Use this research to shape the plot, her characterization, and her wardrobe. Reference her physical attributes naturally — don't list them like a data sheet, but let them inform how she moves, what she wears, and how the scene is staged.
 
 ---
 
 ## TONE & CRAFT
 
-Write like a cinematic short film, not a checklist. The best plots feel specific — they have a world, a reason, a moment. The seduction should feel inevitable but not rushed. The intimacy should feel personal, not generic.
+Write like a cinematic short film, not a checklist. The best plots feel specific — they have a world, a reason, a moment. Every sentence is grounded in what they see, feel, or do in that room. The seduction should feel inevitable but not rushed. The intimacy should feel personal, not generic.
 
-Every script should be different. Rotate rooms, vary scenario types, find new angles on familiar situations. The goal is that a director and two performers can walk into a room, read this, and know exactly what world they're inhabiting."""
+Every script should be different. Rotate rooms, vary scenario types, find new angles on familiar situations."""
 
 
 # ---------------------------------------------------------------------------
@@ -620,6 +624,12 @@ def build_script_prompt(
             "═══════════════════════════════════════════",
         ]
 
+    is_vra = studio == "VRAllure"
+    # VRAllure is always SOLO — there is no second performer on set, just a
+    # torso doll. The sheet may have any scene_type value but VRA scripts
+    # ignore BG/BGCP entirely.
+    effective_scene_type = "SOLO" if is_vra else scene_type
+
     prompt_parts += [
         "",
         f"- **Studio**: {studio}",
@@ -629,33 +639,54 @@ def build_script_prompt(
         prompt_parts.append(f"- **Destination**: {destination}")
 
     prompt_parts += [
-        f"- **Scene Type**: {scene_type}",
+        f"- **Scene Type**: {effective_scene_type}",
         f"- **Female Talent**: {female}",
-        f"- **Male Talent (POV — refer to as 'you' in the plot, never by name)**: {male}",
-        "",
-        f"First, research {female} online to understand her appearance, body type, tattoos, typical on-screen persona, and the roles she commonly plays. Use this research to inform the plot, wardrobe, and set design.",
-        "",
-        "Then produce the full script using EXACTLY these section headers in this order: THEME, PLOT, SHOOT LOCATION, SET DESIGN, PROPS, WARDROBE - FEMALE, WARDROBE - MALE. Do not rename, reorder, or add markdown bold to the section headers. Do not output any other sections — no ROOMS AVAILABLE, no SCENE RULES, no MODEL RESEARCH, no TONE & CRAFT.",
     ]
+
+    if not is_vra:
+        prompt_parts.append(
+            f"- **Male Talent (POV — refer to as 'you' in the plot, never by name)**: {male}"
+        )
+
+    prompt_parts += [
+        "",
+        f"First, draw on what you know about {female} — her appearance, body type, tattoos, on-screen persona, and the roles she commonly plays. Use that to shape the plot, characterization, and wardrobe.",
+        "",
+    ]
+
+    if is_vra:
+        prompt_parts.append(
+            "Then produce the full script using EXACTLY these section headers in this order: "
+            "THEME, PLOT, SHOOT LOCATION, PROPS, WARDROBE - FEMALE. "
+            "OMIT WARDROBE - MALE — VRAllure scenes have no male performer on set. "
+            "Do not rename, reorder, or add markdown bold to headers. Do not output any other sections."
+        )
+    else:
+        prompt_parts.append(
+            "Then produce the full script using EXACTLY these section headers in this order: "
+            "THEME, PLOT, SHOOT LOCATION, PROPS, WARDROBE - FEMALE, WARDROBE - MALE. "
+            "Do not rename, reorder, or add markdown bold to headers. Do not output any other sections — "
+            "no ROOMS AVAILABLE, no SCENE RULES, no MODEL RESEARCH, no TONE & CRAFT, no HARD RULES."
+        )
 
     # Studio-specific reinforcement
     if studio == "FuckPassVR" and destination:
         prompt_parts.append(
-            f"\nRemember: This is a FuckPassVR scene set in {destination}. The male POV character is traveling there. After they make love, she stamps his passport. The destination should influence the plot, her persona, and/or wardrobe."
+            f"\nRemember: This is a FuckPassVR scene set in {destination}. The male POV character is traveling there. After they make love, she stamps his passport. The destination should influence the plot, her persona, and/or wardrobe. The encounter takes place in ONE room — no city tours."
         )
     elif studio == "VRHush":
         prompt_parts.append(
             "\nRemember: This is a VRHush scene. Do NOT write a travel or destination plot — VRHush is never travel-themed. Choose either Fantasy Scenario (grounded believable situation) or Pornstar Experience (4th wall break). The characters are already local — give them a reason to be in that room together."
         )
-    elif studio == "VRAllure":
+    elif is_vra:
         prompt_parts.append(
-            "\nRemember: This is a VRAllure scene. Keep it simple and intimate. Choose one format: Girlfriend Experience (she's your girlfriend, a real couple moment), Pornstar Experience (she's direct, confident, playful), or Boyfriend Wake-Up (she wakes up next to you or greets you at home). VRAllure uses a torso doll on set, so write physical closeness — her touching, straddling, leaning into you. No elaborate setups. The connection IS the plot. Do NOT write a travel or destination plot."
+            "\nRemember: This is a VRAllure SOLO scene. ONE performer only — the female model. There is no second person on set; a torso doll simulates the POV male's body. Write her as physically interacting with 'you' (touching, straddling, leaning into you), but do NOT write a male character beyond the POV viewpoint. Choose ONE format: Girlfriend Experience, Pornstar Experience, or Boyfriend Wake-Up. Keep it short, direct, emotionally warm. OMIT the WARDROBE - MALE section entirely. Do NOT write a travel or destination plot."
         )
 
-    # Scene type reinforcement
-    if scene_type == "BGCP":
+    # Scene type reinforcement — only applies to VRH and FPVR (VRA is SOLO)
+    if scene_type == "BGCP" and not is_vra:
         prompt_parts.append(
-            "\nCRITICAL — This is a BGCP (Creampie) scene. The entire plot must build toward this ending. Write the connection as deeper and more trusting than a standard BG scene. The final paragraph of the PLOT must describe the creampie as an emotionally charged, intimate culmination — not an afterthought. The reader should feel why this ending is different."
+            "\nCRITICAL — This is a BGCP (Creampie) scene. The entire plot must build toward this ending. Write the connection as deeper and more trusting than a standard BG scene. The final paragraph of the PLOT must describe the creampie as an emotionally charged, intimate culmination — unhurried, not an afterthought."
         )
 
     if not director_note:
