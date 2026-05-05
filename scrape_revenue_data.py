@@ -55,6 +55,7 @@ import argparse
 import csv
 import logging
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -86,7 +87,10 @@ STATE_DIR.mkdir(exist_ok=True)
 
 OUT_SLR    = DOCUMENTS / "slr_all_studios_video_stats.csv"
 OUT_POVR   = DOCUMENTS / "povr_video_data.csv"
-OUT_VRPORN = DOCUMENTS / "vrporn_video_data.csv"
+# VRPorn's UI exposes daily totals (not per-video) under /account/earnings/.
+# Per-video data lives elsewhere in the partner portal (TBD); for now the
+# daily file feeds the dashboard's "yesterday" + "this-month-daily" cards.
+OUT_VRPORN = DOCUMENTS / "vrporn_daily.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -325,40 +329,95 @@ def scrape_povr(page: Page, dry_run: bool) -> list[list[str]]:
 # VRPorn — admin.vrporn.com (or wherever the ODS portal lives)
 # ---------------------------------------------------------------------------
 def scrape_vrporn(page: Page, dry_run: bool) -> list[list[str]]:
-    """Log into VRPorn ODS / partner portal and pull per-video stats.
+    """Log into VRPorn (consumer site, content-creator account) and pull
+    daily earnings totals from /account/earnings/.
 
-    EXPECTED OUTPUT SHAPE:
-      Published Date, Title, Slug, Total Hits, Total Earnings $, View Hits,
-      View Earnings $, Download Hits, Download Earnings $, Game Hits, Game Earnings $
+    Output schema (matches what the dashboard wants for daily granularity):
+      Date, Studio, Total Earnings $
 
-    The user's existing CSV came from the ODS portal — historical data
-    pre-Sep 2025 was their old ODS export, post-Sep 2025 is direct-payout
-    via the admin panel. We may need to scrape both and merge.
+    Note: VRPorn's UI doesn't expose per-video earnings via a stable URL
+    we've found yet, so per-video catalog stays in the user's existing
+    "VRPorn Videos" tab (manual import) until we discover that surface.
+    What this scraper provides is *daily totals per studio*, which feeds
+    the dashboard's "yesterday" + "this-month daily" cards.
+
+    Scrape strategy:
+      1. Log into vrporn.com (dismiss age-gate "Agree" button on the login modal,
+         fill #v-0-0-1-0 / #v-0-0-1-1, submit)
+      2. Navigate to /account/earnings/?studio=<NAME>&d1=<date>&d2=<date>
+         for each studio + date range
+      3. Parse the daily list (rendered as div.app-earnings-tab-premium__table-item
+         with two cols: date string + dollar amount)
+      4. Paginate via &page=N until empty
     """
     user = os.environ.get("VRPORN_USER")
     pw   = os.environ.get("VRPORN_PASS")
     if not user or not pw:
         raise RuntimeError("VRPORN_USER / VRPORN_PASS env vars not set")
 
-    log.info("VRPorn: navigating to login...")
-    # TODO: confirm the actual portal URL — the user's note mentions both
-    # "ODS portal" and "direct payouts", suggesting two surfaces.
-    page.goto("https://admin.vrporn.com/login", wait_until="domcontentloaded")
+    # ── Login (idempotent — skips if storage_state already authed) ───────────
+    log.info("VRPorn: opening /login/...")
+    page.goto("https://vrporn.com/login/", wait_until="domcontentloaded", timeout=30_000)
 
-    if "/login" in page.url:
+    # Age-gate modal — only the BUTTON.button_primary version, NOT the
+    # "Website's Terms-of-Service Agreement" link with the same text.
+    try:
+        page.locator('button.button_primary:has-text("Agree")').first.click(timeout=5_000)
+        page.wait_for_timeout(800)
+    except Exception:
+        pass
+
+    # If we're still on /login/ AFTER dismissing the age gate, fill creds.
+    if "/login" in page.url and page.locator('#v-0-0-1-0:visible').count() > 0:
         log.info("VRPorn: filling credentials...")
-        page.fill('input[name="username"], input[type="email"]', user)
-        page.fill('input[name="password"], input[type="password"]', pw)
-        page.click('button[type="submit"]')
-        try:
-            page.wait_for_url(lambda u: "/login" not in u, timeout=15_000)
-        except PWTimeout:
-            raise RuntimeError("VRPorn login failed — check creds or 2FA")
+        page.fill('#v-0-0-1-0', user)
+        page.fill('#v-0-0-1-1', pw)
+        # Press Enter (the "Log In" button selector is ambiguous because
+        # there's also a top-bar "Log In" link).
+        page.locator('#v-0-0-1-1').press("Enter")
+        page.wait_for_load_state("networkidle", timeout=20_000)
 
-    raise NotImplementedError(
-        "VRPorn scrape not yet wired — need the URL of the per-video earnings "
-        "page (ODS portal vs direct-payout admin) and the export selector."
-    )
+    # If we're still stuck on /login/ — bail loudly.
+    if "/login" in page.url:
+        raise RuntimeError("VRPorn login failed — still on /login/ after submit")
+
+    # ── Scrape /account/earnings/ ────────────────────────────────────────────
+    # Default view is "last 30-or-so days" with no date filter. For lifetime
+    # capture we'd need to step back month-by-month; for the user's immediate
+    # ask ("this month daily + yesterday") the default 20-row view is enough.
+    # We loop pagination while the page has rows.
+    log.info("VRPorn: loading /account/earnings/...")
+    page.goto("https://vrporn.com/account/earnings/", wait_until="networkidle", timeout=30_000)
+
+    # Studio dropdown values seen on the live page:
+    STUDIOS = ["All", "FuckPassVR", "XPlayVR", "BlowJobNow", "VRHush", "VRAllure", "NaughtyJOI"]
+    # We only scrape "All" for now — the per-studio split is summable from
+    # POVR/SLR which DO give us studio-level data, and VRPorn's "All" total
+    # is what the user's existing dashboard surfaces.
+    # TODO: per-studio loop once we confirm the URL param name (likely ?studio=<name>).
+
+    # Page 1 of /account/earnings/ shows the most recent ~20 days. The
+    # `?page=N` param in the URL doesn't actually paginate — it returns
+    # the same content. The visible "1, 2" page links use JS navigation
+    # that we haven't mapped yet. For the user's immediate need ("this
+    # month daily + yesterday") the default 20-day window is enough; the
+    # historical backfill can come later via a different endpoint.
+    out: list[list[str]] = []
+    pattern = re.compile(r'([A-Z][a-z]{2}\s+\d+,\s+\d{4})\s*\n\s*\$([\d,]+(?:\.\d+)?)')
+    body = page.evaluate("document.body.innerText")
+    matches = pattern.findall(body)
+    seen_dates: set[str] = set()
+    for date_str, amount in matches:
+        if date_str in seen_dates:
+            continue
+        seen_dates.add(date_str)
+        out.append([
+            date_str,                            # Date (e.g. "Apr 30, 2026")
+            "All",                               # Studio (TODO: per-studio loop)
+            amount.replace(",", ""),             # Total Earnings $ (raw)
+        ])
+    log.info(f"VRPorn: {len(out)} unique daily rows captured (default last-20-day view)")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -392,9 +451,10 @@ PLATFORMS: dict[str, dict] = {
     "vrporn": {
         "fn": scrape_vrporn,
         "out": OUT_VRPORN,
-        "header": ["Published Date", "Title", "Slug", "Total Hits", "Total Earnings $",
-                   "View Hits", "View Earnings $", "Download Hits", "Download Earnings $",
-                   "Game Hits", "Game Earnings $"],
+        # Daily-totals schema (we currently only scrape the "All" studio
+        # aggregate; per-studio + per-video are TODOs that need additional
+        # surface mapping).
+        "header": ["Date", "Studio", "Total Earnings $"],
     },
 }
 

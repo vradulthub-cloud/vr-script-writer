@@ -207,7 +207,11 @@ def stamp_dashboard_updated(sh: gspread.Spreadsheet) -> None:
       'SexLikeReal  ·  POVR  ·  VRPorn  |  Updated: 3/16/2026'
     We replace that whole cell so the date stays visible above the totals.
     """
-    today = datetime.now().strftime("%-m/%-d/%Y")  # e.g. "5/4/2026"
+    # Windows strftime doesn't support %-m / %-d (POSIX-only). Build the
+    # leading-zero-stripped m/d/Y manually so this script works the same
+    # on Mac (dev) and Windows (production).
+    n = datetime.now()
+    today = f"{n.month}/{n.day}/{n.year}"  # e.g. "5/4/2026"
     try:
         ws = sh.worksheet("📊 Dashboard")
     except gspread.WorksheetNotFound:
