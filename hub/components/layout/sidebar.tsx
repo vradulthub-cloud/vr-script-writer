@@ -17,8 +17,10 @@ import {
   Shield,
   ClipboardCheck,
   UploadCloud,
+  DollarSign,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { canViewRevenue } from "@/lib/access"
 
 // ─── Nav structure ────────────────────────────────────────────────────────────
 
@@ -58,10 +60,12 @@ const NAV_SECTIONS = [
 interface SidebarProps {
   allowedTabs: string   // comma-separated tab keys or "ALL"
   userRole: string      // "admin" | "editor"
+  userEmail?: string    // used to gate Revenue dashboard (top-tier-admin only)
 }
 
-export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
+export function Sidebar({ allowedTabs, userRole, userEmail }: SidebarProps) {
   const pathname = usePathname()
+  const showRevenue = canViewRevenue(userEmail, userRole)
 
   const allowed = useMemo(() => {
     if (userRole === "admin" || allowedTabs === "ALL") return null // null = all
@@ -145,10 +149,20 @@ export function Sidebar({ allowedTabs, userRole }: SidebarProps) {
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-2" aria-label="Main navigation">
 
-        {/* Core items — Dashboard + Missing — always visible */}
+        {/* Core items — Dashboard always visible. Revenue surfaces here for
+            top-tier admins only (stricter than the regular /admin gate
+            because $$$ data is sensitive even within the company). */}
         {CORE_ITEMS.map(item => (
           <NavLink key={item.href} {...item} />
         ))}
+        {showRevenue && (
+          <NavLink
+            href="/admin/revenue"
+            label="Revenue"
+            shortLabel="Rev"
+            icon={DollarSign}
+          />
+        )}
 
         {/* Sectioned nav */}
         {NAV_SECTIONS.map(section => {
