@@ -136,6 +136,29 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
   const [renaming,     setRenaming]     = useState(false)
   const [renameError,  setRenameError]  = useState<string | null>(null)
 
+  // Bulk multi-select rename — checkbox column on MEGA rows. Operator
+  // selects N files, opens a find/replace dialog, previews the renames,
+  // confirms. Each rename runs sequentially through legalFileRename so
+  // a partial-failure mid-batch is recoverable.
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+  const [bulkRenameOpen, setBulkRenameOpen] = useState(false)
+  const [bulkFind, setBulkFind] = useState("")
+  const [bulkReplace, setBulkReplace] = useState("")
+  const [bulkRunning, setBulkRunning] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
+  const [bulkErrors, setBulkErrors] = useState<{ file: string; error: string }[]>([])
+  const [bulkDone, setBulkDone] = useState<{ renamed: number; failed: number } | null>(null)
+
+  // Toggle checkbox for a single MEGA row.
+  function toggleSelect(key: string) {
+    setSelectedKeys(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }
+  function clearSelection() { setSelectedKeys(new Set()) }
+
   // Bulk MEGA → DB importer
   const [importOpen, setImportOpen]           = useState(false)
   const [importRunning, setImportRunning]     = useState(false)
@@ -312,6 +335,50 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
       // Surface inline rather than throw — admins can refresh and retry.
       setMegaError(e instanceof Error ? e.message : "Could not generate download URL")
     }
+  }
+
+  // Compute the planned src→dst pairs for the current find/replace pattern.
+  const bulkPlan = useMemo<{ file: MegaLegalFile; newName: string }[]>(() => {
+    if (selectedKeys.size === 0 || !bulkFind) return []
+    const find = bulkFind
+    const out: { file: MegaLegalFile; newName: string }[] = []
+    for (const f of megaFiles) {
+      if (!selectedKeys.has(f.key)) continue
+      const newName = f.filename.split(find).join(bulkReplace)
+      if (newName !== f.filename) out.push({ file: f, newName })
+    }
+    return out
+  }, [megaFiles, selectedKeys, bulkFind, bulkReplace])
+
+  async function runBulkRename() {
+    if (bulkPlan.length === 0) return
+    setBulkRunning(true)
+    setBulkErrors([])
+    setBulkProgress({ done: 0, total: bulkPlan.length })
+    let renamed = 0
+    const errors: { file: string; error: string }[] = []
+    for (const item of bulkPlan) {
+      try {
+        await client.compliance.legalFileRename(
+          item.file.studio.toLowerCase(),
+          item.file.key,
+          item.newName,
+        )
+        renamed++
+      } catch (e) {
+        errors.push({
+          file: item.file.filename,
+          error: e instanceof Error ? e.message : "Failed",
+        })
+      }
+      setBulkProgress({ done: renamed + errors.length, total: bulkPlan.length })
+    }
+    setBulkErrors(errors)
+    setBulkDone({ renamed, failed: errors.length })
+    setBulkRunning(false)
+    setSelectedKeys(new Set())
+    void loadDb({ silent: true })
+    void loadMega(true)
   }
 
   function startRename(f: MegaLegalFile) {
@@ -681,6 +748,44 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
         </div>
       </div>
 
+      {/* ── Bulk-selection action bar (visible only when MEGA rows are selected) ── */}
+      {selectedKeys.size > 0 && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 12,
+          marginBottom: 8, padding: "8px 12px",
+          background: "color-mix(in srgb, var(--color-lime) 10%, transparent)",
+          border: "1px solid var(--color-lime)",
+          borderRadius: 8,
+          fontSize: 12,
+        }}>
+          <span style={{ color: "var(--color-lime)", fontWeight: 700, letterSpacing: "0.04em" }}>
+            {selectedKeys.size} selected
+          </span>
+          <button
+            type="button"
+            onClick={() => setBulkRenameOpen(true)}
+            style={{
+              ...btnGhost,
+              background: "color-mix(in srgb, var(--color-lime) 16%, transparent)",
+              color: "var(--color-lime)",
+              borderColor: "var(--color-lime)",
+            }}
+          >
+            <Pencil size={13} />
+            Rename selected
+          </button>
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={clearSelection}
+            style={{ ...btnGhost, padding: "5px 9px", fontSize: 11 }}
+          >
+            <X size={11} />
+            Clear
+          </button>
+        </div>
+      )}
+
       {/* ── Status line ── */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -744,6 +849,27 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
                   letterSpacing: "0.06em",
                   textTransform: "uppercase",
                 }}>
+                  <Th style={{ width: 28, textAlign: "center" }}>
+                    {/* Header checkbox: "select all visible MEGA rows" */}
+                    <input
+                      type="checkbox"
+                      aria-label="Select all MEGA rows"
+                      checked={(() => {
+                        const megaKeys = rows.filter(r => r.source === "mega").map(r => (r as MegaRow).file.key)
+                        return megaKeys.length > 0 && megaKeys.every(k => selectedKeys.has(k))
+                      })()}
+                      onChange={(e) => {
+                        const megaKeys = rows.filter(r => r.source === "mega").map(r => (r as MegaRow).file.key)
+                        if (e.target.checked) setSelectedKeys(new Set([...selectedKeys, ...megaKeys]))
+                        else {
+                          const next = new Set(selectedKeys)
+                          megaKeys.forEach(k => next.delete(k))
+                          setSelectedKeys(next)
+                        }
+                      }}
+                      style={{ cursor: "pointer" }}
+                    />
+                  </Th>
                   <Th style={{ width: 90 }}>Date</Th>
                   <Th style={{ width: 70 }}>Studio</Th>
                   <Th style={{ width: 90 }}>Scene</Th>
@@ -759,6 +885,8 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
                     key={r.source === "db" ? `db-${r.hit.id}` : `mega-${r.file.key}`}
                     row={r}
                     zebra={idx % 2 === 1}
+                    selected={r.source === "mega" && selectedKeys.has(r.file.key)}
+                    onToggleSelect={r.source === "mega" ? () => toggleSelect(r.file.key) : undefined}
                     onOpenDb={(id) => setEditingId(id)}
                     onOpenMega={openMegaFile}
                     onRenameMega={startRename}
@@ -781,6 +909,28 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
           error={renameError}
           onCancel={() => { setRenameTarget(null); setRenameError(null) }}
           onConfirm={commitRename}
+        />
+      )}
+
+      {/* ── Bulk rename modal (find/replace across selected MEGA files) ── */}
+      {bulkRenameOpen && (
+        <BulkRenameDialog
+          selectedCount={selectedKeys.size}
+          find={bulkFind}
+          setFind={setBulkFind}
+          replace={bulkReplace}
+          setReplace={setBulkReplace}
+          plan={bulkPlan}
+          running={bulkRunning}
+          progress={bulkProgress}
+          errors={bulkErrors}
+          done={bulkDone}
+          onCancel={() => {
+            setBulkRenameOpen(false)
+            setBulkFind(""); setBulkReplace("")
+            setBulkProgress(null); setBulkErrors([]); setBulkDone(null)
+          }}
+          onConfirm={runBulkRename}
         />
       )}
 
@@ -808,10 +958,13 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
 // ─── Row ─────────────────────────────────────────────────────────────────────
 
 function RowView({
-  row, zebra, onOpenDb, onOpenMega, onRenameMega, pdfUrl,
+  row, zebra, selected, onToggleSelect,
+  onOpenDb, onOpenMega, onRenameMega, pdfUrl,
 }: {
   row: Row
   zebra: boolean
+  selected: boolean
+  onToggleSelect?: () => void
   onOpenDb: (id: number) => void
   onOpenMega: (f: MegaLegalFile) => void
   onRenameMega: (f: MegaLegalFile) => void
@@ -835,6 +988,12 @@ function RowView({
         onClick={() => onOpenDb(h.id)}
         title="Open paperwork record"
       >
+        {/* DB rows can't be bulk-renamed (no on-bucket key to rewrite),
+            so we render a disabled-looking placeholder cell to keep the
+            grid aligned with MEGA rows. */}
+        <td style={{ ...cellStyle, textAlign: "center", color: "var(--color-text-faint)" }}>
+          <span aria-hidden="true" style={{ fontSize: 14 }}>·</span>
+        </td>
         <td style={cellStyle}>
           <div style={{ fontWeight: 600 }}>
             {h.shoot_date || "—"}
@@ -913,10 +1072,27 @@ function RowView({
   const docKind = classifyDocument(f.filename)
   return (
     <tr
-      style={{ background: bg, cursor: "pointer" }}
+      style={{
+        background: selected
+          ? "color-mix(in srgb, var(--color-lime) 8%, transparent)"
+          : bg,
+        cursor: "pointer",
+      }}
       onClick={() => onOpenMega(f)}
       title="MEGA file — not yet imported into the records DB. Click to download."
     >
+      {/* Bulk-rename selection — checkbox; clicking it must NOT bubble to
+          the row's open-on-MEGA handler. */}
+      <td style={{ ...cellStyle, textAlign: "center" }}
+          onClick={e => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          aria-label={`Select ${f.filename}`}
+          style={{ cursor: "pointer" }}
+        />
+      </td>
       <td style={cellStyle}>
         <div style={{ fontWeight: 600, color: "var(--color-text-muted)" }}>
           {(f.last_modified || "").slice(0, 10) || "—"}
@@ -1235,6 +1411,244 @@ function RenameDialog({
             {running ? <Loader2 size={13} className="spin" /> : <Pencil size={13} />}
             Rename
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Bulk rename — find/replace pattern applied across N selected MEGA files.
+// Each rename runs sequentially through legalFileRename so a partial-failure
+// leaves the bucket in a recoverable state.
+function BulkRenameDialog({
+  selectedCount, find, setFind, replace, setReplace,
+  plan, running, progress, errors, done,
+  onCancel, onConfirm,
+}: {
+  selectedCount: number
+  find: string
+  setFind: (s: string) => void
+  replace: string
+  setReplace: (s: string) => void
+  plan: { file: MegaLegalFile; newName: string }[]
+  running: boolean
+  progress: { done: number; total: number } | null
+  errors: { file: string; error: string }[]
+  done: { renamed: number; failed: number } | null
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="bulk-rename-title"
+      onClick={onCancel}
+      style={{
+        position: "fixed", inset: 0,
+        background: "rgba(0,0,0,0.6)", zIndex: 50,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "var(--color-surface)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 12,
+          padding: "20px 22px",
+          width: "min(720px, 100%)",
+          maxHeight: "90vh", overflowY: "auto",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <Pencil size={14} color="var(--color-lime)" />
+          <h3
+            id="bulk-rename-title"
+            style={{
+              margin: 0, fontSize: 13, fontWeight: 700,
+              letterSpacing: "0.04em", textTransform: "uppercase",
+              color: "var(--color-text)",
+            }}
+          >
+            Bulk rename — {selectedCount} file{selectedCount === 1 ? "" : "s"}
+          </h3>
+        </div>
+        <p style={{
+          margin: "0 0 14px", fontSize: 11,
+          color: "var(--color-text-faint)", lineHeight: 1.55,
+        }}>
+          Find/replace the leaf filename of every selected file. Files
+          where the match doesn&apos;t apply are skipped. Each rename is
+          a server-side COPY+DELETE — there&apos;s no undo.
+        </p>
+
+        {done ? (
+          <div style={{
+            padding: "12px 14px", marginBottom: 14,
+            background: done.failed === 0
+              ? "color-mix(in srgb, var(--color-lime) 14%, transparent)"
+              : "color-mix(in srgb, var(--color-warning, #f59e0b) 14%, transparent)",
+            border: `1px solid ${done.failed === 0 ? "var(--color-lime)" : "var(--color-warning, #f59e0b)"}`,
+            borderRadius: 8, fontSize: 12, color: "var(--color-text)",
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>
+              {done.failed === 0
+                ? `Renamed ${done.renamed} file${done.renamed === 1 ? "" : "s"}`
+                : `Renamed ${done.renamed}, ${done.failed} failed`}
+            </div>
+            {errors.length > 0 && (
+              <ul style={{ margin: "6px 0 0", paddingLeft: 20, fontSize: 11 }}>
+                {errors.slice(0, 5).map((e, i) => (
+                  <li key={i}><code>{e.file}</code> — {e.error}</li>
+                ))}
+                {errors.length > 5 && <li>… and {errors.length - 5} more</li>}
+              </ul>
+            )}
+          </div>
+        ) : null}
+
+        {!done && (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 8, marginBottom: 12 }}>
+              <label style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--color-text-faint)", alignSelf: "center" }}>
+                Find
+              </label>
+              <input
+                type="text"
+                placeholder="manicini"
+                value={find}
+                onChange={e => setFind(e.target.value)}
+                disabled={running}
+                style={{
+                  ...inputCompact,
+                  fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                }}
+              />
+              <label style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--color-text-faint)", alignSelf: "center" }}>
+                Replace
+              </label>
+              <input
+                type="text"
+                placeholder="mancini"
+                value={replace}
+                onChange={e => setReplace(e.target.value)}
+                disabled={running}
+                style={{
+                  ...inputCompact,
+                  fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                }}
+              />
+            </div>
+
+            {plan.length > 0 ? (
+              <div style={{
+                background: "var(--color-bg)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 8,
+                marginBottom: 12,
+                maxHeight: 240,
+                overflowY: "auto",
+              }}>
+                <div style={{
+                  padding: "6px 10px", fontSize: 10, color: "var(--color-text-faint)",
+                  textTransform: "uppercase", letterSpacing: "0.06em",
+                  borderBottom: "1px solid var(--color-border)",
+                  background: "var(--color-elevated)",
+                }}>
+                  Plan ({plan.length} of {selectedCount} match)
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10, fontFamily: "var(--font-mono, ui-monospace, monospace)" }}>
+                  <tbody>
+                    {plan.slice(0, 100).map((p, i) => (
+                      <tr key={i} style={{ borderBottom: "1px solid var(--color-border)" }}>
+                        <td style={{ padding: "4px 10px", color: "var(--color-text-faint)", wordBreak: "break-all" }}>
+                          {p.file.filename}
+                        </td>
+                        <td style={{ padding: "4px 6px", color: "var(--color-lime)", fontSize: 12 }}>→</td>
+                        <td style={{ padding: "4px 10px", color: "var(--color-text)", wordBreak: "break-all" }}>
+                          {p.newName}
+                        </td>
+                      </tr>
+                    ))}
+                    {plan.length > 100 && (
+                      <tr><td colSpan={3} style={{ padding: "6px 10px", color: "var(--color-text-faint)", fontSize: 10 }}>
+                        … and {plan.length - 100} more
+                      </td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{
+                padding: "10px 12px", marginBottom: 12,
+                background: "var(--color-elevated)",
+                border: "1px solid var(--color-border)", borderRadius: 6,
+                fontSize: 11, color: "var(--color-text-faint)",
+              }}>
+                {find ? `No selected filenames contain "${find}"` : "Type a find pattern to preview matches."}
+              </div>
+            )}
+
+            {progress && (
+              <div style={{
+                marginBottom: 12, fontSize: 11, color: "var(--color-text)",
+              }}>
+                <div style={{ marginBottom: 4 }}>
+                  Renaming {progress.done} of {progress.total}…
+                </div>
+                <div style={{
+                  height: 4, background: "var(--color-elevated)",
+                  borderRadius: 2, overflow: "hidden",
+                }}>
+                  <div style={{
+                    width: `${(progress.done / Math.max(1, progress.total)) * 100}%`,
+                    height: "100%",
+                    background: "var(--color-lime)",
+                    transition: "width 200ms ease-out",
+                  }} />
+                </div>
+              </div>
+            )}
+
+            {plan.length > 0 && !progress && (
+              <div style={{
+                display: "flex", alignItems: "flex-start", gap: 8,
+                background: "color-mix(in srgb, var(--color-warning, #f59e0b) 14%, transparent)",
+                border: "1px solid var(--color-warning, #f59e0b)",
+                borderRadius: 6, padding: "8px 10px", marginBottom: 14,
+              }}>
+                <AlertTriangle size={13} color="var(--color-warning, #f59e0b)" style={{ marginTop: 1, flexShrink: 0 }} />
+                <div style={{ fontSize: 11, color: "var(--color-text)", lineHeight: 1.5 }}>
+                  Each rename is a COPY+DELETE on MEGA. No undo. Any signature
+                  record pointing at an old key gets rewritten to the new one.
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button type="button" onClick={onCancel} disabled={running} style={btnGhost}>
+            {done ? "Close" : "Cancel"}
+          </button>
+          {!done && (
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={running || plan.length === 0}
+              style={{
+                ...btnGhost,
+                background: "color-mix(in srgb, var(--color-lime) 16%, transparent)",
+                color: "var(--color-lime)",
+                borderColor: "var(--color-lime)",
+              }}
+            >
+              {running ? <Loader2 size={13} className="spin" /> : <Pencil size={13} />}
+              Rename {plan.length}
+            </button>
+          )}
         </div>
       </div>
     </div>
