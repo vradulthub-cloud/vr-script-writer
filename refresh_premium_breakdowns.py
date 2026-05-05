@@ -311,52 +311,63 @@ def normalize_vrporn_date(s: str) -> str:
         return s
 
 
-def push_daily_data(sh: gspread.Spreadsheet, vrporn_daily_csv: Path | None) -> int:
-    """Read the VRPorn daily CSV and write/append to the _DailyData tab.
-
-    Tab schema: Date | Platform | Studio | Total Earnings $
-    - Date in ISO (YYYY-MM-DD) so filtering by month/yesterday is trivial
-    - Platform = "vrporn" / "povr" / "slr" (lowercased canonical)
-    - Studio  = "All" until per-studio scrape lands; else specific studio name
-    - Earnings as raw float (no $ or comma)
-
-    Existing rows in _DailyData for the same (date, platform, studio) tuple
-    are overwritten — newer scrape wins. New rows are appended.
-    """
-    if not vrporn_daily_csv or not vrporn_daily_csv.exists():
-        log.info("Daily push: no vrporn_daily.csv found — skipping")
-        return 0
-
-    # Read incoming
-    incoming: list[list[str]] = []
-    with vrporn_daily_csv.open("r", encoding="utf-8-sig", newline="") as f:
+def _read_daily_csv(path: Path, platform: str) -> list[list[str]]:
+    """Read one platform's daily CSV. Returns list of [iso_date, platform, studio, earnings]."""
+    if not path or not path.exists():
+        return []
+    with path.open("r", encoding="utf-8-sig", newline="") as f:
         r = csv.reader(f)
         rows = [row for row in r if any(c.strip() for c in row)]
     if not rows:
-        return 0
+        return []
     header = [c.strip().lower() for c in rows[0]]
-    # Expected: Date, Studio, Total Earnings $
     if "date" not in header or "studio" not in header:
-        log.error(f"Daily push: vrporn_daily.csv header unexpected: {rows[0]}")
-        return 0
+        log.error(f"Daily push: {path.name} unexpected header: {rows[0]}")
+        return []
     di = header.index("date")
     si = header.index("studio")
     ei = next((i for i, h in enumerate(header) if "earning" in h), None)
     if ei is None:
-        log.error("Daily push: no earnings column in vrporn_daily.csv")
-        return 0
-
+        log.error(f"Daily push: no earnings column in {path.name}")
+        return []
+    out: list[list[str]] = []
     for row in rows[1:]:
         if len(row) <= max(di, si, ei):
             continue
-        iso = normalize_vrporn_date(row[di])
+        raw_date = row[di].strip()
+        # POVR ships ISO dates already; VRPorn ships "Apr 30, 2026". Detect.
+        iso = raw_date if (len(raw_date) == 10 and raw_date[4] == "-" and raw_date[7] == "-") \
+              else normalize_vrporn_date(raw_date)
         if not iso:
             continue
-        incoming.append([iso, "vrporn", row[si] or "All", row[ei]])
+        out.append([iso, platform, row[si] or "All", row[ei]])
+    return out
 
-    log.info(f"Daily push: prepared {len(incoming)} VRPorn rows")
+
+def push_daily_data(sh: gspread.Spreadsheet,
+                    vrporn_daily_csv: Path | None = None,
+                    povr_daily_csv: Path | None = None,
+                    slr_daily_csv: Path | None = None) -> int:
+    """Read all daily CSVs and merge into the _DailyData tab.
+
+    Tab schema: Date | Platform | Studio | Total Earnings $
+    Existing rows are upserted by (date, platform, studio) — newer scrape wins.
+    """
+    incoming: list[list[str]] = []
+    for path, platform in [
+        (vrporn_daily_csv, "vrporn"),
+        (povr_daily_csv,   "povr"),
+        (slr_daily_csv,    "slr"),
+    ]:
+        if path and path.exists():
+            rows = _read_daily_csv(path, platform)
+            log.info(f"Daily push: {platform} {path.name} → {len(rows)} rows")
+            incoming.extend(rows)
+
     if not incoming:
+        log.info("Daily push: no daily CSVs found — skipping")
         return 0
+    log.info(f"Daily push: total incoming {len(incoming)} rows across platforms")
 
     # Open or create the _DailyData tab
     try:
@@ -397,6 +408,10 @@ def main() -> int:
                     help="VRPorn per-video CSV (auto-discovered if omitted)")
     ap.add_argument("--vrporn-daily", type=Path, default=None,
                     help="VRPorn daily-totals CSV (default: ~/Documents/vrporn_daily.csv)")
+    ap.add_argument("--povr-daily", type=Path, default=None,
+                    help="POVR daily-totals CSV (default: ~/Documents/povr_daily.csv)")
+    ap.add_argument("--slr-daily", type=Path, default=None,
+                    help="SLR daily-totals CSV (default: ~/Documents/slr_daily.csv)")
     ap.add_argument("--dry-run", action="store_true",
                     help="Validate CSVs only — don't touch the sheet")
     args = ap.parse_args()
@@ -455,13 +470,15 @@ def main() -> int:
         by_platform.get("vrporn", []),
     )
 
-    # Daily totals (separate from per-video tabs). VRPorn is the only
-    # platform we currently scrape daily — POVR/SLR daily wiring is TODO.
-    daily_csv = args.vrporn_daily or (Path.home() / "Documents" / "vrporn_daily.csv")
-    if daily_csv.exists():
-        push_daily_data(sh, daily_csv)
-    else:
-        log.info(f"Daily push: {daily_csv} not found — skipping")
+    # Daily totals (separate from per-video tabs). All available daily
+    # CSVs are merged into the _DailyData tab.
+    home_docs = Path.home() / "Documents"
+    push_daily_data(
+        sh,
+        vrporn_daily_csv=args.vrporn_daily or (home_docs / "vrporn_daily.csv"),
+        povr_daily_csv=args.povr_daily   or (home_docs / "povr_daily.csv"),
+        slr_daily_csv=args.slr_daily     or (home_docs / "slr_daily.csv"),
+    )
 
     stamp_dashboard_updated(sh)
 
