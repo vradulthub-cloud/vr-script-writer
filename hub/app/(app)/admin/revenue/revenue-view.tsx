@@ -1,8 +1,9 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, useEffect } from "react"
 import Link from "next/link"
-import { ArrowLeft, TrendingDown, TrendingUp, Calendar, Filter, Sparkles } from "lucide-react"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { ArrowLeft, TrendingDown, TrendingUp, Calendar, Filter, AlertCircle } from "lucide-react"
 import type {
   RevenueDashboard,
   SceneRevenueRow,
@@ -26,11 +27,23 @@ const DATE_RANGE_LABELS: Record<DateRange, string> = {
 type StudioFilter = string | null
 const STUDIOS = ["FPVR", "VRH", "VRA", "NJOI"]
 
-// Platform identity — reuses studio palette as anchors.
+// Platform identity — uses the dedicated platform palette (sky / amber /
+// emerald), kept separate from the studio palette so platform × studio
+// filtering doesn't fight for the same colors. Lime is reserved for
+// actions and stays out of platform identity.
 const PLATFORM_COLOR: Record<string, string> = {
-  slr:    "var(--color-lime)",
-  povr:   "var(--color-vrh)",
-  vrporn: "var(--color-vra)",
+  slr:    "var(--color-platform-slr)",
+  povr:   "var(--color-platform-povr)",
+  vrporn: "var(--color-platform-vrporn)",
+}
+
+// Studio identity — used as overlay accents when a studio context is
+// the subject. Available for filter-chip tinting and per-studio detail.
+const STUDIO_COLOR: Record<string, string> = {
+  FPVR: "var(--color-fpvr)",
+  VRH:  "var(--color-vrh)",
+  VRA:  "var(--color-vra)",
+  NJOI: "var(--color-njoi)",
 }
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -114,10 +127,33 @@ export function RevenueView({
   daily: DailyRevenueSummary | null
   error: string | null
 }) {
-  const [activeSection, setActiveSection] = useState<"top" | "cross">("top")
-  const [platformFilter, setPlatformFilter] = useState<string | null>(null)
-  const [studioFilter, setStudioFilter] = useState<StudioFilter>(null)
-  const [dateRange, setDateRange] = useState<DateRange>("month")
+  // Filter state hydrates from / writes to the URL so a configured view
+  // can be shared or bookmarked (?range=7d&platform=povr&studio=VRH).
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const initialRange    = (searchParams?.get("range")    as DateRange | null) ?? "month"
+  const initialPlatform = (searchParams?.get("platform") as string    | null)
+  const initialStudio   = (searchParams?.get("studio")   as StudioFilter)
+  const initialSection  = (searchParams?.get("section")  === "cross" ? "cross" : "top") as "top" | "cross"
+
+  const [activeSection, setActiveSection] = useState<"top" | "cross">(initialSection)
+  const [platformFilter, setPlatformFilter] = useState<string | null>(initialPlatform ?? null)
+  const [studioFilter, setStudioFilter] = useState<StudioFilter>(initialStudio ?? null)
+  const [dateRange, setDateRange] = useState<DateRange>(initialRange)
+
+  // Push state to URL whenever it changes — replaceState (not push) so the
+  // filter dance doesn't clog browser history.
+  useEffect(() => {
+    const q = new URLSearchParams()
+    if (dateRange !== "month") q.set("range", dateRange)
+    if (platformFilter)        q.set("platform", platformFilter)
+    if (studioFilter)          q.set("studio", studioFilter)
+    if (activeSection !== "top") q.set("section", activeSection)
+    const next = q.toString() ? `${pathname}?${q.toString()}` : pathname
+    router.replace(next, { scroll: false })
+  }, [router, pathname, dateRange, platformFilter, studioFilter, activeSection])
 
   if (error) {
     return (
@@ -238,29 +274,28 @@ export function RevenueView({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      {/* Header */}
-      <div>
-        <Link href="/admin" style={{
-          fontSize: 11, color: "var(--color-text-muted)", textDecoration: "none",
-          letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600,
-        }}>
-          <ArrowLeft size={11} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
-          Admin
-        </Link>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 4 }}>
-          <div>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase",
-                          color: "var(--color-text-muted)" }}>
-              Premium Breakdowns · SLR · POVR · VRPorn
-            </div>
-            <h1 style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 600,
-                         letterSpacing: "-0.015em", marginTop: 4 }}>
-              Revenue
-            </h1>
-          </div>
-          <div style={{ fontSize: 11, color: "var(--color-text-faint)", fontFamily: "var(--font-mono)" }}>
-            Refreshed {refreshedAgo}
-          </div>
+      {/* Header — eyebrow links back to Admin; h1 carries the page weight. */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div>
+          <Link href="/admin" style={{
+            fontSize: 11, color: "var(--color-text-muted)", textDecoration: "none",
+            letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600,
+          }}>
+            <ArrowLeft size={11} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+            Admin
+          </Link>
+          <h1 style={{
+            fontFamily: "var(--font-display-hero)",
+            fontSize: "var(--text-display)",
+            fontWeight: 700,
+            letterSpacing: "-0.02em",
+            marginTop: 6, lineHeight: 1.05,
+          }}>
+            Revenue
+          </h1>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-text-faint)", fontFamily: "var(--font-mono)" }}>
+          Refreshed {refreshedAgo}
         </div>
       </div>
 
@@ -357,103 +392,72 @@ function FilterBar({
       padding: "10px 14px",
       display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap",
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <Calendar size={11} style={{ color: "var(--color-text-faint)" }} />
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
                        textTransform: "uppercase", color: "var(--color-text-faint)" }}>
           Range
         </span>
-        <div style={{ display: "flex", gap: 0 }}>
-          {ranges.map(r => {
-            const isActive = dateRange === r
-            return (
-              <button
-                key={r}
-                type="button"
-                onClick={() => setDateRange(r)}
-                style={{
-                  padding: "4px 10px", fontSize: 11, fontWeight: 600,
-                  background: isActive ? "var(--color-base)" : "transparent",
-                  color: isActive ? "var(--color-text)" : "var(--color-text-muted)",
-                  border: `1px solid ${isActive ? "var(--color-border)" : "transparent"}`,
-                  cursor: "pointer",
-                }}
-              >
-                {DATE_RANGE_LABELS[r]}
-              </button>
-            )
-          })}
+        <div style={{ display: "flex", gap: 4 }}>
+          {ranges.map(r => (
+            <Chip
+              key={r}
+              isActive={dateRange === r}
+              onClick={() => setDateRange(r)}
+              label={DATE_RANGE_LABELS[r]}
+            />
+          ))}
         </div>
       </div>
 
       <div style={{ height: 16, width: 1, background: "var(--color-border-subtle)" }} />
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <Filter size={11} style={{ color: "var(--color-text-faint)" }} />
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
                        textTransform: "uppercase", color: "var(--color-text-faint)" }}>
           Platform
         </span>
-        <div style={{ display: "flex", gap: 0 }}>
-          {([null, "slr", "povr", "vrporn"] as (string | null)[]).map(opt => {
-            const isActive = platform === opt
-            return (
-              <button
-                key={opt ?? "all"}
-                type="button"
-                onClick={() => setPlatform(opt)}
-                style={{
-                  padding: "4px 10px", fontSize: 11, fontWeight: 600,
-                  background: isActive ? "var(--color-base)" : "transparent",
-                  color: isActive ? "var(--color-text)" : "var(--color-text-muted)",
-                  border: `1px solid ${isActive ? "var(--color-border)" : "transparent"}`,
-                  cursor: "pointer",
-                }}
-              >
-                {opt
-                  ? <>
-                      <span style={{
-                        display: "inline-block", width: 6, height: 6, borderRadius: 1,
-                        background: PLATFORM_COLOR[opt],
-                        marginRight: 6, verticalAlign: "middle",
-                      }} />
-                      {PLATFORM_LABEL[opt]}
-                    </>
-                  : "All"}
-              </button>
-            )
-          })}
+        <div style={{ display: "flex", gap: 4 }}>
+          {([null, "slr", "povr", "vrporn"] as (string | null)[]).map(opt => (
+            <Chip
+              key={opt ?? "all"}
+              isActive={platform === opt}
+              onClick={() => setPlatform(opt)}
+              accent={opt ? PLATFORM_COLOR[opt] : undefined}
+              label={opt
+                ? <>
+                    <span style={{
+                      display: "inline-block", width: 6, height: 6, borderRadius: 1,
+                      background: PLATFORM_COLOR[opt],
+                      marginRight: 6, verticalAlign: "middle",
+                    }} />
+                    {PLATFORM_LABEL[opt]}
+                  </>
+                : "All"}
+            />
+          ))}
         </div>
       </div>
 
       <div style={{ height: 16, width: 1, background: "var(--color-border-subtle)" }} />
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
                        textTransform: "uppercase", color: "var(--color-text-faint)" }}>
           Studio
         </span>
-        <div style={{ display: "flex", gap: 0 }}>
-          {[null, ...STUDIOS].map(opt => {
-            const isActive = studio === opt
-            return (
-              <button
-                key={opt ?? "all"}
-                type="button"
-                onClick={() => setStudio(opt as StudioFilter)}
-                style={{
-                  padding: "4px 10px", fontSize: 11, fontWeight: 600,
-                  background: isActive ? "var(--color-base)" : "transparent",
-                  color: isActive ? "var(--color-text)" : "var(--color-text-muted)",
-                  border: `1px solid ${isActive ? "var(--color-border)" : "transparent"}`,
-                  cursor: "pointer",
-                  fontFamily: opt ? "var(--font-mono)" : "inherit",
-                }}
-              >
-                {opt ?? "All"}
-              </button>
-            )
-          })}
+        <div style={{ display: "flex", gap: 4 }}>
+          {[null, ...STUDIOS].map(opt => (
+            <Chip
+              key={opt ?? "all"}
+              isActive={studio === opt}
+              onClick={() => setStudio(opt as StudioFilter)}
+              accent={opt ? STUDIO_COLOR[opt] : undefined}
+              mono={!!opt}
+              label={opt ?? "All"}
+            />
+          ))}
         </div>
       </div>
 
@@ -549,54 +553,65 @@ function HeroKpis({
       .map(p => PLATFORM_SHORT[p] ?? p).join(" + ")
   })()
 
-  // Build tiles. Always 4-up so the strip stays rhythmic.
+  // Detect Yesterday == Best Day so the duplicate is acknowledged inline
+  // instead of looking like a display bug ("why are these two numbers
+  // identical?"). Tolerates floating-point fuzz.
+  const yesterdayIsBest = bestTotal > 0 && Math.abs(yTotal - bestTotal) < 0.01
+
+  // Build tiles. Lead = current MTD with bigger weight; mini = three
+  // demoted tiles for projection / yesterday / best day.
   const monthLabel = last ? fmtMonthLong(last.month) : "—"
-  const tiles: KpiTile[] = [
-    {
-      kicker: matchesCurrent ? `${monthLabel} · MTD` : monthLabel,
-      value:  fmtMoneyFull(last?.total ?? 0),
-      delta:  last?.mom_pct ?? null,
-      sub:    prev ? `vs ${fmtMonthLong(prev.month)} ${fmtMoney(prev.total, true)}` : "—",
-      tint:   "default",
-    },
+  const lead: KpiTile = {
+    kicker: matchesCurrent ? `${monthLabel} · MTD` : monthLabel,
+    help:   "Month-to-date total across all reporting platforms.",
+    value:  fmtMoneyFull(last?.total ?? 0),
+    delta:  last?.mom_pct ?? null,
+    sub:    prev ? `vs ${fmtMonthLong(prev.month)} ${fmtMoney(prev.total, true)}` : "—",
+  }
+  const minis: KpiTile[] = [
     {
       kicker: matchesCurrent ? "Projected EOM" : "Last full month",
-      value:  fmtMoneyFull(matchesCurrent ? projected : (prev?.total ?? 0)),
+      help:   matchesCurrent
+        ? "Linear extrapolation of MTD across all days in the month."
+        : "Most recent full month's total.",
+      value:  fmtMoney(matchesCurrent ? projected : (prev?.total ?? 0), true),
       delta:  matchesCurrent ? projVsPrev : null,
       sub:    matchesCurrent
-        ? `${dayOfMonth}/${dim} days elapsed · linear pace`
+        ? `${dayOfMonth}/${dim} days · linear pace`
         : prev ? `${fmtMonthLong(prev.month)} closed` : "—",
-      tint:   "muted",
     },
     {
       kicker: yDate ? `Yesterday · ${prettyDate(yDate)}` : "Yesterday",
-      value:  fmtMoneyFull(yTotal),
+      help:   "Daily total for the most recent date in the daily feed.",
+      value:  fmtMoney(yTotal, true),
       delta:  wowPct,
       sub:    wowPct !== null ? `vs ${prettyDate(sevenBack)} ${fmtMoney(wowTotal, true)}` : feedLabel,
-      tint:   "default",
     },
     {
       kicker: "Best day MTD",
-      value:  bestTotal ? fmtMoneyFull(bestTotal) : "—",
+      help:   "Highest single-day total in the current month.",
+      value:  bestTotal ? fmtMoney(bestTotal, true) : "—",
       delta:  null,
-      sub:    bestDate ? `${prettyDate(bestDate)} · ${feedLabel}` : "no daily rows",
-      tint:   "muted",
+      sub:    bestDate
+        ? (yesterdayIsBest ? `${prettyDate(bestDate)} · = Yesterday` : `${prettyDate(bestDate)} · ${feedLabel}`)
+        : "no daily rows",
+      badge:  yesterdayIsBest ? "= Yesterday" : undefined,
     },
   ]
 
-  // Footer line with grand totals — keeps the historical anchor visible.
   return (
     <div>
       <div style={{
         display: "grid",
-        gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))`,
+        // Lead = 2fr; three demoted = 1fr each. Keeps the four-tile rhythm
+        // but lifts the MTD number to the eye first.
+        gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)",
         gap: 1,
         background: "var(--color-border-subtle)",
         border: "1px solid var(--color-border-subtle)",
       }}>
-        {tiles.map((t, i) => (
-          <KpiTileView key={i} tile={t} />
-        ))}
+        <KpiLeadView tile={lead} />
+        {minis.map((t, i) => <KpiMiniView key={i} tile={t} />)}
       </div>
       <div style={{
         display: "flex", justifyContent: "space-between", alignItems: "baseline",
@@ -627,13 +642,14 @@ function HeroKpis({
 
 type KpiTile = {
   kicker: string
+  help?:  string                  // tooltip on hover — unpacks the jargon
   value:  string
   delta:  number | null
   sub:    string
-  tint:   "default" | "muted"
+  badge?: string                  // "= Yesterday" etc. — flags duplicate values
 }
 
-function KpiTileView({ tile }: { tile: KpiTile }) {
+function KpiLeadView({ tile }: { tile: KpiTile }) {
   const TrendIcon = tile.delta === null
     ? null
     : tile.delta >= 0 ? TrendingUp : TrendingDown
@@ -642,30 +658,88 @@ function KpiTileView({ tile }: { tile: KpiTile }) {
     : tile.delta >= 0 ? "var(--color-ok)" : "var(--color-err)"
   return (
     <div style={{
-      background: tile.tint === "muted" ? "var(--color-base)" : "var(--color-surface)",
-      padding: "20px 20px",
-      display: "flex", flexDirection: "column", gap: 4,
+      background: "var(--color-surface)",
+      padding: "26px 28px",
+      display: "flex", flexDirection: "column", gap: 6,
     }}>
-      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
-                    textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+      <div title={tile.help} style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: "0.14em",
+        textTransform: "uppercase", color: "var(--color-text-faint)",
+        cursor: tile.help ? "help" : "default",
+      }}>
         {tile.kicker}
       </div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-        <div style={{ fontFamily: "var(--font-display)", fontSize: 30, fontWeight: 600,
-                      letterSpacing: "-0.015em", color: "var(--color-text)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
+        <div style={{
+          fontFamily: "var(--font-display-hero)", fontSize: 48, fontWeight: 700,
+          letterSpacing: "-0.025em", color: "var(--color-text)", lineHeight: 1,
+        }}>
           {tile.value}
         </div>
         {tile.delta !== null && TrendIcon && (
           <span style={{
-            fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 700,
-            color: trendColor, display: "flex", alignItems: "center", gap: 2,
+            fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 700,
+            color: trendColor, display: "flex", alignItems: "center", gap: 3,
           }}>
-            <TrendIcon size={12} style={{ verticalAlign: -1 }} />
+            <TrendIcon size={14} style={{ verticalAlign: -1 }} />
             {fmtPct(tile.delta)}
           </span>
         )}
       </div>
-      <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{tile.sub}</div>
+      <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{tile.sub}</div>
+    </div>
+  )
+}
+
+function KpiMiniView({ tile }: { tile: KpiTile }) {
+  const TrendIcon = tile.delta === null
+    ? null
+    : tile.delta >= 0 ? TrendingUp : TrendingDown
+  const trendColor = tile.delta === null
+    ? "var(--color-text-faint)"
+    : tile.delta >= 0 ? "var(--color-ok)" : "var(--color-err)"
+  return (
+    <div style={{
+      background: "var(--color-base)",
+      padding: "16px 16px",
+      display: "flex", flexDirection: "column", gap: 4, justifyContent: "space-between",
+    }}>
+      <div title={tile.help} style={{
+        fontSize: 9, fontWeight: 700, letterSpacing: "0.12em",
+        textTransform: "uppercase", color: "var(--color-text-faint)",
+        display: "flex", justifyContent: "space-between", gap: 8,
+        cursor: tile.help ? "help" : "default",
+      }}>
+        <span>{tile.kicker}</span>
+        {tile.badge && (
+          <span style={{
+            fontSize: 8, fontWeight: 700, padding: "1px 5px",
+            background: "color-mix(in srgb, var(--color-text-faint) 18%, transparent)",
+            color: "var(--color-text-muted)",
+            letterSpacing: "0.06em",
+          }}>
+            {tile.badge}
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+        <div style={{
+          fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 700,
+          letterSpacing: "-0.015em", color: "var(--color-text)", lineHeight: 1,
+        }}>
+          {tile.value}
+        </div>
+        {tile.delta !== null && TrendIcon && (
+          <span style={{
+            fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 700,
+            color: trendColor, display: "flex", alignItems: "center", gap: 2,
+          }}>
+            <TrendIcon size={10} style={{ verticalAlign: -1 }} />
+            {fmtPct(tile.delta)}
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: 10, color: "var(--color-text-muted)" }}>{tile.sub}</div>
     </div>
   )
 }
@@ -784,12 +858,16 @@ function MonthlyHero({
                 }}>
                   {fmtMonth(p.month)}
                 </div>
-                {/* MoM% delta */}
+                {/* MoM% delta — only the current month gets full red/green
+                    saturation. Prior months stay muted so the chart doesn't
+                    read as a wall of red during normal seasonal swings. */}
                 <div style={{
                   fontSize: 10, textAlign: "center",
                   color: p.mom_pct === null
                     ? "var(--color-text-faint)"
-                    : p.mom_pct >= 0 ? "var(--color-ok)" : "var(--color-err)",
+                    : isCurrent
+                      ? (p.mom_pct >= 0 ? "var(--color-ok)" : "var(--color-err)")
+                      : "var(--color-text-faint)",
                   fontFamily: "var(--font-mono)",
                   fontWeight: isCurrent ? 700 : 500,
                 }}>
@@ -852,7 +930,8 @@ function PlatformMonthlyCards({
         gridTemplateColumns: `repeat(${visible.length}, minmax(0, 1fr))`,
         gap: 1,
         background: "var(--color-border-subtle)",
-        margin: -16, // bleed into Section's padding for a cleaner edge-to-edge grid
+        // Sit flush against the section's interior. No bleed — the previous
+        // -16px margin pulled card edges past the section border on the right.
       }}>
         {visible.map(p => (
           <PlatformCard key={p.platform} platform={p} monthly={monthly} />
@@ -1013,16 +1092,37 @@ function DailyDetail({
   studioFilter: StudioFilter
 }) {
   void studioFilter
-  // Group by date so the chart x-axis is one bar per day even when multiple
-  // platforms contribute (today only VRPorn, but we render as if all could).
-  const byDate = new Map<string, { date: string; total: number; rows: DailyRevenueRow[] }>()
+  // Group by (date, platform) so each day's bar is a stack reflecting which
+  // platforms contributed — this is the honest visual when daily feeds are
+  // partial across SLR/POVR/VRPorn. Aggregating across all three would hide
+  // which platform is silent on a given day.
+  type DayCol = { date: string; total: number; byPlatform: Record<string, number> }
+  const byDate = new Map<string, DayCol>()
+  const platformsPresent = new Set<string>()
   for (const r of daily.this_month) {
-    const e = byDate.get(r.date) ?? { date: r.date, total: 0, rows: [] }
+    const e = byDate.get(r.date) ?? { date: r.date, total: 0, byPlatform: {} }
     e.total += r.revenue
-    e.rows.push(r)
+    e.byPlatform[r.platform] = (e.byPlatform[r.platform] ?? 0) + r.revenue
     byDate.set(r.date, e)
+    platformsPresent.add(r.platform)
   }
   const days = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
+
+  // Honesty marker: which platforms are reporting daily, and which aren't.
+  // Distinct from filteredDaily.this_month being empty — this badge stays
+  // visible even when data exists, so the user never assumes completeness.
+  const ALL_DAILY = ["slr", "povr", "vrporn"] as const
+  const missing = platformFilter
+    ? []
+    : ALL_DAILY.filter(p => !platformsPresent.has(p))
+  const feedBadgeLabel = (() => {
+    if (platformFilter) return null   // user picked one — no honesty needed
+    if (missing.length === 0) return null
+    if (platformsPresent.size === 0) return "no daily feed"
+    const have = [...platformsPresent].sort().map(p => PLATFORM_SHORT[p] ?? p).join(" + ")
+    const lacking = missing.map(p => PLATFORM_SHORT[p]).join(" + ")
+    return `${have} feed · ${lacking} pending`
+  })()
 
   if (days.length === 0) {
     return (
@@ -1047,8 +1147,21 @@ function DailyDetail({
     ? `${days.length} days · daily bars + cumulative MTD line`
     : `${DATE_RANGE_LABELS[dateRange]} · ${days.length} days · daily bars + cumulative line`
 
+  // Build the SVG path (round joins) and end-cap dot for the cumulative line.
+  // Using a `path` with linejoin=round renders cleaner than polyline.
+  const cumPath = cumulative
+    .map((c, i) => `${i === 0 ? "M" : "L"}${i + 0.5},${100 - (c.sum / maxCum) * 96}`)
+    .join(" ")
+  const lastCum = cumulative[cumulative.length - 1]
+  const lastX = (cumulative.length - 1) + 0.5
+  const lastY = 100 - (lastCum.sum / maxCum) * 96
+
   return (
-    <Section title="Daily detail" subtitle={subtitle}>
+    <Section
+      title="Daily detail"
+      subtitle={subtitle}
+      badge={feedBadgeLabel ? <FeedBadge label={feedBadgeLabel} /> : undefined}
+    >
       {/* Quick stats line above chart */}
       <div style={{
         display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
@@ -1058,7 +1171,9 @@ function DailyDetail({
         <MiniStat
           kicker="Range total"
           value={fmtMoneyFull(total)}
-          sub={platformFilter ? PLATFORM_LABEL[platformFilter] : "All platforms (where reported)"}
+          sub={platformFilter
+            ? PLATFORM_LABEL[platformFilter]
+            : `${[...platformsPresent].sort().map(p => PLATFORM_SHORT[p] ?? p).join(" + ")}${missing.length ? ` · ${missing.map(p => PLATFORM_SHORT[p]).join("+")} pending` : ""}`}
         />
         <MiniStat
           kicker="Daily avg"
@@ -1078,7 +1193,7 @@ function DailyDetail({
         />
       </div>
 
-      {/* Chart: bars + cumulative line overlay */}
+      {/* Chart: stacked bars (per-platform contribution per day) + cumulative line */}
       <div style={{ position: "relative", height: 140 }}>
         {/* Y-axis baseline */}
         <div style={{
@@ -1095,35 +1210,57 @@ function DailyDetail({
           position: "relative",
         }}>
           {days.map((d, i) => {
-            const h = (d.total / max) * 96
             const isBest = i === bestIdx
+            const slr  = d.byPlatform.slr    ?? 0
+            const povr = d.byPlatform.povr   ?? 0
+            const vrp  = d.byPlatform.vrporn ?? 0
+            const totalH = (d.total / max) * 96
+            const tip = `${prettyDate(d.date)} · ${fmtMoneyFull(d.total)}`
+              + (slr  ? `\nSLR ${fmtMoney(slr, true)}`    : "")
+              + (povr ? `\nPOVR ${fmtMoney(povr, true)}`  : "")
+              + (vrp  ? `\nVRPorn ${fmtMoney(vrp, true)}` : "")
             return (
               <div key={d.date}
-                title={`${prettyDate(d.date)} · ${fmtMoneyFull(d.total)}`}
+                title={tip}
                 style={{
-                  height: Math.max(2, h),
-                  background: PLATFORM_COLOR.vrporn,
-                  opacity: isBest ? 1 : 0.78,
+                  display: "flex", flexDirection: "column-reverse",
+                  height: Math.max(2, totalH),
                   outline: isBest ? "1px solid var(--color-text)" : "none",
                   outlineOffset: 0,
+                  opacity: isBest ? 1 : 0.85,
                 }}
-              />
+              >
+                {slr  > 0 && <div style={{ flex: slr,  background: PLATFORM_COLOR.slr    }} />}
+                {povr > 0 && <div style={{ flex: povr, background: PLATFORM_COLOR.povr   }} />}
+                {vrp  > 0 && <div style={{ flex: vrp,  background: PLATFORM_COLOR.vrporn }} />}
+              </div>
             )
           })}
         </div>
 
-        {/* Cumulative line overlay (SVG) */}
+        {/* Cumulative line overlay (SVG path with round joins + end-cap dot) */}
         <svg
-          viewBox={`0 0 ${days.length} 100`}
+          viewBox={`0 0 ${Math.max(1, days.length)} 100`}
           preserveAspectRatio="none"
           style={{ position: "absolute", inset: "0 0 40px 0", height: 100, width: "100%", pointerEvents: "none" }}
         >
-          <polyline
+          <path
+            d={cumPath}
             fill="none"
             stroke="var(--color-lime)"
-            strokeWidth={1.4}
+            strokeWidth={1.6}
+            strokeLinejoin="round"
+            strokeLinecap="round"
             vectorEffect="non-scaling-stroke"
-            points={cumulative.map((c, i) => `${i + 0.5},${100 - (c.sum / maxCum) * 96}`).join(" ")}
+          />
+          <circle
+            cx={lastX}
+            cy={lastY}
+            r={2.2}
+            fill="var(--color-lime)"
+            stroke="var(--color-base)"
+            strokeWidth={0.8}
+            vectorEffect="non-scaling-stroke"
           />
         </svg>
 
@@ -1133,8 +1270,11 @@ function DailyDetail({
                       fontSize: 10, fontFamily: "var(--font-mono)",
                       color: "var(--color-text-faint)" }}>
           <span>{prettyDate(days[0].date)}</span>
-          <span style={{ color: "var(--color-lime)" }}>
-            <Sparkles size={9} style={{ display: "inline", verticalAlign: -1, marginRight: 4 }} />
+          <span style={{ color: "var(--color-lime)", display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{
+              width: 8, height: 2, background: "var(--color-lime)",
+              display: "inline-block",
+            }} />
             cumulative {fmtMoney(runSum, true)}
           </span>
           <span>{prettyDate(days[days.length - 1].date)}</span>
@@ -1362,11 +1502,27 @@ function CrossPlatformTable({ rows }: { rows: CrossPlatformRevenueRow[] }) {
 // ---------------------------------------------------------------------------
 // Reusable bits
 // ---------------------------------------------------------------------------
-function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Section({
+  title, subtitle, children, badge,
+}: {
+  title: string
+  subtitle?: string
+  children: React.ReactNode
+  badge?: React.ReactNode
+}) {
   return (
     <section>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, letterSpacing: "-0.005em" }}>{title}</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                    marginBottom: 10, gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, minWidth: 0 }}>
+          <h2 style={{
+            fontFamily: "var(--font-display)",
+            fontSize: 19, fontWeight: 700, letterSpacing: "-0.012em",
+          }}>
+            {title}
+          </h2>
+          {badge}
+        </div>
         {subtitle && (
           <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{subtitle}</span>
         )}
@@ -1376,6 +1532,65 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
         {children}
       </div>
     </section>
+  )
+}
+
+// FeedBadge — a persistent honesty marker shown next to a section title
+// when the underlying feed is partial. Distinct from the empty state, which
+// only renders when there's no data; this one renders ALONGSIDE real data
+// so the user never assumes "all platforms" when only one is reporting.
+function FeedBadge({ label, tone = "warn" }: { label: string; tone?: "warn" | "info" }) {
+  const color = tone === "warn" ? "var(--color-warn)" : "var(--color-text-muted)"
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      fontSize: 10, fontWeight: 700, letterSpacing: "0.04em",
+      padding: "2px 8px",
+      background: "color-mix(in srgb, var(--color-warn) 12%, transparent)",
+      color,
+      border: `1px solid color-mix(in srgb, ${color} 40%, transparent)`,
+    }}>
+      <AlertCircle size={10} />
+      {label}
+    </span>
+  )
+}
+
+// Chip — used for filter buttons. Inactive state has a subtle border so
+// it reads as a control. Active state gets a 2px lime underline (the
+// "you are here" pattern from Linear) and a stronger text color. An
+// optional `accent` color tints the underline to the platform/studio's
+// own identity color when applicable, so an active POVR chip reads as
+// "POVR is selected" without re-introducing lime confusion.
+function Chip({
+  isActive, onClick, label, accent, mono,
+}: {
+  isActive: boolean
+  onClick: () => void
+  label: React.ReactNode
+  accent?: string
+  mono?: boolean
+}) {
+  const underline = isActive
+    ? (accent ?? "var(--color-lime)")
+    : "transparent"
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "4px 10px", fontSize: 11, fontWeight: 600,
+        background: isActive ? "var(--color-base)" : "transparent",
+        color: isActive ? "var(--color-text)" : "var(--color-text-muted)",
+        border: `1px solid ${isActive ? "var(--color-border)" : "var(--color-border-subtle)"}`,
+        boxShadow: `inset 0 -2px 0 ${underline}`,
+        cursor: "pointer",
+        fontFamily: mono ? "var(--font-mono)" : "inherit",
+        transition: "color 100ms ease, background 100ms ease",
+      }}
+    >
+      {label}
+    </button>
   )
 }
 

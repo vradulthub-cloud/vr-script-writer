@@ -34,6 +34,15 @@
   --color-vra:   #ec4899;
   --color-njoi:  #3b82f6;
 
+  /* Partner-platform palette — independent of studio identity so the two
+     dimensions (platform × studio) can both be filtered without their colors
+     colliding. Hues sit outside the studio palette and outside lime so the
+     "lime = commits action" rule holds even when SLR/POVR/VRPorn dominate
+     a section. */
+  --color-platform-slr:    #38bdf8;   /* sky-400 — cool light blue, distinct from NJOI's deeper #3b82f6 */
+  --color-platform-povr:   #f59e0b;   /* amber-500 — warm, distinct from FPVR orange */
+  --color-platform-vrporn: #34d399;   /* emerald-400 — distinct from lime yellow-green */
+
   /* Status */
   --color-ok:   #22c55e;
   --color-warn: #eab308;
