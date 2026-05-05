@@ -207,27 +207,40 @@ def scrape_slr(page: Page, dry_run: bool) -> list[list[str]]:
 
     # Already authed via persisted cookies? Sign-in URL redirects off /signin.
     if "/signin" in page.url:
-        log.info("SLR: not authed — filling credentials")
-        page.fill('input[name="email"]', user)
-        page.fill('input[name="password"]', pw)
+        log.info("SLR: not authed (cookies expired or never saved)")
 
-        # Solve the reCAPTCHA. Prefer 2Captcha if configured; fall back to
-        # waiting for a human (--headed mode) for up to 60s.
+        # Three paths to get past the reCAPTCHA, in order of preference:
+        #   1. TWOCAPTCHA_API_KEY in env → automated solve (~$1/yr daily)
+        #   2. Cookie-refresh helper (slr_refresh_cookies.py) → free,
+        #      done-once-a-month from a real Chrome on any machine.
+        #      Real browsers almost never see the captcha at all.
+        #   3. --headed flag with a human present → manual click.
         captcha_key = os.environ.get("TWOCAPTCHA_API_KEY", "").strip()
         if captcha_key:
+            page.fill('input[name="email"]', user)
+            page.fill('input[name="password"]', pw)
             _solve_slr_recaptcha(page, captcha_key)
+            try:
+                page.locator('input[type="submit"]').click()
+                page.wait_for_url(lambda u: "/signin" not in u, timeout=60_000)
+            except PWTimeout:
+                raise RuntimeError(
+                    "SLR: 2Captcha-assisted login failed. Either the balance is "
+                    "empty or sitekey changed — re-run with --headed to fall back."
+                )
+            log.info(f"SLR: login successful via 2Captcha ({page.url})")
         else:
-            log.info("SLR: no TWOCAPTCHA_API_KEY — assuming --headed mode (60s grace for human solver)")
-
-        try:
-            page.locator('input[type="submit"]').click()
-            page.wait_for_url(lambda u: "/signin" not in u, timeout=60_000)
-        except PWTimeout:
+            # No captcha solver configured. The right fix is to run
+            # slr_refresh_cookies.py from any machine with a real Chrome,
+            # which produces a fresh ~/.scraper_state/slr.json that this
+            # scraper picks up. Surface a loud, actionable error.
             raise RuntimeError(
-                "SLR login still on /signin after 60s — reCAPTCHA solver may have failed "
-                "or 2Captcha balance is empty. Run --headed to fall back to manual."
+                "SLR cookies are stale or missing. Run "
+                "`python3 slr_refresh_cookies.py` from any machine with a "
+                "real Chrome (Mac, your laptop). It opens a window, you log "
+                "in normally (reCAPTCHA almost never challenges real users), "
+                "and cookies sync to Windows automatically. Lasts ~30 days."
             )
-        log.info(f"SLR: login successful ({page.url})")
 
     # TODO: this requires a real signed-in session to inspect. The URL the
     # user gave us — /statistics/daily/studio/64/project/1 — implies:
@@ -634,11 +647,15 @@ def main() -> int:
     if args.all:
         targets = ["slr", "povr", "vrporn"]  # full per-video scrape (drops daily)
     elif args.daily:
-        # SLR is included only if a 2Captcha key is configured — otherwise
-        # the daily run would fail-loud every morning. Operator can opt in
-        # explicitly with `--slr` for a one-off --headed run regardless.
+        # SLR is included if EITHER:
+        #   (a) we have valid persisted cookies (the 30-day cookie-refresh
+        #       pattern via slr_refresh_cookies.py — free), OR
+        #   (b) TWOCAPTCHA_API_KEY is configured (~$1/yr — paid).
+        # Otherwise we'd fail-loud every morning. Operator can still run
+        # `--slr` explicitly with `--headed` for a one-off manual login.
         targets = ["povr-daily", "vrporn"]
-        if os.environ.get("TWOCAPTCHA_API_KEY", "").strip():
+        slr_state = STATE_DIR / "slr.json"
+        if os.environ.get("TWOCAPTCHA_API_KEY", "").strip() or slr_state.exists():
             targets.append("slr")
     else:
         for p in PLATFORMS:

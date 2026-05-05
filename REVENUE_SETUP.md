@@ -19,33 +19,54 @@ Per-platform status:
 
 Logs land at `~/Dropbox/AudioTraining/revenue_refresh.log` so you can read them from any machine.
 
-## Enabling SLR (one-time setup)
+## Enabling SLR — pick one path
 
-SLR's login is gated by Google reCAPTCHA v2. To run unattended, we use 2Captcha to solve the challenge automatically.
+SLR's login is gated by Google reCAPTCHA v2. The cheapest reliable path is the **30-day cookie pattern** (free + ~30 sec of clicks once a month). The fully-unattended path is **2Captcha** (~$1/year).
 
-### Steps:
+### Path A: Free 30-day cookie refresh (recommended)
 
-1. **Create a 2Captcha account** at <https://2captcha.com>. Sign up, verify email.
-2. **Add funds** — minimum $1, recommended $5. SLR daily refresh = ~365 solves/year × $0.003 = ~$1.10/year of captcha budget. Funding $5 covers ~4 years.
-3. **Copy your API key** from <https://2captcha.com/enterpage> (top of page, under your account name).
-4. **Add it to Windows `.env`**:
+Real Chrome with your real session almost never sees the reCAPTCHA challenge. So we let *you* log in once a month from your normal browser, capture the resulting cookies, and the daily Windows scheduled task uses them for the next ~30 days.
+
+```sh
+python3 /Users/andrewninn/Scripts/slr_refresh_cookies.py
+```
+
+What happens:
+1. A Chrome window pops up at `partners.sexlikereal.com/user/signin`
+2. You log in normally (no captcha, you're a real human)
+3. Cookies save locally → SCP'd to Windows automatically
+4. Daily scheduled task runs SLR for the next ~30 days, no more interaction
+
+When daily logs start showing `SLR cookies are stale or missing`, just re-run the helper. Total recurring cost: ~30 seconds, once a month.
+
+### Path B: Fully unattended via 2Captcha (~$1/year)
+
+If you'd rather pay than do the monthly click:
+
+1. Sign up at <https://2captcha.com> (email verification only)
+2. Add **$5** to your balance (covers ~4 years of daily SLR refreshes at $0.003/solve)
+3. Copy your API key from <https://2captcha.com/enterpage>
+4. Add to **`C:\Users\andre\eclatech-hub\.env`** on Windows:
    ```
    TWOCAPTCHA_API_KEY=your_key_here
    ```
-   File location: `C:\Users\andre\eclatech-hub\.env`
-5. **Test it once manually** to confirm:
-   ```
-   ssh -i ~/.ssh/id_ed25519_win andre@100.90.90.68
-   cd C:\Users\andre\eclatech-hub
-   py scrape_revenue_data.py --slr
-   ```
-   First run takes ~30s (login + captcha solve + page navigation). Subsequent runs reuse cookies (`~/.scraper_state/slr.json`) until they expire.
+5. Daily scheduled task picks SLR up automatically the next morning
 
-After step 5 succeeds the daily scheduled task will automatically include SLR in its run.
+### Path C: Headed first run (one-off)
+
+If you happen to be in front of the Windows box (RDP or directly):
+
+```
+ssh -i ~/.ssh/id_ed25519_win andre@100.90.90.68
+cd C:\Users\andre\eclatech-hub
+py scrape_revenue_data.py --slr --headed
+```
+
+A Chrome window pops on the Windows desktop, you click through the captcha, cookies persist for ~30 days. Same as path A but without the SCP step.
 
 ## If you ever want to disable SLR
 
-Remove `TWOCAPTCHA_API_KEY` from `.env`. The daily task will silently skip SLR; POVR + VRPorn keep running.
+Delete `~/.scraper_state/slr.json` on Windows AND remove `TWOCAPTCHA_API_KEY` from `.env`. The daily task will skip SLR; POVR + VRPorn keep running.
 
 ## Manual one-off commands
 
