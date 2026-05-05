@@ -672,20 +672,28 @@ function RowView({
     )
   }
 
-  // MEGA-only row
+  // MEGA-only row — paperwork that lives on the bucket but doesn't have a
+  // structured compliance_signatures row yet. We show a "Not imported"
+  // pill so the operator knows this is the artifact-only state, and try to
+  // pull the talent name out of the filename so the row isn't anonymous.
   const f = row.file
   const color = studioColor(f.studio)
+  const guessedTalent = guessTalentFromFilename(f.filename)
+  const docKind = classifyDocument(f.filename)
   return (
     <tr
       style={{ background: bg, cursor: "pointer" }}
       onClick={() => onOpenMega(f)}
-      title="Download from MEGA — legacy paperwork (no editable record)"
+      title="MEGA file — not yet imported into the records DB. Click to download."
     >
       <td style={cellStyle}>
         <div style={{ fontWeight: 600, color: "var(--color-text-muted)" }}>
           {(f.last_modified || "").slice(0, 10) || "—"}
         </div>
-        <div style={{ fontSize: 9, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+        <div style={{
+          fontSize: 9, color: "var(--color-text-faint)",
+          textTransform: "uppercase", letterSpacing: "0.06em",
+        }}>
           MEGA
         </div>
       </td>
@@ -706,17 +714,42 @@ function RowView({
       <td style={{ ...cellStyle, fontFamily: "var(--font-mono, ui-monospace, monospace)", fontSize: 11 }}>
         {f.scene_id || "—"}
       </td>
-      <td style={{ ...cellStyle, color: "var(--color-text-faint)", fontStyle: "italic", fontSize: 11 }}>
-        Legacy artifact
+      <td style={cellStyle}>
+        {guessedTalent ? (
+          <>
+            <div style={{ fontWeight: 600 }}>{guessedTalent}</div>
+            <div style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
+              From filename
+            </div>
+          </>
+        ) : (
+          <span style={{ color: "var(--color-text-faint)", fontSize: 11 }}>
+            —
+          </span>
+        )}
       </td>
-      <td style={cellStyle}>—</td>
+      <td style={cellStyle}>
+        <span style={{
+          display: "inline-block",
+          padding: "1px 6px",
+          borderRadius: 4,
+          border: "1px solid var(--color-border)",
+          color: "var(--color-text-faint)",
+          fontSize: 9,
+          fontWeight: 600,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+        }}>
+          Not imported
+        </span>
+      </td>
       <td style={cellStyle}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <HardDrive size={12} color="var(--color-text-faint)" />
           <span style={{ fontSize: 11, wordBreak: "break-all" }}>{f.filename}</span>
         </div>
         <div style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
-          {formatBytes(f.size)}
+          {docKind} · {formatBytes(f.size)}
         </div>
       </td>
       <td style={{ ...cellStyle, textAlign: "right", whiteSpace: "nowrap" }}>
@@ -731,6 +764,48 @@ function RowView({
       </td>
     </tr>
   )
+}
+
+// ─── Filename heuristics ─────────────────────────────────────────────────────
+
+/**
+ * Best-effort extract a talent display name from a MEGA legal-folder
+ * filename. The convention from the prepare flow is `{TalentSlug}-{date}.pdf`
+ * and historical files mostly follow `{TalentName}-{kind}.{ext}` (e.g.
+ * `JadaSnow-IDFront.jpg`, `MissyDee-Front.jpg`). Returns null when the
+ * leading segment doesn't look like a CamelCase person name.
+ */
+function guessTalentFromFilename(filename: string): string | null {
+  const stem = filename.replace(/\.[^.]+$/, "")        // drop extension
+  const head = stem.split(/[-_ ]/, 1)[0] || ""         // first segment
+  // Must look like CamelCase: ≥2 capitalized chunks, e.g. "JadaSnow"
+  if (!/^[A-Z][a-z]+([A-Z][a-z]+)+$/.test(head)) return null
+  // Skip generic words that happen to match (avoid false positives like
+  // "SignedRelease", "MaleAgreement").
+  const NON_NAMES = new Set([
+    "SignedAgreement", "SignedRelease", "ReleaseOriginal", "ModelRelease",
+    "Disclosure", "Performer", "Custom", "Original", "Document", "Photo",
+  ])
+  if (NON_NAMES.has(head)) return null
+  // Insert a space between adjacent CamelCase chunks: JadaSnow → Jada Snow
+  return head.replace(/([a-z])([A-Z])/g, "$1 $2")
+}
+
+/**
+ * Coarse classification of a legacy paperwork file based on its filename.
+ * Drives the "Document" subtitle on MEGA rows so the operator knows what
+ * they're about to download before opening it.
+ */
+function classifyDocument(filename: string): string {
+  const lower = filename.toLowerCase()
+  if (/(2257|disclosure)/.test(lower))                  return "2257 disclosure"
+  if (/w-?9/.test(lower))                                return "W-9"
+  if (/(agreement|release|contract)/.test(lower))        return "Agreement"
+  if (/(bunny.?ear)/.test(lower))                        return "Verification photo"
+  if (/(front|back|id|license|passport)/.test(lower))    return "ID photo"
+  if (lower.endsWith(".pdf"))                            return "PDF"
+  if (/\.(jpe?g|png|heic|webp)$/i.test(lower))           return "Photo"
+  return "File"
 }
 
 // ─── Tiny presentational helpers ─────────────────────────────────────────────

@@ -116,6 +116,16 @@ MALE_IDS: dict[str, dict[str, str]] = {
 }
 
 
+# Scene types that the compliance flow handles. Originally just BG / BGCP
+# (mixed boy/girl shoots that need both male + female paperwork), extended
+# 2026-05-05 to include SOLO (VRAllure female-only scenes) and JOI
+# (NaughtyJOI female-only scenes) — both produce shoot days for talent who
+# still need W-9 / 2257 / agreement on file. The downstream prepare and sign
+# flows already handle female-only by skipping male PDF copy when no male
+# is set on the shoot.
+COMPLIANCE_SCENE_TYPES = ("BG", "BGCP", "SOLO", "JOI")
+
+
 def _ext_from_name(name: str) -> str:
     """Lowercase extension including the leading dot, or empty string."""
     if "." not in name:
@@ -759,7 +769,7 @@ async def list_compliance_shoots(
     results: list[ComplianceShoot] = []
 
     for shoot in shoots:
-        bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in ("BG", "BGCP")]
+        bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in COMPLIANCE_SCENE_TYPES]
         if not bg_scenes:
             continue
 
@@ -1485,7 +1495,7 @@ async def sign_shoot(shoot_id: str, user: CurrentUser, request: Request, body: S
         raise HTTPException(status_code=404, detail="Shoot not found")
 
     # Pick the BG scene we'll attach this signature to
-    bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in ("BG", "BGCP")]
+    bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in COMPLIANCE_SCENE_TYPES]
     if not bg_scenes:
         raise HTTPException(status_code=400, detail="Shoot has no BG/BGCP scene")
     primary = bg_scenes[0]
@@ -2076,7 +2086,7 @@ def _do_auto_sign(shoot_id: str, talent_role: str) -> AutoSignTalentResult:
         raise HTTPException(status_code=400, detail=f"shoot has no {talent_role} talent")
     talent_slug = talent_display.replace(" ", "")
 
-    bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in ("BG", "BGCP")]
+    bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in COMPLIANCE_SCENE_TYPES]
     primary = bg_scenes[0] if bg_scenes else None
     scene_id = primary.scene_id if primary else ""
     studio = primary.studio if primary else ""
@@ -2332,7 +2342,7 @@ async def import_from_drive(
     if not shoot:
         raise HTTPException(status_code=404, detail="Shoot not found")
 
-    bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in ("BG", "BGCP")]
+    bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in COMPLIANCE_SCENE_TYPES]
     if not bg_scenes:
         raise HTTPException(status_code=400, detail="Shoot has no BG/BGCP scene")
     primary = bg_scenes[0]
@@ -2574,7 +2584,7 @@ async def upload_compliance_photo(
     if not shoot:
         raise HTTPException(status_code=404, detail="Shoot not found")
 
-    bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in ("BG", "BGCP")]
+    bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in COMPLIANCE_SCENE_TYPES]
     primary = bg_scenes[0] if bg_scenes else None
     scene_id = (primary.scene_id if primary else "") or ""
     studio   = (primary.studio   if primary else "") or ""
@@ -3048,7 +3058,7 @@ async def bulk_import_from_drive(
                 continue
             pdfs = [f for f in files if (f.get("name") or "").lower().endswith(".pdf")]
 
-            bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in ("BG", "BGCP")]
+            bg_scenes = [sc for sc in shoot.scenes if sc.scene_type.upper() in COMPLIANCE_SCENE_TYPES]
             if not bg_scenes:
                 result.shoots.append(BulkDriveImportShootResult(
                     shoot_id=shoot.shoot_id,
