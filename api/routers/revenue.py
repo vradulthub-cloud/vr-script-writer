@@ -30,7 +30,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from api.auth import require_admin
+from api.auth import require_revenue_viewer
 from api.sheets_client import open_revenue, with_retry
 
 _log = logging.getLogger(__name__)
@@ -366,7 +366,7 @@ def _get_cache(force: bool = False) -> dict:
 @router.get("/dashboard", response_model=RevenueDashboard)
 async def get_dashboard(
     refresh: bool = Query(default=False, description="Bypass cache"),
-    _admin: dict = Depends(require_admin),
+    _admin: dict = Depends(require_revenue_viewer),
 ):
     """High-level revenue dashboard — totals, YoY, 12-month trend, catalog."""
     return _get_cache(force=refresh)["dashboard"]
@@ -378,7 +378,7 @@ async def get_scenes(
     studio: Optional[str] = Query(default=None, description="VRH | FPVR | VRA | NJOI | …"),
     order: str = Query(default="top", pattern="^(top|bottom)$"),
     limit: int = Query(default=50, le=500),
-    _admin: dict = Depends(require_admin),
+    _admin: dict = Depends(require_revenue_viewer),
 ):
     """Top or bottom scenes by revenue, optionally filtered by platform/studio."""
     scenes: list[SceneRow] = _get_cache()["scenes"]
@@ -395,7 +395,7 @@ async def get_scenes(
 @router.get("/cross-platform", response_model=list[CrossPlatformRow])
 async def get_cross_platform(
     limit: int = Query(default=100, le=500),
-    _admin: dict = Depends(require_admin),
+    _admin: dict = Depends(require_revenue_viewer),
 ):
     """Scenes that appear on 2+ platforms with lifetime earnings."""
     cross: list[CrossPlatformRow] = _get_cache()["cross"]
@@ -407,7 +407,7 @@ async def get_cross_platform(
 async def lookup_scene_revenue(
     title: Optional[str] = Query(default=None, description="Substring match on title"),
     studio: Optional[str] = Query(default=None),
-    _admin: dict = Depends(require_admin),
+    _admin: dict = Depends(require_revenue_viewer),
 ):
     """Find revenue rows for a given title (used by scene-detail cross-link)."""
     scenes: list[SceneRow] = _get_cache()["scenes"]
@@ -422,7 +422,7 @@ async def lookup_scene_revenue(
 
 
 @router.get("/daily", response_model=DailySummary)
-async def get_daily_summary(_admin: dict = Depends(require_admin)):
+async def get_daily_summary(_admin: dict = Depends(require_revenue_viewer)):
     """Daily-granularity snapshot for the dashboard:
        - yesterday: rows for the most recent date in _DailyData
        - this_month: rows from start-of-current-month to yesterday

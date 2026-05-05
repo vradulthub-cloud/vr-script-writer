@@ -24,6 +24,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar
         allowedTabs={userProfile.allowed_tabs}
         userRole={userProfile.role}
+        userEmail={userProfile.email}
       />
       <Topbar session={session} idToken={idToken} userRole={userProfile.role} disablePolling={skipAuth} />
       <main
