@@ -126,28 +126,76 @@ def save_state(context: BrowserContext, platform: str) -> None:
 # ---------------------------------------------------------------------------
 # SexLikeReal — sellers.sexlikereal.com
 # ---------------------------------------------------------------------------
-def scrape_slr(page: Page, dry_run: bool) -> list[list[str]]:
-    """Log into SLR partners (partners.sexlikereal.com) and pull
-    all-studios per-video stats.
+def _solve_slr_recaptcha(page: Page, api_key: str) -> str:
+    """Submit the page's reCAPTCHA v2 challenge to 2Captcha and inject the
+    response token into the form. Returns the solver's solution token
+    (mostly for logging/debugging).
 
-    Output schema:
-      Studio, Release Date, SLR_ID, Title, Uniq Views, Favorites,
-      Premium $, Sales $, Scripts $, Total Income $
+    2Captcha pricing: ~$2.99 per 1000 reCAPTCHA v2 solves at the time of
+    writing. Daily SLR scrape = 1 solve/day = ~$1/year of CAPTCHA budget.
 
-    *FIRST-RUN REQUIREMENT*: SLR's login form is gated by Google
-    reCAPTCHA v2 ("I'm not a robot" checkbox). We CANNOT solve this
-    headlessly. The first time you run this script:
-
-        python3 scrape_revenue_data.py --slr --headed
-
-    Complete the reCAPTCHA + login by hand. We persist the resulting
-    session cookies under ~/.scraper_state/slr.json. Subsequent runs
-    skip the login form entirely (cookies survive ~30 days typically),
-    so the monthly scheduled task runs unattended.
-
-    Once logged-in, scrape the per-video stats page (URL/selectors below
-    — confirmed against the user's existing CSV header).
+    Set TWOCAPTCHA_API_KEY in .env. Sign up + fund at https://2captcha.com.
     """
+    # Lazy import so the rest of the file stays useful when the dep isn't
+    # installed (e.g. running --povr-daily on a fresh machine).
+    try:
+        from twocaptcha import TwoCaptcha
+    except ImportError as e:
+        raise RuntimeError(
+            "twocaptcha-python not installed. `pip install 2captcha-python` "
+            "(or remove TWOCAPTCHA_API_KEY from .env to fall back to --headed)"
+        ) from e
+
+    sitekey = page.evaluate(
+        "() => { const el = document.querySelector('[data-sitekey]'); "
+        "return el ? el.getAttribute('data-sitekey') : null; }"
+    )
+    if not sitekey:
+        raise RuntimeError("SLR: no reCAPTCHA data-sitekey on page (page layout changed?)")
+
+    log.info(f"SLR: solving reCAPTCHA via 2Captcha (sitekey={sitekey[:20]}...)")
+    solver = TwoCaptcha(api_key)
+    # The solver blocks until 2Captcha returns (typically 15-45s for v2).
+    result = solver.recaptcha(sitekey=sitekey, url=page.url)
+    token = result.get("code", "")
+    if not token:
+        raise RuntimeError(f"SLR: 2Captcha returned no token: {result}")
+
+    # Inject the token into the hidden response field that reCAPTCHA's JS
+    # would normally populate when the user clicks "I'm not a robot".
+    page.evaluate(
+        "(t) => {"
+        "  const el = document.getElementById('g-recaptcha-response');"
+        "  if (el) { el.innerHTML = t; el.value = t; el.style.display = 'block'; }"
+        "  document.querySelectorAll('textarea[name=g-recaptcha-response]').forEach("
+        "    e => { e.innerHTML = t; e.value = t; }"
+        "  );"
+        "}",
+        token,
+    )
+    log.info(f"SLR: reCAPTCHA token injected ({len(token)} chars)")
+    return token
+
+
+def scrape_slr(page: Page, dry_run: bool) -> list[list[str]]:
+    """Log into SLR partners (partners.sexlikereal.com) and pull all-studios
+    daily revenue from /statistics/daily/...
+
+    Output schema (matches _DailyData via uploader normalization):
+      Date (ISO), Studio, Total Earnings $
+
+    SLR's login form is gated by Google reCAPTCHA v2. Two paths:
+
+      1. Set TWOCAPTCHA_API_KEY in .env — we solve the captcha automatically
+         via the 2Captcha service (~$0.003 per solve = ~$1/year for daily).
+      2. Run with --headed once, complete the challenge by hand. Cookies
+         persist under ~/.scraper_state/slr.json for ~30 days.
+
+    Once authed, navigate to the per-studio daily stats page. The URL the
+    user gave us as a starting point: /statistics/daily/studio/64/project/1
+    """
+    from datetime import date, timedelta
+
     user = os.environ.get("SLR_USER")
     pw   = os.environ.get("SLR_PASS")
     if not user or not pw:
@@ -159,35 +207,47 @@ def scrape_slr(page: Page, dry_run: bool) -> list[list[str]]:
 
     # Already authed via persisted cookies? Sign-in URL redirects off /signin.
     if "/signin" in page.url:
-        log.info("SLR: not authed (still on /signin) — login form needs reCAPTCHA")
-        # If a human is sitting in front of a headed browser they can solve
-        # it; otherwise we surface a clear error so the monthly task fails
-        # loudly instead of silently scraping a logged-out page.
+        log.info("SLR: not authed — filling credentials")
         page.fill('input[name="email"]', user)
         page.fill('input[name="password"]', pw)
-        # Wait up to 60s for either the URL to leave /signin (reCAPTCHA solved)
-        # or for the user to give up.
+
+        # Solve the reCAPTCHA. Prefer 2Captcha if configured; fall back to
+        # waiting for a human (--headed mode) for up to 60s.
+        captcha_key = os.environ.get("TWOCAPTCHA_API_KEY", "").strip()
+        if captcha_key:
+            _solve_slr_recaptcha(page, captcha_key)
+        else:
+            log.info("SLR: no TWOCAPTCHA_API_KEY — assuming --headed mode (60s grace for human solver)")
+
         try:
             page.locator('input[type="submit"]').click()
             page.wait_for_url(lambda u: "/signin" not in u, timeout=60_000)
         except PWTimeout:
             raise RuntimeError(
-                "SLR login still on /signin after 60s — reCAPTCHA likely "
-                "blocking. Re-run with --headed and complete the challenge "
-                "by hand. Cookies will persist for future unattended runs."
+                "SLR login still on /signin after 60s — reCAPTCHA solver may have failed "
+                "or 2Captcha balance is empty. Run --headed to fall back to manual."
             )
+        log.info(f"SLR: login successful ({page.url})")
 
-    # TODO: navigate to the per-video stats page. Inspect the partners
-    # portal's left-nav after a successful login to find the right URL
-    # and table structure. Header in the user's existing CSV is:
-    #   Studio | Release Date | SLR_ID | Title | Uniq Views | Favorites |
-    #   Premium $ | Sales $ | Scripts $ | Total Income $
-    # Likely candidates: /stats, /content, /videos, /earnings — fill in
-    # once we've eyeballed the post-login dashboard.
+    # TODO: this requires a real signed-in session to inspect. The URL the
+    # user gave us — /statistics/daily/studio/64/project/1 — implies:
+    #   - "studio/64" = a numeric studio ID (we'll need to discover the
+    #     full set: probably one per studio, e.g. 64=VRH, 65=VRA, 66=FPVR).
+    #   - "project/1" = a project filter (possibly studio sub-channel).
+    # Once we have a working session post-2Captcha, the next step is to
+    # eyeball this page, identify the table structure, and fill in the
+    # parsing — same shape as scrape_povr_daily / scrape_vrporn.
+    log.info("SLR: navigating to daily stats page...")
+    today = date.today()
+    d_from = (today - timedelta(days=60)).isoformat()
+    page.goto(f"https://partners.sexlikereal.com/statistics/daily/studio/64/project/1?from={d_from}",
+              wait_until="domcontentloaded", timeout=30_000)
+    page.wait_for_load_state("networkidle", timeout=20_000)
+
     raise NotImplementedError(
-        "SLR per-video stats page URL not yet known — run --headed once, "
-        "navigate to the all-studios stats page in the browser, then update "
-        "this function with the URL and table-column mapping."
+        "SLR daily-stats parsing not yet wired — need to inspect the live "
+        "page DOM after a successful 2Captcha-assisted login. Re-run once "
+        "TWOCAPTCHA_API_KEY is set + funded, then we'll fill in the table parser."
     )
 
 
@@ -526,10 +586,13 @@ def write_csv(out: Path, header: list[str], rows: list[list[str]]) -> None:
 # ---------------------------------------------------------------------------
 PLATFORMS: dict[str, dict] = {
     "slr": {
+        # SLR scraper now writes daily-totals shape (Date / Studio / $);
+        # the per-video CSV the manual export produces stays separately
+        # in slr_all_studios_video_stats.csv until we discover the
+        # equivalent post-login per-video page.
         "fn": scrape_slr,
-        "out": OUT_SLR,
-        "header": ["Studio", "Release Date", "SLR_ID", "Title", "Uniq Views",
-                   "Favorites", "Premium $", "Sales $", "Scripts $", "Total Income $"],
+        "out": OUT_SLR_DAILY,
+        "header": ["Date", "Studio", "Total Earnings $"],
     },
     "povr": {
         "fn": scrape_povr,
@@ -571,7 +634,12 @@ def main() -> int:
     if args.all:
         targets = ["slr", "povr", "vrporn"]  # full per-video scrape (drops daily)
     elif args.daily:
-        targets = ["povr-daily", "vrporn"]   # SLR daily TBD
+        # SLR is included only if a 2Captcha key is configured — otherwise
+        # the daily run would fail-loud every morning. Operator can opt in
+        # explicitly with `--slr` for a one-off --headed run regardless.
+        targets = ["povr-daily", "vrporn"]
+        if os.environ.get("TWOCAPTCHA_API_KEY", "").strip():
+            targets.append("slr")
     else:
         for p in PLATFORMS:
             # argparse converts hyphens to underscores for attribute names
