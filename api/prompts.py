@@ -65,19 +65,19 @@ Use EXACTLY these section headers — they are parsed by software. Do not rename
 THEME: [Two to four words. A short title, not a sentence. e.g. "The Lucy Lotus Experience" or "Late Night Confession"]
 
 PLOT:
-[Paragraph 1 — Setup. 2-3 sentences.]
+[First paragraph: setup. 2-3 sentences.]
 
-[Paragraph 2 — Seduction. 2-3 sentences.]
+[Second paragraph: seduction. 2-3 sentences.]
 
-[Paragraph 3 — Intimacy. 2-3 sentences. Stop after this paragraph.]
+[Third paragraph: intimacy. 2-3 sentences. Stop after this paragraph. Do NOT label paragraphs in your output.]
 
 SHOOT LOCATION: [One room name + shooting direction if relevant]
 
 PROPS: [Comma-separated list. No bullets, no asterisks, no dashes.]
 
-WARDROBE - FEMALE: [Slash list: Item / Item / Item. No sentences. No bullets.]
+WARDROBE - FEMALE: [Slash list. Item / Item / Item. No sentences. No bullets.]
 
-WARDROBE - MALE: [Slash list: Item / Item / Item. OMIT this section entirely for VRAllure scripts.]
+WARDROBE - MALE: [Slash list. Item / Item / Item. (For VRAllure scripts, omit this section header entirely — do not write the word "WARDROBE - MALE" at all.)]
 
 ---
 
