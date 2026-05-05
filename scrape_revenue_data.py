@@ -515,7 +515,7 @@ def scrape_povr(page: Page, dry_run: bool) -> list[list[str]]:
     return out
 
 
-def scrape_povr_daily(page: Page, dry_run: bool, lookback_days: int = 60) -> list[list[str]]:
+def scrape_povr_daily(page: Page, dry_run: bool, lookback_days: int = 120) -> list[list[str]]:
     """Scrape POVR daily revenue (last `lookback_days`).
 
     Output schema (matches the _DailyData tab on the sheet):
@@ -556,7 +556,11 @@ def scrape_povr_daily(page: Page, dry_run: bool, lookback_days: int = 60) -> lis
     today = date.today()
     d1 = (today - timedelta(days=lookback_days)).isoformat()
     d2 = today.isoformat()
-    url = f"https://partners.povr.com/stats?gr=day&pp=100&d1={d1}&d2={d2}"
+    # pp=200 gives us comfortably more than the 120-day default lookback
+    # (pp=100 capped earlier runs at exactly 100 rows). The /stats endpoint
+    # accepts arbitrary pp values; if a future window exceeds 200 days we'd
+    # bump again or paginate via &p=.
+    url = f"https://partners.povr.com/stats?gr=day&pp=200&d1={d1}&d2={d2}"
     log.info(f"POVR daily: loading {url}")
 
     last_exc: Exception | None = None

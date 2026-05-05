@@ -387,14 +387,49 @@ def _build_cache() -> dict:
         by_month[ym][f["platform"]] = by_month[ym].get(f["platform"], 0.0) + f["revenue"]
         _attribute_to_studios(ym, f["platform"], f["revenue"], f["studio"])
 
+    # Roll _DailyData up by (month, platform) so we can compare its coverage
+    # against what _Data has for that same month-platform.
     daily = _read_daily_rows(sh)
-    months_in_data = set(by_month.keys())
+    daily_by_pm: dict[tuple[str, str], dict] = {}
     for r in daily:
         ym = r.date[:7] if r.date else ""
-        if not ym or ym in months_in_data:
-            continue  # _Data wins when both have the month
-        by_month[ym][r.platform] = by_month[ym].get(r.platform, 0.0) + r.revenue
-        _attribute_to_studios(ym, r.platform, r.revenue, r.studio)
+        if not ym:
+            continue
+        key = (ym, r.platform)
+        e = daily_by_pm.setdefault(key, {"total": 0.0, "days": set(), "rows": []})
+        e["total"] += r.revenue
+        e["days"].add(r.date)
+        e["rows"].append(r)
+
+    # Decide per (month, platform) which source wins. Rule:
+    #   - If _Data has nothing for this (month, platform): use daily.
+    #   - If daily has ≥25 days AND its total is HIGHER than _Data: use daily
+    #     (catches the "_Data was imported partway through the month" case
+    #     where the partner's monthly export missed the back half of the
+    #     month — daily's complete sweep is more accurate then).
+    #   - Otherwise: keep _Data (the partner-portal export is authoritative
+    #     when it actually covers the month).
+    months_in_data = set(by_month.keys())
+    for (ym, plat), agg in daily_by_pm.items():
+        sheet_val = by_month.get(ym, {}).get(plat, 0.0) if ym in months_in_data else 0.0
+        daily_val = agg["total"]
+        day_count = len(agg["days"])
+        prefer_daily = (
+            ym not in months_in_data
+            or sheet_val == 0
+            or (day_count >= 25 and daily_val > sheet_val)
+        )
+        if not prefer_daily:
+            continue
+        # Replace whatever was there for this platform with the daily total
+        by_month[ym][plat] = daily_val
+        # Per-studio breakdown — re-attribute by walking the actual daily rows.
+        # Zero out any per-studio totals already credited from facts so we
+        # don't double-count.
+        for sname in list(by_month_studio.get(ym, {}).keys()):
+            by_month_studio[ym][sname][plat] = 0.0
+        for r in agg["rows"]:
+            _attribute_to_studios(ym, plat, r.revenue, r.studio)
 
     sorted_months = sorted(by_month.keys())[-12:]
     monthly: list[MonthlyPoint] = []
