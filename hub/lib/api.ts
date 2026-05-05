@@ -513,6 +513,12 @@ export interface RevenueMonthlyPoint {
   vrporn: number
   total: number
   mom_pct: number | null            // null on first point
+  // Per-studio breakdown, keyed by 4-letter studio code (FPVR/VRH/VRA/NJOI/BJN).
+  // For SLR the values are real (from per-studio rows in _Data); for
+  // POVR/VRPorn they're approximated by applying cross-platform studio
+  // shares to the platform total. May be undefined or {} when no
+  // attribution could be resolved.
+  by_studio?: Record<string, { slr: number; povr: number; vrporn: number; total: number }>
 }
 
 export interface RevenueCatalogIntel {

@@ -303,6 +303,29 @@ thead th {
   animation: successFlash 1.2s var(--ease-out-expo) both;
 }
 
+/* Revenue / Rev Dashboard motion. Used on KPI tile values (cross-fade
+   when the underlying number changes due to filter shifts) and on chips
+   (subtle pulse when activated, so the user gets feedback that the click
+   landed). All gated behind prefers-reduced-motion. */
+@keyframes ecKpiFade {
+  0%   { opacity: 0;   transform: translateY(2px); }
+  100% { opacity: 1;   transform: translateY(0); }
+}
+.ec-kpi-fade {
+  animation: ecKpiFade 200ms var(--ease-out-expo, ease-out) both;
+}
+
+@keyframes ecChipPulse {
+  0%   { box-shadow: inset 0 -2px 0 currentColor, 0 0 0 0 color-mix(in srgb, var(--color-lime) 30%, transparent); }
+  60%  { box-shadow: inset 0 -2px 0 currentColor, 0 0 0 4px color-mix(in srgb, var(--color-lime) 0%, transparent); }
+  100% { box-shadow: inset 0 -2px 0 currentColor; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ec-kpi-fade { animation: none; }
+  .ec-chip-pulse { animation: none; }
+}
+
 /* Complete row accent — subtle background tint for 100% scenes */
 tr[data-complete="true"] {
   background: color-mix(in srgb, var(--color-ok) 4%, transparent);

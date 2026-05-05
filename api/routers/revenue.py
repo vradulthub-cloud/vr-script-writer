@@ -55,6 +55,11 @@ class MonthlyPoint(BaseModel):
     vrporn: float = 0.0
     total: float = 0.0
     mom_pct: Optional[float] = None  # null on the first point
+    # Per-studio breakdown — populated for platforms that report studio-level
+    # data (currently only SLR). Frontend uses this when a studio filter is
+    # active to recompute per-platform contributions. Keys are 4-letter
+    # studio codes (FPVR/VRH/VRA/NJOI/BJN); inner dict is platform-keyed.
+    by_studio: dict[str, dict[str, float]] = {}
 
 
 class CatalogIntel(BaseModel):
@@ -170,6 +175,30 @@ def _normalize_platform(raw: str) -> str:
     return r
 
 
+# Sheet uses long studio names ('FuckPassVR', 'VRHush'); UI uses 4-letter
+# codes (FPVR, VRH). Normalizing here so studio filter can match per-studio
+# monthly rollups end-to-end. Returns "" for non-studio rows (POVR/VRPorn
+# aggregated rows that have studio == platform name) so they stay out of
+# per-studio totals.
+_STUDIO_NORMALIZE = {
+    "fuckpassvr": "FPVR", "fpvr": "FPVR",
+    "vrhush":     "VRH",  "vrh":  "VRH",
+    "vrallure":   "VRA",  "vra":  "VRA",
+    "naughtyjoi": "NJOI", "njoi": "NJOI", "nnjoi": "NJOI",
+    "bjnow":      "BJN",  "bjn":  "BJN",
+}
+
+
+def _normalize_studio(raw: str) -> str:
+    """Map studio names to 4-letter codes used by the UI. Empty string for
+    platform-aggregated rows that don't represent a single studio (e.g.
+    POVR's row.studio == 'POVR', VRPorn's row.studio == 'VRPorn')."""
+    if not raw:
+        return ""
+    r = raw.strip().lower()
+    return _STUDIO_NORMALIZE.get(r, "")
+
+
 def _read_daily_rows(sh) -> list[DailyRow]:
     """Read the _DailyData tab. Returns [] if the tab doesn't exist yet."""
     try:
@@ -260,6 +289,45 @@ def _build_cache() -> dict:
             povr_views=_parse_int(r[9]) if len(r) > 9 else 0,
         ))
 
+    # ── Studio attribution for POVR/VRPorn ──────────────────────────────────
+    # The _Data tab aggregates POVR + VRPorn revenue at the platform level
+    # because the partner exports don't tag individual scenes with the studio
+    # that produced them. The 🔗 Cross-Platform tab DOES carry studio info
+    # per scene (1440 scenes, attributed by studio). We use that as a proxy
+    # to derive platform → studio share, and apply it to monthly POVR/VRPorn
+    # totals so the studio filter actually means something at monthly grain.
+    #
+    # Limitations: shares are derived from cross-platform-distributed scenes
+    # only (not single-platform scenes). For studios that distribute heavily
+    # cross-platform, this is accurate; for studios with platform-exclusive
+    # content, it's a directional approximation. A platform_share field
+    # surfaces this so the frontend can flag derived numbers.
+    platform_shares: dict[str, dict[str, float]] = {"povr": {}, "vrporn": {}, "slr": {}}
+    cross_totals = {"povr": 0.0, "vrporn": 0.0, "slr": 0.0}
+    cross_by_studio = {
+        "povr":   defaultdict(float),
+        "vrporn": defaultdict(float),
+        "slr":    defaultdict(float),
+    }
+    for cx in cross:
+        scode = _normalize_studio(cx.studio)
+        if not scode:
+            continue
+        if cx.povr_total > 0:
+            cross_by_studio["povr"][scode] += cx.povr_total
+            cross_totals["povr"] += cx.povr_total
+        if cx.vrporn_total > 0:
+            cross_by_studio["vrporn"][scode] += cx.vrporn_total
+            cross_totals["vrporn"] += cx.vrporn_total
+        if cx.slr_total > 0:
+            cross_by_studio["slr"][scode] += cx.slr_total
+            cross_totals["slr"] += cx.slr_total
+    for plat in ("povr", "vrporn", "slr"):
+        tot = cross_totals[plat]
+        if tot > 0:
+            for s, v in cross_by_studio[plat].items():
+                platform_shares[plat][s] = v / tot
+
     # ── Aggregations ────────────────────────────────────────────────────────
     # Per-platform: all-time, YTD, yearly breakdown
     current_year = max((f["year"] for f in facts if f["year"]), default=2026)
@@ -289,11 +357,35 @@ def _build_cache() -> dict:
     # so the chart stays current instead of stranded at the last imported
     # month.
     by_month: dict[str, dict[str, float]] = defaultdict(lambda: {"slr": 0.0, "povr": 0.0, "vrporn": 0.0})
+    # Per-studio breakdown is built alongside the platform totals so the
+    # frontend can drill into studio=VRH (etc.) at monthly grain. Schema:
+    # {month: {studio_code: {platform: revenue}}}. For SLR (where _Data has
+    # real per-studio rows) this is direct; for POVR/VRPorn (where _Data
+    # rows are platform-aggregated) we apply platform_shares derived from
+    # the Cross-Platform tab as a directional approximation.
+    by_month_studio: dict[str, dict[str, dict[str, float]]] = defaultdict(lambda: defaultdict(lambda: {"slr": 0.0, "povr": 0.0, "vrporn": 0.0}))
+
+    def _attribute_to_studios(month: str, plat: str, rev: float, raw_studio: str) -> None:
+        """Record a (month, platform, revenue) into by_month_studio. If the
+        row carries a real studio code (SLR's per-studio rows), credit it
+        directly. If it's a platform-aggregated row (POVR/VRPorn), distribute
+        the revenue across studios using cross-platform shares."""
+        scode = _normalize_studio(raw_studio)
+        if scode:
+            by_month_studio[month][scode][plat] += rev
+            return
+        shares = platform_shares.get(plat) or {}
+        if not shares:
+            return  # No attribution available — leave it out of per-studio
+        for sname, share in shares.items():
+            by_month_studio[month][sname][plat] += rev * share
+
     for f in facts:
         ym = f["year_month"]
         if not ym or len(ym) < 7:
             continue
         by_month[ym][f["platform"]] = by_month[ym].get(f["platform"], 0.0) + f["revenue"]
+        _attribute_to_studios(ym, f["platform"], f["revenue"], f["studio"])
 
     daily = _read_daily_rows(sh)
     months_in_data = set(by_month.keys())
@@ -302,6 +394,7 @@ def _build_cache() -> dict:
         if not ym or ym in months_in_data:
             continue  # _Data wins when both have the month
         by_month[ym][r.platform] = by_month[ym].get(r.platform, 0.0) + r.revenue
+        _attribute_to_studios(ym, r.platform, r.revenue, r.studio)
 
     sorted_months = sorted(by_month.keys())[-12:]
     monthly: list[MonthlyPoint] = []
@@ -312,6 +405,22 @@ def _build_cache() -> dict:
         mom = None
         if prev_total is not None and prev_total > 0:
             mom = round(((total - prev_total) / prev_total) * 100, 1)
+        # Per-studio breakdown for this month — round for the wire.
+        bs_raw = by_month_studio.get(m, {})
+        bs: dict[str, dict[str, float]] = {}
+        for sname, plat_map in bs_raw.items():
+            slr_v    = round(plat_map.get("slr", 0.0),    2)
+            povr_v   = round(plat_map.get("povr", 0.0),   2)
+            vrp_v    = round(plat_map.get("vrporn", 0.0), 2)
+            stotal   = round(slr_v + povr_v + vrp_v,      2)
+            if stotal <= 0:
+                continue
+            bs[sname] = {
+                "slr":    slr_v,
+                "povr":   povr_v,
+                "vrporn": vrp_v,
+                "total":  stotal,
+            }
         monthly.append(MonthlyPoint(
             month=m,
             slr=round(d["slr"], 2),
@@ -319,6 +428,7 @@ def _build_cache() -> dict:
             vrporn=round(d["vrporn"], 2),
             total=round(total, 2),
             mom_pct=mom,
+            by_studio=bs,
         ))
         prev_total = total
 
