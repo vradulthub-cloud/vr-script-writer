@@ -282,13 +282,26 @@ def _build_cache() -> dict:
     ]
     platforms.sort(key=lambda x: -x.all_time)
 
-    # Last 12 months, summed across platforms with MoM delta
+    # Last 12 months, summed across platforms with MoM delta.
+    # _Data is the authoritative source (monthly partner-portal exports). When
+    # a month is missing from _Data but present in _DailyData (e.g. the latest
+    # in-progress month or a not-yet-imported one), we roll the daily rows up
+    # so the chart stays current instead of stranded at the last imported
+    # month.
     by_month: dict[str, dict[str, float]] = defaultdict(lambda: {"slr": 0.0, "povr": 0.0, "vrporn": 0.0})
     for f in facts:
         ym = f["year_month"]
         if not ym or len(ym) < 7:
             continue
         by_month[ym][f["platform"]] = by_month[ym].get(f["platform"], 0.0) + f["revenue"]
+
+    daily = _read_daily_rows(sh)
+    months_in_data = set(by_month.keys())
+    for r in daily:
+        ym = r.date[:7] if r.date else ""
+        if not ym or ym in months_in_data:
+            continue  # _Data wins when both have the month
+        by_month[ym][r.platform] = by_month[ym].get(r.platform, 0.0) + r.revenue
 
     sorted_months = sorted(by_month.keys())[-12:]
     monthly: list[MonthlyPoint] = []
@@ -329,8 +342,6 @@ def _build_cache() -> dict:
 
     grand_total = sum(p.all_time for p in platforms)
     ytd_total   = sum(p.ytd      for p in platforms)
-
-    daily = _read_daily_rows(sh)
 
     return {
         "scenes": scenes,

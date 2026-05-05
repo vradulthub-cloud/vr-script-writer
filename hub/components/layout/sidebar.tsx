@@ -158,7 +158,7 @@ export function Sidebar({ allowedTabs, userRole, userEmail }: SidebarProps) {
         {showRevenue && (
           <NavLink
             href="/admin/revenue"
-            label="Revenue"
+            label="Rev Dashboard"
             shortLabel="Rev"
             icon={DollarSign}
           />

@@ -1139,9 +1139,7 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
           yearly: { "2025": 109_735.62, "2026": 66_006.83 } },
       ],
       monthly_trend: [
-        { month: "2025-04", slr: 33_634.00, povr: 11_427.00, vrporn: 0,         total: 45_061.00, mom_pct: null },
-        { month: "2025-05", slr: 30_417.69, povr: 12_824.43, vrporn: 0,         total: 43_242.12, mom_pct: -4.0 },
-        { month: "2025-06", slr: 28_291.20, povr: 12_950.24, vrporn: 0,         total: 41_241.44, mom_pct: -4.6 },
+        { month: "2025-06", slr: 28_291.20, povr: 12_950.24, vrporn: 0,         total: 41_241.44, mom_pct: null },
         { month: "2025-07", slr: 28_465.01, povr: 12_543.14, vrporn: 0,         total: 41_008.15, mom_pct: -0.6 },
         { month: "2025-08", slr: 30_568.77, povr: 12_256.40, vrporn: 0,         total: 42_825.17, mom_pct:  4.4 },
         { month: "2025-09", slr: 33_829.87, povr: 13_190.84, vrporn: 27_346.81, total: 74_367.52, mom_pct: 73.7 },
@@ -1150,7 +1148,11 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
         { month: "2025-12", slr: 31_567.58, povr: 12_682.56, vrporn: 30_217.61, total: 74_467.75, mom_pct:  7.2 },
         { month: "2026-01", slr: 31_246.19, povr: 10_979.46, vrporn: 27_421.91, total: 69_647.56, mom_pct: -6.5 },
         { month: "2026-02", slr: 27_993.81, povr: 11_027.02, vrporn: 24_422.28, total: 63_443.11, mom_pct: -8.9 },
-        { month: "2026-03", slr: 15_331.85, povr:  5_765.13, vrporn: 14_162.64, total: 35_259.62, mom_pct: -44.4 },
+        { month: "2026-03", slr: 28_002.97, povr:  9_320.27, vrporn:  6_540.12, total: 43_863.36, mom_pct: -30.9 },
+        // April + May synthesized from "_DailyData" rollups in the mock to
+        // mirror how the API now backfills months missing from _Data.
+        { month: "2026-04", slr:  2_644.28, povr: 10_649.20, vrporn: 11_724.84, total: 25_018.32, mom_pct: -43.0 },
+        { month: "2026-05", slr:    421.00, povr:  1_507.80, vrporn:  1_932.45, total:  3_861.25, mom_pct: -84.6 },
       ],
       catalog: [
         { platform: "povr",   total_scenes: 4749, avg_revenue_per_scene:  78.91, top_scene_revenue: 1_220.78 },
@@ -1181,17 +1183,19 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
     ] as unknown as T)
   }
   if (base === "/revenue/daily") {
-    // Build a 25-day stretch of fake VRPorn daily rows ending yesterday.
+    // Multi-platform daily rows ending yesterday — mirrors the production
+    // _DailyData state where POVR + SLR + VRPorn all push daily totals.
     const today = new Date()
     today.setUTCHours(0, 0, 0, 0)
     const rows: { date: string; platform: string; studio: string; revenue: number }[] = []
     for (let i = 25; i >= 1; i--) {
       const d = new Date(today.getTime() - i * 86_400_000)
       const iso = d.toISOString().slice(0, 10)
-      // Pseudo-random but stable amounts per day (seeded by date)
       const hash = [...iso].reduce((a, c) => a + c.charCodeAt(0), 0)
-      const rev = 450 + (hash % 350)
-      rows.push({ date: iso, platform: "vrporn", studio: "All", revenue: rev })
+      // Each platform contributes a stable pseudo-random amount per day.
+      rows.push({ date: iso, platform: "vrporn", studio: "All", revenue: 450 + (hash % 350) })
+      rows.push({ date: iso, platform: "povr",   studio: "All", revenue: 280 + (hash % 220) })
+      rows.push({ date: iso, platform: "slr",    studio: "VRH", revenue: 180 + (hash % 140) })
     }
     const yesterdayDate = rows[rows.length - 1].date
     const yesterdayRows = rows.filter(r => r.date === yesterdayDate)

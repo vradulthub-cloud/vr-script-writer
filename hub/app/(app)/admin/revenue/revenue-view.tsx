@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { ArrowLeft, TrendingDown, TrendingUp, Calendar, Filter } from "lucide-react"
+import { ArrowLeft, TrendingDown, TrendingUp, Calendar, Filter, Sparkles } from "lucide-react"
 import type {
   RevenueDashboard,
   SceneRevenueRow,
@@ -12,8 +12,7 @@ import type {
   DailyRevenueRow,
 } from "@/lib/api"
 
-// Date-range presets for the daily view. Values are ISO offsets from "today";
-// "all" means: don't filter, show whatever the API returned.
+// Date-range presets — affect daily-grain blocks only.
 type DateRange = "yesterday" | "7d" | "30d" | "month" | "all"
 
 const DATE_RANGE_LABELS: Record<DateRange, string> = {
@@ -27,9 +26,7 @@ const DATE_RANGE_LABELS: Record<DateRange, string> = {
 type StudioFilter = string | null
 const STUDIOS = ["FPVR", "VRH", "VRA", "NJOI"]
 
-// Studio identity colors — the brand spec keeps these as contextual anchors.
-// Platform tints reuse the studio palette: SLR ≈ lime (default), POVR purple,
-// VRPorn pink. Reasonable substitutes that don't collide with status colors.
+// Platform identity — reuses studio palette as anchors.
 const PLATFORM_COLOR: Record<string, string> = {
   slr:    "var(--color-lime)",
   povr:   "var(--color-vrh)",
@@ -41,6 +38,14 @@ const PLATFORM_LABEL: Record<string, string> = {
   povr:   "POVR",
   vrporn: "VRPorn",
 }
+
+const PLATFORM_SHORT: Record<string, string> = {
+  slr:    "SLR",
+  povr:   "POVR",
+  vrporn: "VRPorn",
+}
+
+const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 
 function fmtMoney(n: number, dollarsOnly = false): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
@@ -54,7 +59,7 @@ function fmtMoneyFull(n: number): string {
 }
 
 function fmtPct(n: number | null): string {
-  if (n === null) return "—"
+  if (n === null || !isFinite(n)) return "—"
   const sign = n > 0 ? "+" : ""
   return `${sign}${n.toFixed(1)}%`
 }
@@ -62,8 +67,38 @@ function fmtPct(n: number | null): string {
 function fmtMonth(ym: string): string {
   // "2026-03" → "Mar '26"
   const [y, m] = ym.split("-")
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-  return `${months[parseInt(m, 10) - 1]} '${y.slice(2)}`
+  return `${MONTHS_SHORT[parseInt(m, 10) - 1]} '${y.slice(2)}`
+}
+
+function fmtMonthLong(ym: string): string {
+  // "2026-03" → "March 2026"
+  const [y, m] = ym.split("-")
+  const long = ["January","February","March","April","May","June","July","August","September","October","November","December"]
+  return `${long[parseInt(m, 10) - 1]} ${y}`
+}
+
+function prettyDate(iso: string): string {
+  // "2026-04-30" → "Apr 30"
+  if (!iso || iso.length < 10) return iso
+  const [, m, d] = iso.split("-")
+  return `${MONTHS_SHORT[parseInt(m, 10) - 1]} ${parseInt(d, 10)}`
+}
+
+function daysInMonth(ym: string): number {
+  const [y, m] = ym.split("-").map(s => parseInt(s, 10))
+  return new Date(Date.UTC(y, m, 0)).getUTCDate()
+}
+
+// "2026-04-12" minus 7 days → "2026-04-05"
+function isoMinusDays(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00Z")
+  d.setUTCDate(d.getUTCDate() - days)
+  return d.toISOString().slice(0, 10)
+}
+
+function pctDelta(curr: number, prev: number): number | null {
+  if (!prev) return null
+  return ((curr - prev) / prev) * 100
 }
 
 export function RevenueView({
@@ -116,15 +151,9 @@ export function RevenueView({
   })()
 
   // ── Filtering wired across every filter-aware section ─────────────────────
-  // Conventions:
-  //   - Range filter: shrinks the date window for daily-grain sections only.
-  //     Lifetime sections (platform-comparison table, 12-month trend) stay
-  //     reference data — that's the whole point of having them.
-  //   - Platform filter: drops rows from other platforms in any section.
-  //   - Studio filter: drops rows from other studios in any section.
-  //                    Cross-platform daily rows often carry studio="All",
-  //                    so we keep those when a studio is selected (otherwise
-  //                    the chart would empty out for POVR/VRPorn).
+  // Range filter shrinks daily-grain blocks. Platform/studio drop rows
+  // everywhere applicable. The monthly-grain hero is unaffected by Range
+  // (Range is a daily concept) but does honor Platform.
 
   const cutoffDate = useMemo(() => {
     if (dateRange === "all" || dateRange === "month") return null
@@ -146,10 +175,6 @@ export function RevenueView({
     let out = crossPlatform
     if (studioFilter)   out = out.filter(r => r.studio.toUpperCase() === studioFilter.toUpperCase())
     if (platformFilter) {
-      // For cross-platform rows, "platform filter = SLR" means: only show
-      // scenes that earned on SLR (i.e. slr_total > 0). Otherwise filtering
-      // to a single platform makes the section meaningless (it's literally
-      // about cross-platform overlap).
       out = out.filter(r => {
         if (platformFilter === "slr")    return r.slr_total > 0
         if (platformFilter === "povr")   return r.povr_total > 0
@@ -172,9 +197,6 @@ export function RevenueView({
       monthRows     = monthRows.filter(r => r.platform === platformFilter)
     }
     if (studioFilter) {
-      // Daily rows where studio == "All" are platform-aggregates that we
-      // CAN'T disaggregate by studio (POVR/VRPorn data). Hide them when
-      // a specific studio is requested — only SLR has real per-studio rows.
       yesterdayRows = yesterdayRows.filter(r => r.studio.toUpperCase() === studioFilter.toUpperCase())
       monthRows     = monthRows.filter(r => r.studio.toUpperCase() === studioFilter.toUpperCase())
     }
@@ -188,26 +210,7 @@ export function RevenueView({
     }
   }, [daily, cutoffDate, platformFilter, studioFilter])
 
-  // Filter the totals strip — needs platform breakdown when "All" is selected
-  // or just one platform's totals when filtered.
-  const filteredTotals = useMemo(() => {
-    const platforms = platformFilter
-      ? dashboard.platforms.filter(p => p.platform === platformFilter)
-      : dashboard.platforms
-    const grand = platforms.reduce((acc, p) => acc + p.all_time, 0)
-    const ytd   = platforms.reduce((acc, p) => acc + p.ytd, 0)
-    return { platforms, grand, ytd }
-  }, [dashboard.platforms, platformFilter])
-
-  // Filter the platform comparison: when a platform is selected, collapse to
-  // just that row + total. Studio filter is N/A here (table is platform-grain).
-  const filteredPlatforms = useMemo(() => {
-    if (!platformFilter) return dashboard.platforms
-    return dashboard.platforms.filter(p => p.platform === platformFilter)
-  }, [dashboard.platforms, platformFilter])
-
-  // Filter the 12-month trend: when a platform is selected, zero out the
-  // other platforms' contribution so the bars only show the selected one.
+  // Monthly trend: zero out non-selected platforms when a platform is filtered.
   const filteredMonthly = useMemo(() => {
     if (!platformFilter) return dashboard.monthly_trend
     return dashboard.monthly_trend.map(p => ({
@@ -220,7 +223,12 @@ export function RevenueView({
     }))
   }, [dashboard.monthly_trend, platformFilter])
 
-  // Are any filters active? Used by the "Clear all" button.
+  // Filter the YoY platform table.
+  const filteredPlatforms = useMemo(() => {
+    if (!platformFilter) return dashboard.platforms
+    return dashboard.platforms.filter(p => p.platform === platformFilter)
+  }, [dashboard.platforms, platformFilter])
+
   const filtersActive = !!(platformFilter || studioFilter || dateRange !== "month")
   function clearAllFilters() {
     setPlatformFilter(null)
@@ -256,8 +264,7 @@ export function RevenueView({
         </div>
       </div>
 
-      {/* Sticky filter bar — single source of truth for date range, studio,
-          platform across all sections. */}
+      {/* Sticky filter bar */}
       <FilterBar
         dateRange={dateRange}
         setDateRange={setDateRange}
@@ -269,24 +276,37 @@ export function RevenueView({
         onClear={clearAllFilters}
       />
 
-      {/* Totals — collapses to single platform when filtered. */}
-      <TotalsStrip
-        totals={filteredTotals}
+      {/* Hero KPI band — month-led metrics */}
+      <HeroKpis
+        monthly={filteredMonthly}
+        daily={filteredDaily}
+        platformFilter={platformFilter}
+        grandTotal={filteredPlatforms.reduce((acc, p) => acc + p.all_time, 0)}
+        ytdTotal={filteredPlatforms.reduce((acc, p) => acc + p.ytd, 0)}
+      />
+
+      {/* Monthly hero — primary lens for cross-platform revenue */}
+      <MonthlyHero points={filteredMonthly} platformFilter={platformFilter} />
+
+      {/* Per-platform monthly cards — how each platform's portal shows it */}
+      <PlatformMonthlyCards
+        platforms={dashboard.platforms}
+        monthly={dashboard.monthly_trend}
         platformFilter={platformFilter}
       />
 
-      {/* Daily snapshot — driven by all three filters. */}
-      {filteredDaily && (filteredDaily.yesterday.length > 0 || filteredDaily.this_month.length > 0) && (
-        <DailySnapshot daily={filteredDaily} dateRange={dateRange}
-                       platformFilter={platformFilter} studioFilter={studioFilter} />
+      {/* Daily detail — only fully populated for VRPorn today; honors Range */}
+      {filteredDaily && (filteredDaily.this_month.length > 0 || filteredDaily.yesterday.length > 0) && (
+        <DailyDetail
+          daily={filteredDaily}
+          dateRange={dateRange}
+          platformFilter={platformFilter}
+          studioFilter={studioFilter}
+        />
       )}
 
-      {/* Per-platform comparison — collapses to selected platform when filtered. */}
-      <PlatformComparison platforms={filteredPlatforms}
-                          platformFilter={platformFilter} />
-
-      {/* 12-month trend — zeroes out non-selected platforms when filtered. */}
-      <MonthlyTrend points={filteredMonthly} platformFilter={platformFilter} />
+      {/* Year-over-year reference table */}
+      <PlatformComparison platforms={filteredPlatforms} platformFilter={platformFilter} />
 
       {/* Section toggle: Top scenes vs Cross-platform */}
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
@@ -337,7 +357,6 @@ function FilterBar({
       padding: "10px 14px",
       display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap",
     }}>
-      {/* Date range */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <Calendar size={11} style={{ color: "var(--color-text-faint)" }} />
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
@@ -346,7 +365,7 @@ function FilterBar({
         </span>
         <div style={{ display: "flex", gap: 0 }}>
           {ranges.map(r => {
-            const active = dateRange === r
+            const isActive = dateRange === r
             return (
               <button
                 key={r}
@@ -354,9 +373,9 @@ function FilterBar({
                 onClick={() => setDateRange(r)}
                 style={{
                   padding: "4px 10px", fontSize: 11, fontWeight: 600,
-                  background: active ? "var(--color-base)" : "transparent",
-                  color: active ? "var(--color-text)" : "var(--color-text-muted)",
-                  border: `1px solid ${active ? "var(--color-border)" : "transparent"}`,
+                  background: isActive ? "var(--color-base)" : "transparent",
+                  color: isActive ? "var(--color-text)" : "var(--color-text-muted)",
+                  border: `1px solid ${isActive ? "var(--color-border)" : "transparent"}`,
                   cursor: "pointer",
                 }}
               >
@@ -369,7 +388,6 @@ function FilterBar({
 
       <div style={{ height: 16, width: 1, background: "var(--color-border-subtle)" }} />
 
-      {/* Platform */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <Filter size={11} style={{ color: "var(--color-text-faint)" }} />
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
@@ -378,7 +396,7 @@ function FilterBar({
         </span>
         <div style={{ display: "flex", gap: 0 }}>
           {([null, "slr", "povr", "vrporn"] as (string | null)[]).map(opt => {
-            const active = platform === opt
+            const isActive = platform === opt
             return (
               <button
                 key={opt ?? "all"}
@@ -386,9 +404,9 @@ function FilterBar({
                 onClick={() => setPlatform(opt)}
                 style={{
                   padding: "4px 10px", fontSize: 11, fontWeight: 600,
-                  background: active ? "var(--color-base)" : "transparent",
-                  color: active ? "var(--color-text)" : "var(--color-text-muted)",
-                  border: `1px solid ${active ? "var(--color-border)" : "transparent"}`,
+                  background: isActive ? "var(--color-base)" : "transparent",
+                  color: isActive ? "var(--color-text)" : "var(--color-text-muted)",
+                  border: `1px solid ${isActive ? "var(--color-border)" : "transparent"}`,
                   cursor: "pointer",
                 }}
               >
@@ -410,7 +428,6 @@ function FilterBar({
 
       <div style={{ height: 16, width: 1, background: "var(--color-border-subtle)" }} />
 
-      {/* Studio */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
                        textTransform: "uppercase", color: "var(--color-text-faint)" }}>
@@ -440,7 +457,6 @@ function FilterBar({
         </div>
       </div>
 
-      {/* Clear all (only renders when any filter is non-default) */}
       {active && (
         <>
           <div style={{ flex: 1 }} />
@@ -466,68 +482,529 @@ function FilterBar({
 }
 
 // ---------------------------------------------------------------------------
-// Top totals strip — 4 huge $$$ tiles
+// Hero KPI band — month-led metrics with deltas + projections
 // ---------------------------------------------------------------------------
-function TotalsStrip({
-  totals, platformFilter,
+function HeroKpis({
+  monthly, daily, platformFilter, grandTotal, ytdTotal,
 }: {
-  totals: { platforms: { platform: string; all_time: number; ytd: number }[]; grand: number; ytd: number }
+  monthly: RevenueMonthlyPoint[]
+  daily: DailyRevenueSummary | null
   platformFilter: string | null
+  grandTotal: number
+  ytdTotal: number
 }) {
-  // When unfiltered: show Grand + YTD + top 2 platforms.
-  // When filtered: show that platform's all-time + YTD + top years.
-  const tiles = platformFilter
-    ? [
-        {
-          label: PLATFORM_LABEL[platformFilter] ?? platformFilter,
-          value: totals.grand,
-          sub: "all-time",
-        },
-        { label: "2026 YTD", value: totals.ytd, sub: "Jan – present" },
-      ]
-    : [
-        { label: "Grand Total", value: totals.grand, sub: "all platforms · all time" },
-        { label: "2026 YTD",    value: totals.ytd,   sub: "Jan – present" },
-        ...totals.platforms.slice(0, 2).map(p => ({
-          label: PLATFORM_LABEL[p.platform] ?? p.platform,
-          value: p.all_time,
-          sub: `2026 YTD ${fmtMoney(p.ytd, true)}`,
-        })),
-      ]
+  // Latest two monthly points anchor the MTD KPI + MoM.
+  const last = monthly[monthly.length - 1] ?? null
+  const prev = monthly[monthly.length - 2] ?? null
+
+  // Days elapsed in current month → projection.
+  // We assume the current month is whatever today's UTC month is. If the
+  // dataset is lagging (e.g. monthly_trend's last point is two months old),
+  // we still compute against the actual calendar to keep the math honest.
+  const today = new Date()
+  const dayOfMonth = today.getUTCDate()
+  const ymToday = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}`
+  const matchesCurrent = last?.month === ymToday
+  const dim = last ? daysInMonth(last.month) : 30
+  const projected = matchesCurrent && dayOfMonth > 0 && last
+    ? (last.total / dayOfMonth) * dim
+    : last?.total ?? 0
+
+  // Compare projection to previous full month
+  const projVsPrev = prev?.total ? pctDelta(projected, prev.total) : null
+
+  // Yesterday + WoW delta (only meaningful when daily is populated).
+  const yTotal = daily?.yesterday_total ?? 0
+  const yDate = daily?.yesterday_date ?? ""
+  const sevenBack = yDate ? isoMinusDays(yDate, 7) : ""
+  const wowRows = daily?.this_month.filter(r => r.date === sevenBack) ?? []
+  const wowTotal = wowRows.reduce((acc, r) => acc + r.revenue, 0)
+  const wowPct = wowTotal ? pctDelta(yTotal, wowTotal) : null
+
+  // Best day MTD (from daily rows). Source label comes from whichever
+  // platforms actually contribute rows in the current snapshot.
+  const dailyByDate = new Map<string, number>()
+  const dailyPlatformsPresent = new Set<string>()
+  for (const r of daily?.this_month ?? []) {
+    dailyByDate.set(r.date, (dailyByDate.get(r.date) ?? 0) + r.revenue)
+    dailyPlatformsPresent.add(r.platform)
+  }
+  let bestDate = ""
+  let bestTotal = 0
+  for (const [d, v] of dailyByDate.entries()) {
+    if (v > bestTotal) { bestDate = d; bestTotal = v }
+  }
+
+  // Human-readable label for "what platforms are contributing daily rows".
+  // Used in the bottom-line subcopy of the daily-derived KPIs so the user
+  // never wonders whether a number is partial.
+  const feedLabel = (() => {
+    if (platformFilter) return PLATFORM_LABEL[platformFilter] ?? platformFilter
+    if (dailyPlatformsPresent.size === 0) return "no daily feed yet"
+    if (dailyPlatformsPresent.size === 1) {
+      const p = [...dailyPlatformsPresent][0]
+      return `${PLATFORM_SHORT[p] ?? p}-only feed`
+    }
+    return [...dailyPlatformsPresent].sort()
+      .map(p => PLATFORM_SHORT[p] ?? p).join(" + ")
+  })()
+
+  // Build tiles. Always 4-up so the strip stays rhythmic.
+  const monthLabel = last ? fmtMonthLong(last.month) : "—"
+  const tiles: KpiTile[] = [
+    {
+      kicker: matchesCurrent ? `${monthLabel} · MTD` : monthLabel,
+      value:  fmtMoneyFull(last?.total ?? 0),
+      delta:  last?.mom_pct ?? null,
+      sub:    prev ? `vs ${fmtMonthLong(prev.month)} ${fmtMoney(prev.total, true)}` : "—",
+      tint:   "default",
+    },
+    {
+      kicker: matchesCurrent ? "Projected EOM" : "Last full month",
+      value:  fmtMoneyFull(matchesCurrent ? projected : (prev?.total ?? 0)),
+      delta:  matchesCurrent ? projVsPrev : null,
+      sub:    matchesCurrent
+        ? `${dayOfMonth}/${dim} days elapsed · linear pace`
+        : prev ? `${fmtMonthLong(prev.month)} closed` : "—",
+      tint:   "muted",
+    },
+    {
+      kicker: yDate ? `Yesterday · ${prettyDate(yDate)}` : "Yesterday",
+      value:  fmtMoneyFull(yTotal),
+      delta:  wowPct,
+      sub:    wowPct !== null ? `vs ${prettyDate(sevenBack)} ${fmtMoney(wowTotal, true)}` : feedLabel,
+      tint:   "default",
+    },
+    {
+      kicker: "Best day MTD",
+      value:  bestTotal ? fmtMoneyFull(bestTotal) : "—",
+      delta:  null,
+      sub:    bestDate ? `${prettyDate(bestDate)} · ${feedLabel}` : "no daily rows",
+      tint:   "muted",
+    },
+  ]
+
+  // Footer line with grand totals — keeps the historical anchor visible.
+  return (
+    <div>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))`,
+        gap: 1,
+        background: "var(--color-border-subtle)",
+        border: "1px solid var(--color-border-subtle)",
+      }}>
+        {tiles.map((t, i) => (
+          <KpiTileView key={i} tile={t} />
+        ))}
+      </div>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "baseline",
+        marginTop: 8, fontSize: 11, color: "var(--color-text-muted)",
+      }}>
+        <div>
+          <span style={{ color: "var(--color-text-faint)", letterSpacing: "0.06em",
+                          textTransform: "uppercase", fontWeight: 700, fontSize: 10 }}>
+            All-time
+          </span>{" "}
+          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--color-text)" }}>
+            {fmtMoneyFull(grandTotal)}
+          </span>
+        </div>
+        <div>
+          <span style={{ color: "var(--color-text-faint)", letterSpacing: "0.06em",
+                          textTransform: "uppercase", fontWeight: 700, fontSize: 10 }}>
+            YTD
+          </span>{" "}
+          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--color-text)" }}>
+            {fmtMoneyFull(ytdTotal)}
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type KpiTile = {
+  kicker: string
+  value:  string
+  delta:  number | null
+  sub:    string
+  tint:   "default" | "muted"
+}
+
+function KpiTileView({ tile }: { tile: KpiTile }) {
+  const TrendIcon = tile.delta === null
+    ? null
+    : tile.delta >= 0 ? TrendingUp : TrendingDown
+  const trendColor = tile.delta === null
+    ? "var(--color-text-faint)"
+    : tile.delta >= 0 ? "var(--color-ok)" : "var(--color-err)"
   return (
     <div style={{
-      display: "grid",
-      // Adapt grid to actual tile count so a filtered-down strip doesn't
-      // leave hollow space. 2 tiles → 2 cols, 4 tiles → 4 cols.
-      gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))`,
-      gap: 1,
-      background: "var(--color-border-subtle)",
-      border: "1px solid var(--color-border-subtle)",
+      background: tile.tint === "muted" ? "var(--color-base)" : "var(--color-surface)",
+      padding: "20px 20px",
+      display: "flex", flexDirection: "column", gap: 4,
     }}>
-      {tiles.map((t, i) => (
-        <div key={i} style={{
-          background: "var(--color-surface)", padding: "20px 20px",
-          display: "flex", flexDirection: "column", gap: 4,
-        }}>
-          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
-                        textTransform: "uppercase", color: "var(--color-text-faint)" }}>
-            {t.label}
-          </div>
-          <div style={{ fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 600,
-                        letterSpacing: "-0.015em", color: "var(--color-text)" }}>
-            {fmtMoney(t.value)}
-          </div>
-          <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{t.sub}</div>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
+                    textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+        {tile.kicker}
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div style={{ fontFamily: "var(--font-display)", fontSize: 30, fontWeight: 600,
+                      letterSpacing: "-0.015em", color: "var(--color-text)" }}>
+          {tile.value}
         </div>
-      ))}
+        {tile.delta !== null && TrendIcon && (
+          <span style={{
+            fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 700,
+            color: trendColor, display: "flex", alignItems: "center", gap: 2,
+          }}>
+            <TrendIcon size={12} style={{ verticalAlign: -1 }} />
+            {fmtPct(tile.delta)}
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{tile.sub}</div>
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Daily snapshot — yesterday's $ + this-month-daily mini chart
+// Monthly hero — taller, current-month highlighted, MoM% under each bar
 // ---------------------------------------------------------------------------
-function DailySnapshot({
+function MonthlyHero({
+  points, platformFilter,
+}: {
+  points: RevenueMonthlyPoint[]
+  platformFilter: string | null
+}) {
+  // Trim leading-zero months when filtered to a platform that started
+  // mid-period (e.g. VRPorn launched Sep 2025).
+  const trimmed = useMemo(() => {
+    if (!platformFilter) return points
+    let i = 0
+    while (i < points.length && points[i].total === 0) i++
+    return points.slice(i)
+  }, [points, platformFilter])
+
+  if (trimmed.length === 0) {
+    return (
+      <Section title="Monthly trend" subtitle="No data in range">
+        <Empty>No months match this filter.</Empty>
+      </Section>
+    )
+  }
+
+  const max = Math.max(1, ...trimmed.map(p => p.total))
+  const lastIdx = trimmed.length - 1
+  const subtitle = platformFilter
+    ? `${PLATFORM_LABEL[platformFilter] ?? platformFilter} only · ${trimmed.length} months · current month highlighted`
+    : `Stacked by platform · ${trimmed.length} months · current month highlighted`
+
+  // Y-axis tick lines at 0 / 50% / 100% to give scale anchoring.
+  const ticks = [0, 0.5, 1]
+  const chartHeight = 240
+
+  return (
+    <Section title="Monthly trend" subtitle={subtitle}>
+      <div style={{ position: "relative", padding: "8px 0 0 0" }}>
+        {/* Y-axis backdrop lines */}
+        <div style={{ position: "absolute", inset: "8px 0 70px 0", pointerEvents: "none" }}>
+          {ticks.map((t, i) => (
+            <div key={i} style={{
+              position: "absolute", left: 0, right: 0,
+              bottom: `${t * 100}%`,
+              borderTop: i === 0
+                ? "1px solid var(--color-border-subtle)"
+                : "1px dashed var(--color-border-subtle)",
+              opacity: i === 0 ? 1 : 0.5,
+            }} />
+          ))}
+          <div style={{
+            position: "absolute", left: 0, top: 0, fontSize: 9,
+            fontFamily: "var(--font-mono)", color: "var(--color-text-faint)",
+          }}>
+            {fmtMoney(max, true)}
+          </div>
+          <div style={{
+            position: "absolute", left: 0, top: "50%", fontSize: 9,
+            fontFamily: "var(--font-mono)", color: "var(--color-text-faint)",
+            transform: "translateY(-50%)",
+          }}>
+            {fmtMoney(max / 2, true)}
+          </div>
+        </div>
+
+        {/* Bars */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${trimmed.length}, minmax(0, 1fr))`,
+          gap: 6, alignItems: "end",
+          paddingLeft: 36, // room for y-axis labels
+          height: chartHeight,
+        }}>
+          {trimmed.map((p, i) => {
+            const isCurrent = i === lastIdx
+            const slrH  = (p.slr  / max) * (chartHeight - 60)
+            const povrH = (p.povr / max) * (chartHeight - 60)
+            const vrpH  = (p.vrporn / max) * (chartHeight - 60)
+            return (
+              <div key={p.month} style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 4 }}>
+                {/* Total label above bar */}
+                <div style={{
+                  fontSize: isCurrent ? 11 : 10,
+                  color: isCurrent ? "var(--color-text)" : "var(--color-text-muted)",
+                  textAlign: "center",
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: isCurrent ? 700 : 600,
+                  letterSpacing: isCurrent ? "-0.005em" : 0,
+                }}>
+                  {fmtMoney(p.total, true)}
+                </div>
+                {/* Stacked bars (column-reverse so SLR is at bottom) */}
+                <div style={{
+                  display: "flex", flexDirection: "column-reverse",
+                  height: chartHeight - 60,
+                  justifyContent: "flex-start",
+                  position: "relative",
+                  outline: isCurrent ? "1px solid var(--color-text)" : "none",
+                  outlineOffset: 1,
+                }}>
+                  {p.slr > 0    && <div style={{ height: slrH,  background: PLATFORM_COLOR.slr,    opacity: isCurrent ? 1 : 0.85 }} title={`SLR ${fmtMoney(p.slr, true)}`} />}
+                  {p.povr > 0   && <div style={{ height: povrH, background: PLATFORM_COLOR.povr,   opacity: isCurrent ? 1 : 0.85 }} title={`POVR ${fmtMoney(p.povr, true)}`} />}
+                  {p.vrporn > 0 && <div style={{ height: vrpH,  background: PLATFORM_COLOR.vrporn, opacity: isCurrent ? 1 : 0.85 }} title={`VRPorn ${fmtMoney(p.vrporn, true)}`} />}
+                </div>
+                {/* Month label */}
+                <div style={{
+                  fontSize: 10,
+                  color: isCurrent ? "var(--color-text)" : "var(--color-text-muted)",
+                  fontWeight: isCurrent ? 700 : 500,
+                  textAlign: "center",
+                }}>
+                  {fmtMonth(p.month)}
+                </div>
+                {/* MoM% delta */}
+                <div style={{
+                  fontSize: 10, textAlign: "center",
+                  color: p.mom_pct === null
+                    ? "var(--color-text-faint)"
+                    : p.mom_pct >= 0 ? "var(--color-ok)" : "var(--color-err)",
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: isCurrent ? 700 : 500,
+                }}>
+                  {p.mom_pct !== null && (p.mom_pct >= 0
+                    ? <TrendingUp size={9} style={{ display: "inline", verticalAlign: -1, marginRight: 2 }} />
+                    : <TrendingDown size={9} style={{ display: "inline", verticalAlign: -1, marginRight: 2 }} />)}
+                  {fmtPct(p.mom_pct)}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 16, fontSize: 11, color: "var(--color-text-muted)",
+                    paddingTop: 12, marginTop: 8, borderTop: "1px solid var(--color-border-subtle)" }}>
+        {(["slr", "povr", "vrporn"] as const).map(p => (
+          <span key={p} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 10, height: 10, background: PLATFORM_COLOR[p], display: "inline-block" }} />
+            {PLATFORM_LABEL[p]}
+          </span>
+        ))}
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 10, color: "var(--color-text-faint)" }}>
+          <span style={{ display: "inline-block", width: 10, height: 10, border: "1px solid var(--color-text)",
+                         marginRight: 6, verticalAlign: "middle" }} />
+          current month
+        </span>
+      </div>
+    </Section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Per-platform monthly cards — one card per platform (SLR, POVR, VRPorn)
+// ---------------------------------------------------------------------------
+function PlatformMonthlyCards({
+  platforms, monthly, platformFilter,
+}: {
+  platforms: RevenueDashboard["platforms"]
+  monthly: RevenueMonthlyPoint[]
+  platformFilter: string | null
+}) {
+  // Order: SLR, POVR, VRPorn (matches platform color sequence + chronology)
+  const order = ["slr", "povr", "vrporn"]
+  const ordered = order
+    .map(slug => platforms.find(p => p.platform === slug))
+    .filter(Boolean) as RevenueDashboard["platforms"]
+
+  const visible = platformFilter ? ordered.filter(p => p.platform === platformFilter) : ordered
+  if (visible.length === 0) return null
+
+  return (
+    <Section
+      title="Per-platform"
+      subtitle="This month vs last · 12-month sparkline · all-time anchor"
+    >
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${visible.length}, minmax(0, 1fr))`,
+        gap: 1,
+        background: "var(--color-border-subtle)",
+        margin: -16, // bleed into Section's padding for a cleaner edge-to-edge grid
+      }}>
+        {visible.map(p => (
+          <PlatformCard key={p.platform} platform={p} monthly={monthly} />
+        ))}
+      </div>
+    </Section>
+  )
+}
+
+function PlatformCard({
+  platform, monthly,
+}: {
+  platform: RevenueDashboard["platforms"][number]
+  monthly: RevenueMonthlyPoint[]
+}) {
+  const slug = platform.platform
+  const series = monthly.map(m => ({
+    month: m.month,
+    value: slug === "slr" ? m.slr : slug === "povr" ? m.povr : m.vrporn,
+  }))
+  // Trim leading zeros (e.g. VRPorn before launch).
+  let firstNonZero = 0
+  while (firstNonZero < series.length && series[firstNonZero].value === 0) firstNonZero++
+  const trimmed = series.slice(firstNonZero)
+
+  const last = trimmed[trimmed.length - 1]
+  const prev = trimmed[trimmed.length - 2]
+  const mom = prev?.value ? pctDelta(last?.value ?? 0, prev.value) : null
+  const max = Math.max(1, ...trimmed.map(s => s.value))
+
+  // Lifetime + recency stats
+  const last3 = trimmed.slice(-3)
+  const last3Avg = last3.length ? last3.reduce((a, s) => a + s.value, 0) / last3.length : 0
+
+  const color = PLATFORM_COLOR[slug] ?? "var(--color-text-faint)"
+  const TrendIcon = mom === null
+    ? null
+    : mom >= 0 ? TrendingUp : TrendingDown
+  const trendColor = mom === null
+    ? "var(--color-text-faint)"
+    : mom >= 0 ? "var(--color-ok)" : "var(--color-err)"
+
+  return (
+    <div style={{
+      background: "var(--color-surface)",
+      padding: 18,
+      display: "flex", flexDirection: "column", gap: 12,
+    }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ width: 10, height: 10, background: color, display: "inline-block" }} />
+          <span style={{ fontWeight: 700, fontSize: 13, letterSpacing: "0.02em" }}>
+            {PLATFORM_LABEL[slug]}
+          </span>
+        </div>
+        <span style={{
+          fontSize: 10, fontFamily: "var(--font-mono)",
+          color: "var(--color-text-faint)", letterSpacing: "0.04em",
+        }}>
+          {trimmed.length} mo
+        </span>
+      </div>
+
+      {/* This month $ + delta */}
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
+                      textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+          {last ? fmtMonthLong(last.month) : "—"}
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 2 }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 600,
+                        letterSpacing: "-0.015em" }}>
+            {fmtMoneyFull(last?.value ?? 0)}
+          </div>
+          {mom !== null && TrendIcon && (
+            <span style={{
+              fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 700,
+              color: trendColor, display: "flex", alignItems: "center", gap: 2,
+            }}>
+              <TrendIcon size={11} style={{ verticalAlign: -1 }} />
+              {fmtPct(mom)}
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
+          {prev ? `vs ${fmtMonthLong(prev.month)} ${fmtMoney(prev.value, true)}` : "—"}
+        </div>
+      </div>
+
+      {/* Sparkline — last N months as mini bars */}
+      <div>
+        <div style={{
+          display: "grid", gap: 2,
+          gridTemplateColumns: `repeat(${trimmed.length}, minmax(0, 1fr))`,
+          alignItems: "end", height: 44,
+        }}>
+          {trimmed.map((s, i) => {
+            const h = (s.value / max) * 40
+            const isLast = i === trimmed.length - 1
+            return (
+              <div key={s.month}
+                   title={`${fmtMonth(s.month)} · ${fmtMoneyFull(s.value)}`}
+                   style={{
+                     height: Math.max(2, h),
+                     background: color,
+                     opacity: isLast ? 1 : 0.55,
+                   }}
+              />
+            )
+          })}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4,
+                      fontSize: 10, fontFamily: "var(--font-mono)",
+                      color: "var(--color-text-faint)" }}>
+          <span>{trimmed[0] ? fmtMonth(trimmed[0].month) : ""}</span>
+          <span>{last ? fmtMonth(last.month) : ""}</span>
+        </div>
+      </div>
+
+      {/* Footer stats */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8,
+        paddingTop: 10, borderTop: "1px solid var(--color-border-subtle)",
+        fontSize: 11,
+      }}>
+        <Stat label="All-time" value={fmtMoney(platform.all_time, true)} />
+        <Stat label="YTD" value={fmtMoney(platform.ytd, true)} />
+        <Stat label="3-mo avg" value={fmtMoney(last3Avg, true)} />
+      </div>
+    </div>
+  )
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em",
+                      textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+        {label}
+      </span>
+      <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 12 }}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Daily detail — bars per day + cumulative MTD line; honors Range filter
+// ---------------------------------------------------------------------------
+function DailyDetail({
   daily, dateRange, platformFilter, studioFilter,
 }: {
   daily: DailyRevenueSummary
@@ -535,8 +1012,9 @@ function DailySnapshot({
   platformFilter: string | null
   studioFilter: StudioFilter
 }) {
-  // Group daily rows by date so the mini-chart x-axis is one bar per day,
-  // even when multiple platforms contribute (currently only VRPorn).
+  void studioFilter
+  // Group by date so the chart x-axis is one bar per day even when multiple
+  // platforms contribute (today only VRPorn, but we render as if all could).
   const byDate = new Map<string, { date: string; total: number; rows: DailyRevenueRow[] }>()
   for (const r of daily.this_month) {
     const e = byDate.get(r.date) ?? { date: r.date, total: 0, rows: [] }
@@ -545,104 +1023,148 @@ function DailySnapshot({
     byDate.set(r.date, e)
   }
   const days = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
-  const max = Math.max(1, ...days.map(d => d.total))
 
-  // Yesterday's per-platform breakdown (could be one row "All / vrporn" today
-  // and grow to three rows once POVR + SLR daily land in _DailyData).
-  const ySorted = [...daily.yesterday].sort((a, b) => b.revenue - a.revenue)
+  if (days.length === 0) {
+    return (
+      <Section title="Daily detail" subtitle="No daily rows in this range">
+        <Empty>Daily data resumes when scrapes land. (POVR & SLR daily are still being wired.)</Empty>
+      </Section>
+    )
+  }
+
+  const max = Math.max(1, ...days.map(d => d.total))
+  // Cumulative running total
+  let runSum = 0
+  const cumulative = days.map(d => { runSum += d.total; return { date: d.date, sum: runSum } })
+  const maxCum = Math.max(1, runSum)
+
+  // Stats banner for this range
+  const total = days.reduce((acc, d) => acc + d.total, 0)
+  const avg = total / days.length
+  const bestIdx = days.reduce((a, d, i) => d.total > days[a].total ? i : a, 0)
+
+  const subtitle = dateRange === "month"
+    ? `${days.length} days · daily bars + cumulative MTD line`
+    : `${DATE_RANGE_LABELS[dateRange]} · ${days.length} days · daily bars + cumulative line`
 
   return (
-    <Section
-      title="Daily snapshot"
-      subtitle={`Yesterday · ${prettyDate(daily.yesterday_date)}`}
-    >
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(160px, 220px) 1fr", gap: 24, alignItems: "center" }}>
-        {/* Yesterday tile — big number + per-platform breakdown */}
-        <div>
-          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
-                        textTransform: "uppercase", color: "var(--color-text-faint)" }}>
-            Yesterday
-          </div>
-          <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 600,
-                        letterSpacing: "-0.015em", color: "var(--color-text)", marginTop: 4 }}>
-            {fmtMoneyFull(daily.yesterday_total)}
-          </div>
-          <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 6 }}>
-            {ySorted.map((r, i) => (
-              <div key={`${r.platform}-${r.studio}-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                <span>
-                  <span style={{
-                    display: "inline-block", width: 6, height: 6, borderRadius: 1,
-                    background: PLATFORM_COLOR[r.platform] ?? "var(--color-text-faint)",
-                    marginRight: 6, verticalAlign: "middle",
-                  }} />
-                  {PLATFORM_LABEL[r.platform] ?? r.platform}
-                  {r.studio && r.studio !== "All" && <span style={{ color: "var(--color-text-faint)" }}> / {r.studio}</span>}
-                </span>
-                <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>{fmtMoneyFull(r.revenue)}</span>
-              </div>
-            ))}
-          </div>
+    <Section title="Daily detail" subtitle={subtitle}>
+      {/* Quick stats line above chart */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+        gap: 1, background: "var(--color-border-subtle)",
+        marginBottom: 12,
+      }}>
+        <MiniStat
+          kicker="Range total"
+          value={fmtMoneyFull(total)}
+          sub={platformFilter ? PLATFORM_LABEL[platformFilter] : "All platforms (where reported)"}
+        />
+        <MiniStat
+          kicker="Daily avg"
+          value={fmtMoneyFull(avg)}
+          sub={`across ${days.length} days`}
+        />
+        <MiniStat
+          kicker="Best day"
+          value={fmtMoneyFull(days[bestIdx].total)}
+          sub={prettyDate(days[bestIdx].date)}
+          tone="ok"
+        />
+        <MiniStat
+          kicker="Yesterday"
+          value={fmtMoneyFull(daily.yesterday_total)}
+          sub={prettyDate(daily.yesterday_date)}
+        />
+      </div>
+
+      {/* Chart: bars + cumulative line overlay */}
+      <div style={{ position: "relative", height: 140 }}>
+        {/* Y-axis baseline */}
+        <div style={{
+          position: "absolute", left: 0, right: 0, bottom: 22,
+          height: 1, background: "var(--color-border-subtle)",
+        }} />
+
+        {/* Bars */}
+        <div style={{
+          display: "grid", gap: 2,
+          gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`,
+          alignItems: "end",
+          height: 100,
+          position: "relative",
+        }}>
+          {days.map((d, i) => {
+            const h = (d.total / max) * 96
+            const isBest = i === bestIdx
+            return (
+              <div key={d.date}
+                title={`${prettyDate(d.date)} · ${fmtMoneyFull(d.total)}`}
+                style={{
+                  height: Math.max(2, h),
+                  background: PLATFORM_COLOR.vrporn,
+                  opacity: isBest ? 1 : 0.78,
+                  outline: isBest ? "1px solid var(--color-text)" : "none",
+                  outlineOffset: 0,
+                }}
+              />
+            )
+          })}
         </div>
 
-        {/* This-month daily bar chart */}
-        <div style={{ borderLeft: "1px solid var(--color-border-subtle)", paddingLeft: 24 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
-                          textTransform: "uppercase", color: "var(--color-text-faint)" }}>
-              {dateRange === "month"
-                ? `This month · ${fmtMonth(daily.yesterday_date.slice(0, 7))}`
-                : DATE_RANGE_LABELS[dateRange]}
-              <span style={{ marginLeft: 8, color: "var(--color-text-faint)", fontWeight: 500, letterSpacing: 0 }}>
-                · {days.length} days
-              </span>
-            </div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600 }}>
-              {fmtMoneyFull(daily.this_month_total)}
-            </div>
-          </div>
-          {days.length === 0 ? (
-            <Empty>No daily rows yet for this month.</Empty>
-          ) : (
-            <div style={{
-              display: "grid", gap: 3,
-              gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`,
-              alignItems: "end", height: 80,
-            }}>
-              {days.map(d => {
-                const h = (d.total / max) * 76
-                return (
-                  <div key={d.date}
-                    title={`${prettyDate(d.date)} · ${fmtMoneyFull(d.total)}`}
-                    style={{
-                      height: Math.max(2, h),
-                      background: PLATFORM_COLOR.vrporn,
-                      opacity: 0.85,
-                      transition: "opacity 120ms ease",
-                    }}
-                  />
-                )
-              })}
-            </div>
-          )}
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4,
-                        fontSize: 10, color: "var(--color-text-faint)", fontFamily: "var(--font-mono)" }}>
-            <span>{days.length > 0 ? prettyDate(days[0].date) : ""}</span>
-            <span>{days.length > 0 ? prettyDate(days[days.length - 1].date) : ""}</span>
-          </div>
+        {/* Cumulative line overlay (SVG) */}
+        <svg
+          viewBox={`0 0 ${days.length} 100`}
+          preserveAspectRatio="none"
+          style={{ position: "absolute", inset: "0 0 40px 0", height: 100, width: "100%", pointerEvents: "none" }}
+        >
+          <polyline
+            fill="none"
+            stroke="var(--color-lime)"
+            strokeWidth={1.4}
+            vectorEffect="non-scaling-stroke"
+            points={cumulative.map((c, i) => `${i + 0.5},${100 - (c.sum / maxCum) * 96}`).join(" ")}
+          />
+        </svg>
+
+        {/* X-axis range labels */}
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0,
+                      display: "flex", justifyContent: "space-between",
+                      fontSize: 10, fontFamily: "var(--font-mono)",
+                      color: "var(--color-text-faint)" }}>
+          <span>{prettyDate(days[0].date)}</span>
+          <span style={{ color: "var(--color-lime)" }}>
+            <Sparkles size={9} style={{ display: "inline", verticalAlign: -1, marginRight: 4 }} />
+            cumulative {fmtMoney(runSum, true)}
+          </span>
+          <span>{prettyDate(days[days.length - 1].date)}</span>
         </div>
       </div>
     </Section>
   )
 }
 
-function prettyDate(iso: string): string {
-  // "2026-04-30" → "Apr 30"
-  if (!iso || iso.length < 10) return iso
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-  const [y, m, d] = iso.split("-")
-  void y
-  return `${months[parseInt(m, 10) - 1]} ${parseInt(d, 10)}`
+function MiniStat({ kicker, value, sub, tone }: {
+  kicker: string; value: string; sub: string; tone?: "ok"
+}) {
+  return (
+    <div style={{ background: "var(--color-surface)", padding: "10px 12px" }}>
+      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em",
+                    textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+        {kicker}
+      </div>
+      <div style={{
+        fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 700,
+        color: tone === "ok" ? "var(--color-ok)" : "var(--color-text)",
+        marginTop: 2,
+      }}>
+        {value}
+      </div>
+      <div style={{ fontSize: 10, color: "var(--color-text-muted)", marginTop: 2 }}>
+        {sub}
+      </div>
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -654,7 +1176,6 @@ function PlatformComparison({
   platforms: RevenueDashboard["platforms"]
   platformFilter: string | null
 }) {
-  // Years across all rendered platforms, sorted ascending
   const years = useMemo(() => {
     const s = new Set<string>()
     for (const p of platforms) for (const y of Object.keys(p.yearly)) s.add(y)
@@ -662,7 +1183,7 @@ function PlatformComparison({
   }, [platforms])
 
   return (
-    <Section title="Platform comparison" subtitle="Year-over-year revenue per platform · totals row at bottom">
+    <Section title="Year-over-year" subtitle="Lifetime reference · totals row at bottom">
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
@@ -699,7 +1220,6 @@ function PlatformComparison({
                 })}
               </tr>
             ))}
-            {/* Totals row — only renders for the unfiltered (multi-platform) view */}
             {!platformFilter && platforms.length > 1 && (
               <tr style={{ borderTop: "2px solid var(--color-border)", background: "var(--color-base)" }}>
                 <td style={{ ...tdStyle, fontWeight: 700, textTransform: "uppercase",
@@ -722,87 +1242,6 @@ function PlatformComparison({
             )}
           </tbody>
         </table>
-      </div>
-    </Section>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// 12-month rolling trend — stacked bars + MoM delta
-// ---------------------------------------------------------------------------
-function MonthlyTrend({
-  points, platformFilter,
-}: {
-  points: RevenueMonthlyPoint[]
-  platformFilter: string | null
-}) {
-  // When filtered to a single platform that didn't exist in the earlier
-  // months of the trend (e.g. VRPorn launched Sep 2025), trim leading
-  // months whose total is 0 so the chart focuses on the platform's
-  // actual lifetime instead of months of empty bars.
-  const trimmed = useMemo(() => {
-    if (!platformFilter) return points
-    let i = 0
-    while (i < points.length && points[i].total === 0) i++
-    return points.slice(i)
-  }, [points, platformFilter])
-
-  const max = Math.max(1, ...trimmed.map(p => p.total))
-  const subtitle = platformFilter
-    ? `${PLATFORM_LABEL[platformFilter] ?? platformFilter} only · MoM delta below each bar`
-    : "Stacked monthly revenue · MoM delta below each bar"
-  // Use the trimmed series for rendering
-  points = trimmed
-  return (
-    <Section title="12-month trend" subtitle={subtitle}>
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))`,
-        gap: 8, alignItems: "end",
-        padding: "16px 0", minHeight: 220,
-      }}>
-        {points.map(p => {
-          const slrH = (p.slr / max) * 160
-          const povrH = (p.povr / max) * 160
-          const vrpH = (p.vrporn / max) * 160
-          return (
-            <div key={p.month} style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 4 }}>
-              <div style={{ fontSize: 10, color: "var(--color-text)", textAlign: "center",
-                            fontFamily: "var(--font-mono)", fontWeight: 600 }}>
-                {fmtMoney(p.total, true)}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column-reverse", height: 160,
-                            justifyContent: "flex-start" }}>
-                {p.slr > 0    && <div style={{ height: slrH,  background: PLATFORM_COLOR.slr }}    title={`SLR ${fmtMoney(p.slr, true)}`} />}
-                {p.povr > 0   && <div style={{ height: povrH, background: PLATFORM_COLOR.povr }}   title={`POVR ${fmtMoney(p.povr, true)}`} />}
-                {p.vrporn > 0 && <div style={{ height: vrpH,  background: PLATFORM_COLOR.vrporn }} title={`VRPorn ${fmtMoney(p.vrporn, true)}`} />}
-              </div>
-              <div style={{ fontSize: 10, color: "var(--color-text-muted)", textAlign: "center" }}>
-                {fmtMonth(p.month)}
-              </div>
-              <div style={{ fontSize: 10, textAlign: "center",
-                            color: p.mom_pct === null
-                              ? "var(--color-text-faint)"
-                              : p.mom_pct >= 0 ? "var(--color-ok)" : "var(--color-err)",
-                            fontFamily: "var(--font-mono)" }}>
-                {p.mom_pct !== null && (p.mom_pct >= 0
-                  ? <TrendingUp size={9} style={{ display: "inline", verticalAlign: -1, marginRight: 2 }} />
-                  : <TrendingDown size={9} style={{ display: "inline", verticalAlign: -1, marginRight: 2 }} />)}
-                {fmtPct(p.mom_pct)}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      {/* Legend */}
-      <div style={{ display: "flex", gap: 16, fontSize: 11, color: "var(--color-text-muted)",
-                    paddingTop: 8, borderTop: "1px solid var(--color-border-subtle)" }}>
-        {(["slr", "povr", "vrporn"] as const).map(p => (
-          <span key={p} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 10, height: 10, background: PLATFORM_COLOR[p], display: "inline-block" }} />
-            {PLATFORM_LABEL[p]}
-          </span>
-        ))}
       </div>
     </Section>
   )
@@ -846,7 +1285,7 @@ function TopScenesTable({ scenes }: { scenes: SceneRevenueRow[] }) {
                   background: PLATFORM_COLOR[s.platform] ?? "var(--color-text-faint)",
                   marginRight: 6, verticalAlign: "middle",
                 }} />
-                {PLATFORM_LABEL[s.platform] ?? s.platform}
+                {PLATFORM_SHORT[s.platform] ?? s.platform}
               </td>
               <td style={{ ...tdStyle, textAlign: "right", fontFamily: "var(--font-mono)",
                             color: "var(--color-text-muted)" }}>
