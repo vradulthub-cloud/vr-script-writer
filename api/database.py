@@ -429,6 +429,50 @@ BEGIN
     );
 END;
 
+-- Compliance legal files index — a mirror of every paperwork artifact on
+-- MEGA's `{SCENE_ID}/Legal/` folders. Populated by the scrape_mega_legal.py
+-- worker (nightly via Task Scheduler). The Database view queries this
+-- table instead of doing a live S3 list per page-load — turns a 60-second
+-- bucket walk into a sub-millisecond DB lookup.
+CREATE TABLE IF NOT EXISTS compliance_legal_files (
+    -- Source identity
+    studio TEXT NOT NULL,                -- 4-letter code: FPVR / VRH / VRA / NJOI
+    scene_id TEXT NOT NULL,              -- e.g. "VRH0762"
+    key TEXT NOT NULL,                   -- full bucket key, e.g. "VRH0762/Legal/foo.pdf"
+    filename TEXT NOT NULL,              -- last path segment
+    size INTEGER NOT NULL DEFAULT 0,     -- bytes
+    last_modified TEXT NOT NULL DEFAULT '', -- ISO8601 UTC, from S3 LastModified
+
+    -- Server-side classification (cheap heuristics, refreshed every scan)
+    guessed_talent TEXT DEFAULT '',      -- best-effort name from filename
+    doc_kind TEXT DEFAULT '',            -- "agreement" / "w9" / "2257" / "id_photo" / ...
+
+    -- Link to a structured record once the bulk importer has ingested it
+    imported_signature_id INTEGER DEFAULT NULL, -- compliance_signatures.id
+
+    -- Bookkeeping
+    indexed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+
+    PRIMARY KEY (studio, key)
+);
+CREATE INDEX IF NOT EXISTS idx_legal_files_scene    ON compliance_legal_files(scene_id);
+CREATE INDEX IF NOT EXISTS idx_legal_files_filename ON compliance_legal_files(filename);
+CREATE INDEX IF NOT EXISTS idx_legal_files_kind     ON compliance_legal_files(doc_kind);
+CREATE INDEX IF NOT EXISTS idx_legal_files_talent   ON compliance_legal_files(guessed_talent);
+CREATE INDEX IF NOT EXISTS idx_legal_files_imported ON compliance_legal_files(imported_signature_id);
+
+-- Bookkeeping for the scraper itself — when did the last full scan finish,
+-- which studios were covered, how many files indexed.
+CREATE TABLE IF NOT EXISTS compliance_legal_scan_meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),  -- single-row table
+    last_scan_at TEXT DEFAULT '',
+    last_scan_duration_ms INTEGER DEFAULT 0,
+    last_scan_files INTEGER DEFAULT 0,
+    last_scan_studios TEXT DEFAULT '',      -- comma-separated codes
+    last_scan_errors TEXT DEFAULT ''        -- JSON-encoded list (empty list when clean)
+);
+INSERT OR IGNORE INTO compliance_legal_scan_meta (id) VALUES (1);
+
 -- Compliance photos — independent of Drive and signatures. Photos can be
 -- captured for a shoot at any time (e.g. before talent has signed paperwork)
 -- and persist server-side so they reappear on next visit. Each row is one
