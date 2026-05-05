@@ -1138,22 +1138,39 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
         { platform: "vrporn", all_time: 175_742.45, ytd: 66_006.83,
           yearly: { "2025": 109_735.62, "2026": 66_006.83 } },
       ],
-      monthly_trend: [
-        { month: "2025-06", slr: 28_291.20, povr: 12_950.24, vrporn: 0,         total: 41_241.44, mom_pct: null },
-        { month: "2025-07", slr: 28_465.01, povr: 12_543.14, vrporn: 0,         total: 41_008.15, mom_pct: -0.6 },
-        { month: "2025-08", slr: 30_568.77, povr: 12_256.40, vrporn: 0,         total: 42_825.17, mom_pct:  4.4 },
-        { month: "2025-09", slr: 33_829.87, povr: 13_190.84, vrporn: 27_346.81, total: 74_367.52, mom_pct: 73.7 },
-        { month: "2025-10", slr: 33_057.25, povr: 13_759.47, vrporn: 25_768.73, total: 72_585.45, mom_pct: -2.4 },
-        { month: "2025-11", slr: 30_092.07, povr: 12_942.92, vrporn: 26_402.47, total: 69_437.46, mom_pct: -4.3 },
-        { month: "2025-12", slr: 31_567.58, povr: 12_682.56, vrporn: 30_217.61, total: 74_467.75, mom_pct:  7.2 },
-        { month: "2026-01", slr: 31_246.19, povr: 10_979.46, vrporn: 27_421.91, total: 69_647.56, mom_pct: -6.5 },
-        { month: "2026-02", slr: 27_993.81, povr: 11_027.02, vrporn: 24_422.28, total: 63_443.11, mom_pct: -8.9 },
-        { month: "2026-03", slr: 28_002.97, povr:  9_320.27, vrporn:  6_540.12, total: 43_863.36, mom_pct: -30.9 },
-        // April + May synthesized from "_DailyData" rollups in the mock to
-        // mirror how the API now backfills months missing from _Data.
-        { month: "2026-04", slr:  2_644.28, povr: 10_649.20, vrporn: 11_724.84, total: 25_018.32, mom_pct: -43.0 },
-        { month: "2026-05", slr:    421.00, povr:  1_507.80, vrporn:  1_932.45, total:  3_861.25, mom_pct: -84.6 },
-      ],
+      monthly_trend: (() => {
+        // Synthetic monthly trend with per-studio breakdown derived from
+        // mock cross-platform shares (matches the production-side derivation
+        // in api/routers/revenue.py). Studio shares are: FPVR 28%, VRH 38%,
+        // VRA 26%, NJOI 6%, BJN 2% — derived from the typical 1440-scene
+        // split in the real Cross-Platform tab.
+        const SHARES = { FPVR: 0.28, VRH: 0.38, VRA: 0.26, NJOI: 0.06, BJN: 0.02 }
+        const splitByStudio = (slr: number, povr: number, vrp: number) => {
+          const out: Record<string, { slr: number; povr: number; vrporn: number; total: number }> = {}
+          for (const [s, share] of Object.entries(SHARES)) {
+            const a = Math.round(slr  * share * 100) / 100
+            const b = Math.round(povr * share * 100) / 100
+            const c = Math.round(vrp  * share * 100) / 100
+            const t = Math.round((a + b + c)        * 100) / 100
+            if (t > 0) out[s] = { slr: a, povr: b, vrporn: c, total: t }
+          }
+          return out
+        }
+        return [
+          { month: "2025-06", slr: 28_291.20, povr: 12_950.24, vrporn: 0,         total: 41_241.44, mom_pct: null,  by_studio: splitByStudio(28_291.20, 12_950.24, 0) },
+          { month: "2025-07", slr: 28_465.01, povr: 12_543.14, vrporn: 0,         total: 41_008.15, mom_pct: -0.6,  by_studio: splitByStudio(28_465.01, 12_543.14, 0) },
+          { month: "2025-08", slr: 30_568.77, povr: 12_256.40, vrporn: 0,         total: 42_825.17, mom_pct:  4.4,  by_studio: splitByStudio(30_568.77, 12_256.40, 0) },
+          { month: "2025-09", slr: 33_829.87, povr: 13_190.84, vrporn: 27_346.81, total: 74_367.52, mom_pct: 73.7,  by_studio: splitByStudio(33_829.87, 13_190.84, 27_346.81) },
+          { month: "2025-10", slr: 33_057.25, povr: 13_759.47, vrporn: 25_768.73, total: 72_585.45, mom_pct: -2.4,  by_studio: splitByStudio(33_057.25, 13_759.47, 25_768.73) },
+          { month: "2025-11", slr: 30_092.07, povr: 12_942.92, vrporn: 26_402.47, total: 69_437.46, mom_pct: -4.3,  by_studio: splitByStudio(30_092.07, 12_942.92, 26_402.47) },
+          { month: "2025-12", slr: 31_567.58, povr: 12_682.56, vrporn: 30_217.61, total: 74_467.75, mom_pct:  7.2,  by_studio: splitByStudio(31_567.58, 12_682.56, 30_217.61) },
+          { month: "2026-01", slr: 31_246.19, povr: 10_979.46, vrporn: 27_421.91, total: 69_647.56, mom_pct: -6.5,  by_studio: splitByStudio(31_246.19, 10_979.46, 27_421.91) },
+          { month: "2026-02", slr: 27_993.81, povr: 11_027.02, vrporn: 24_422.28, total: 63_443.11, mom_pct: -8.9,  by_studio: splitByStudio(27_993.81, 11_027.02, 24_422.28) },
+          { month: "2026-03", slr: 28_002.97, povr:  9_320.27, vrporn:  6_540.12, total: 43_863.36, mom_pct: -30.9, by_studio: splitByStudio(28_002.97,  9_320.27,  6_540.12) },
+          { month: "2026-04", slr:  2_644.28, povr: 10_649.20, vrporn: 11_724.84, total: 25_018.32, mom_pct: -43.0, by_studio: splitByStudio( 2_644.28, 10_649.20, 11_724.84) },
+          { month: "2026-05", slr:    421.00, povr:  1_507.80, vrporn:  1_932.45, total:  3_861.25, mom_pct: -84.6, by_studio: splitByStudio(   421.00,  1_507.80,  1_932.45) },
+        ]
+      })(),
       catalog: [
         { platform: "povr",   total_scenes: 4749, avg_revenue_per_scene:  78.91, top_scene_revenue: 1_220.78 },
         { platform: "slr",    total_scenes: 1688, avg_revenue_per_scene:   1.23, top_scene_revenue:   233.63 },
