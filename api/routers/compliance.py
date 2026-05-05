@@ -3316,22 +3316,54 @@ def _scan_mega_legal_folders(
 @router.get("/admin/legal-folders", response_model=MegaLegalScanResponse)
 async def scan_mega_legal_folders(
     _admin: dict = Depends(require_admin),
-    refresh: bool = Query(default=False, description="Bypass the 1h cache"),
+    refresh: bool = Query(default=False, description="Force live S3 scan, bypassing the DB index"),
     studio: Optional[str] = Query(default=None, description="Restrict to one studio (FPVR/VRH/VRA/NJOI)"),
 ):
-    """Scan every MEGA bucket for files inside ``{SCENE_ID}/Legal/`` folders.
+    """Return the searchable list of MEGA `{SCENE_ID}/Legal/` files.
 
-    Surfaces all the historical paperwork sitting on the buckets — including
-    scenes that pre-date the Hub's compliance system and never had a
-    ``compliance_signatures`` row imported. The Database view merges this
-    list with the structured-DB results so admins get one searchable index.
+    Hot path: query the ``compliance_legal_files`` index table that the
+    nightly scraper (scrape_mega_legal.py) populates. Sub-millisecond DB
+    read instead of a 30+ second paginated bucket walk per page-load.
 
-    Cached for 1 hour. Pass ``?refresh=1`` to force a re-scan.
+    Fallback: if the index is empty (first install) or ``refresh=1`` is
+    passed, fall back to the live S3 scan + the in-process 1h cache.
     """
-    import time as _time
     studios: tuple[str, ...] = (studio.lower(),) if studio else ("fpvr", "vrh", "vra", "njoi")
-    cache_key = "|".join(studios)
 
+    # Hot path — read from the index. Empty result => fall through to live scan.
+    if not refresh:
+        with get_db() as conn:
+            scan_meta = conn.execute(
+                "SELECT last_scan_at FROM compliance_legal_scan_meta WHERE id=1"
+            ).fetchone()
+            scanned_at = (scan_meta["last_scan_at"] if scan_meta else "") or ""
+
+            if scanned_at:
+                where = ""
+                params: list = []
+                if studio:
+                    where = " WHERE studio = ?"
+                    params.append(studio.upper())
+                rows = conn.execute(
+                    f"""SELECT studio, scene_id, key, filename, size, last_modified
+                          FROM compliance_legal_files{where}
+                         ORDER BY scene_id, filename""",
+                    params,
+                ).fetchall()
+
+            if scanned_at and rows:
+                files = [MegaLegalFile(**dict(r)) for r in rows]
+                return MegaLegalScanResponse(
+                    files=files,
+                    scanned_at=scanned_at,
+                    studios_scanned=[s.upper() for s in studios],
+                    total=len(files),
+                    truncated=False,
+                )
+
+    # Cold path / explicit refresh — live S3 scan with 1h in-process cache.
+    import time as _time
+    cache_key = "|".join(studios)
     now = _time.time()
     cached = _MEGA_LEGAL_CACHE.get(cache_key)
     if cached and not refresh and (now - cached[0]) < _MEGA_LEGAL_TTL:
