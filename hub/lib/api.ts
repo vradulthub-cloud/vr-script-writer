@@ -1118,7 +1118,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       ? idTokenOrSession
       : (idTokenOrSession?.idToken ?? undefined)
 
-  const get = <T>(path: string) => apiFetch<T>(path, token)
+  const get = <T>(path: string, opts?: { timeoutMs?: number }) =>
+    apiFetch<T>(path, token, opts)
   const post = <T>(path: string, body: unknown, opts?: { timeoutMs?: number }) =>
     apiFetch<T>(path, token, { method: "POST", body: JSON.stringify(body), ...opts })
   const patch = <T>(path: string, body: unknown) =>
@@ -1774,6 +1775,8 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
       // on file, with full-text query + date/studio/role filters. Admin-only
       // because every hit contains personal data (the response masks TIN to
       // last-4; full PII is loaded on demand via getSignature()).
+      // 90s timeout: the per-token LIKE query across 14 columns can be slow
+      // when the bulk-imported back-catalog has thousands of rows.
       search: (params: {
         q?: string
         from?: string
@@ -1794,12 +1797,15 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         const qStr = qs.toString()
         return get<SignatureSearchResponse>(
           `/compliance/admin/search${qStr ? `?${qStr}` : ""}`,
+          { timeoutMs: 90_000 },
         )
       },
 
       // Scan every studio's MEGA bucket for files inside `{SCENE_ID}/Legal/`
       // folders. Cached server-side for 1h. Pass {refresh: true} to force a
       // re-scan after adding new historical paperwork to the buckets.
+      // 5min timeout: the first cold scan walks 40k+ S3 keys across four
+      // buckets and reliably blows past 30s. Cached calls return in <100ms.
       legalFolders: (params: { studio?: string; refresh?: boolean } = {}) => {
         const qs = new URLSearchParams()
         if (params.studio)  qs.set("studio",  params.studio)
@@ -1807,6 +1813,7 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         const qStr = qs.toString()
         return get<MegaLegalScanResponse>(
           `/compliance/admin/legal-folders${qStr ? `?${qStr}` : ""}`,
+          { timeoutMs: 5 * 60_000 },
         )
       },
 

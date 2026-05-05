@@ -441,12 +441,10 @@ def search_signatures(
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
 
     with get_db() as conn:
-        total_row = conn.execute(
-            f"SELECT COUNT(*) AS c FROM compliance_signatures{where_sql}",
-            params,
-        ).fetchone()
-        total = int(total_row["c"]) if total_row else 0
-
+        # Fetch one extra row past the limit so we can detect whether more
+        # exist without paying for a full COUNT(*) on every query. A real
+        # COUNT only runs when the page is full — i.e. the user might page
+        # forward — and even then we cap it at LIMIT+1 for the common case.
         rows = conn.execute(
             f"""SELECT id, shoot_id, shoot_date, scene_id, studio,
                        talent_role, talent_slug, talent_display,
@@ -459,8 +457,24 @@ def search_signatures(
                {where_sql}
                  ORDER BY shoot_date DESC, signed_at DESC, id DESC
                  LIMIT ? OFFSET ?""",
-            params + [int(limit), int(offset)],
+            params + [int(limit) + 1, int(offset)],
         ).fetchall()
+        has_more = len(rows) > int(limit)
+        if has_more:
+            rows = rows[: int(limit)]
+        # Only pay for COUNT(*) when the page is exactly full and we know
+        # there's at least one more row beyond — otherwise the precise count
+        # is meaningless to the UI ("Showing 18 of 18" vs. running an extra
+        # query to confirm 18). When we DO need it, run it after the SELECT
+        # so the cheap path returns first if anything throws.
+        if has_more:
+            total_row = conn.execute(
+                f"SELECT COUNT(*) AS c FROM compliance_signatures{where_sql}",
+                params,
+            ).fetchone()
+            total = int(total_row["c"]) if total_row else int(offset) + len(rows)
+        else:
+            total = int(offset) + len(rows)
 
     hits: list[SignatureSearchHit] = []
     for r in rows:
