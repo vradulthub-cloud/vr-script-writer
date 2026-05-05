@@ -614,7 +614,7 @@ export function DescGenerator({ scenes, scenesError, idToken: serverIdToken, use
                   {genTitleLoading ? "…" : "Title"}
                 </button>
               </div>
-              <p style={{ fontSize: 12, color: "var(--color-text)", lineHeight: 1.35 }}>
+              <p style={{ fontSize: 12, color: "var(--color-text)", lineHeight: 1.5 }}>
                 {selectedScene.title || <span style={{ color: "var(--color-text-faint)" }}>Untitled</span>}
               </p>
               {genTitleErr && (

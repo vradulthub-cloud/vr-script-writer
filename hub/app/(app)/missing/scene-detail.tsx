@@ -1038,8 +1038,8 @@ function ThumbnailLightbox({
         justifyContent: "center",
         padding: "4vh 4vw",
         background: "rgba(0, 0, 0, 0.86)",
-        backdropFilter: "blur(10px)",
-        WebkitBackdropFilter: "blur(10px)",
+        backdropFilter: "blur(4px)",
+        WebkitBackdropFilter: "blur(4px)",
         cursor: "zoom-out",
         animation: "thumbnail-lightbox-fade 160ms ease-out",
       }}

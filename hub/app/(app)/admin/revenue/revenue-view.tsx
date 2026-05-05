@@ -920,8 +920,10 @@ function MonthlyHero({
                   {fmtMoney(p.total, true)}
                 </div>
                 {/* Stacked bars (column-reverse so SLR is at bottom).
-                    Heights transition on filter change so the chart morphs
-                    instead of snapping. */}
+                    Heights snap on filter change — animating height triggers
+                    layout recalc per frame; the comparison matters more than
+                    the morph. Opacity still transitions to mark the active
+                    column on hover/highlight. */}
                 <div style={{
                   display: "flex", flexDirection: "column-reverse",
                   height: chartHeight - 60,
@@ -930,9 +932,9 @@ function MonthlyHero({
                   outline: isCurrent ? "1px solid var(--color-text)" : "none",
                   outlineOffset: 1,
                 }}>
-                  {p.slr > 0    && <div style={{ height: slrH,  background: PLATFORM_COLOR.slr,    opacity: isCurrent ? 1 : 0.85, transition: "height 280ms ease, opacity 200ms ease" }} title={`SLR ${fmtMoney(p.slr, true)}`} />}
-                  {p.povr > 0   && <div style={{ height: povrH, background: PLATFORM_COLOR.povr,   opacity: isCurrent ? 1 : 0.85, transition: "height 280ms ease, opacity 200ms ease" }} title={`POVR ${fmtMoney(p.povr, true)}`} />}
-                  {p.vrporn > 0 && <div style={{ height: vrpH,  background: PLATFORM_COLOR.vrporn, opacity: isCurrent ? 1 : 0.85, transition: "height 280ms ease, opacity 200ms ease" }} title={`VRPorn ${fmtMoney(p.vrporn, true)}`} />}
+                  {p.slr > 0    && <div style={{ height: slrH,  background: PLATFORM_COLOR.slr,    opacity: isCurrent ? 1 : 0.85, transition: "opacity 200ms ease" }} title={`SLR ${fmtMoney(p.slr, true)}`} />}
+                  {p.povr > 0   && <div style={{ height: povrH, background: PLATFORM_COLOR.povr,   opacity: isCurrent ? 1 : 0.85, transition: "opacity 200ms ease" }} title={`POVR ${fmtMoney(p.povr, true)}`} />}
+                  {p.vrporn > 0 && <div style={{ height: vrpH,  background: PLATFORM_COLOR.vrporn, opacity: isCurrent ? 1 : 0.85, transition: "opacity 200ms ease" }} title={`VRPorn ${fmtMoney(p.vrporn, true)}`} />}
                 </div>
                 {/* Month label */}
                 <div style={{
@@ -1119,7 +1121,7 @@ function PlatformRow({
                          height: Math.max(2, h),
                          background: color,
                          opacity: isLast ? 1 : 0.55,
-                         transition: "height 220ms ease, opacity 220ms ease",
+                         transition: "opacity 220ms ease",
                        }}
                   />
                 )
@@ -1352,7 +1354,7 @@ function DailyDetail({
                   height: Math.max(2, totalH),
                   marginBottom: isBest ? -2 : 0,
                   opacity: isBest ? 1 : 0.78,
-                  transition: "height 220ms ease, opacity 180ms ease, margin-bottom 180ms ease",
+                  transition: "opacity 180ms ease",
                 }}
               >
                 {slr  > 0 && <div style={{ flex: slr,  background: PLATFORM_COLOR.slr    }} />}

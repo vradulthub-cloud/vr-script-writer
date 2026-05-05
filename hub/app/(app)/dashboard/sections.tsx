@@ -4,6 +4,7 @@ import { studioAbbr } from "@/lib/studio-colors"
 import { WeekCalendar } from "@/components/ui/week-calendar"
 import { type Briefing, toneForCount } from "@/components/ui/today-briefing"
 import { BriefingCache } from "./briefing-cache"
+import { HealthRetryButton } from "./health-retry-button"
 import { NotificationFeed } from "./notification-feed"
 import { TriageFeed } from "./triage-feed"
 import {
@@ -44,6 +45,7 @@ export async function HealthBadge({ idToken }: { idToken: string | undefined }) 
         }}
       />
       Connection lost
+      <HealthRetryButton />
     </span>
   )
 }

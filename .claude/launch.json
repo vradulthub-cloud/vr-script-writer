@@ -11,8 +11,8 @@
     },
     {
       "name": "hub-dev-mock",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:mock"],
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "AUTH_SECRET=dev-only-not-secret AUTH_TRUST_HOST=true npm run dev:mock"],
       "port": 3001,
       "autoPort": false,
       "cwd": "hub"

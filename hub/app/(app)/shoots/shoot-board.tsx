@@ -223,7 +223,14 @@ export function ShootBoard({
         />
       )}
 
-      {error && <ErrorAlert className="mb-3">{error}</ErrorAlert>}
+      {error && (
+        <ErrorAlert
+          className="mb-3"
+          onRetry={() => { setError(null); void refresh() }}
+        >
+          {error}
+        </ErrorAlert>
+      )}
 
       {filtered.length === 0 && !error ? (
         <EmptyState filter={studioFilter} />

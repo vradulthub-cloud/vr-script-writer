@@ -95,6 +95,8 @@ export function ThemeBlockquote({
   text: string
   studioColor: string
 }) {
+  // Studio color is used for a typographic drop-mark rather than a side stripe —
+  // identifies studio context through ornament, not chrome.
   return (
     <blockquote
       style={{
@@ -102,12 +104,28 @@ export function ThemeBlockquote({
         fontSize: 18,
         fontStyle: "italic",
         color: "var(--color-paper-sub)",
-        borderLeft: `3px solid ${studioColor}`,
-        paddingLeft: 22,
+        paddingLeft: 28,
         lineHeight: 1.65,
         margin: "0 0 24px",
+        position: "relative",
       }}
     >
+      <span
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          left: 0,
+          top: -6,
+          fontFamily: "var(--font-serif)",
+          fontStyle: "normal",
+          fontWeight: 700,
+          fontSize: 36,
+          lineHeight: 1,
+          color: studioColor,
+        }}
+      >
+        “
+      </span>
       {text}
     </blockquote>
   )

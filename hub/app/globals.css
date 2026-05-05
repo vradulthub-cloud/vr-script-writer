@@ -918,6 +918,7 @@ button[style*="color-lime"]:hover:not(:disabled) {
 .ec-prose {
   padding: 24px 32px; font-size: 15px; line-height: 1.65;
   color: var(--color-text);
+  max-width: 65ch;
 }
 .ec-prose p { margin-bottom: 1.1em; }
 .ec-prose .speaker {
@@ -1049,6 +1050,7 @@ header[class*="fixed"][class*="top-0"] {
 .writing-paper .writing-body {
   font-size: 1.0625rem;   /* 17px — comfortable for long-form reading */
   line-height: 1.9;
+  max-width: 65ch;        /* prevent fatigue on wide screens */
 }
 .writing-paper .writing-body p { margin-bottom: 1.2em; }
 .writing-paper .writing-meta {

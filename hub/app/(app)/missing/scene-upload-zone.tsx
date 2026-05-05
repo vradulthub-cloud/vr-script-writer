@@ -226,7 +226,7 @@ export function SceneUploadZone({
                     </div>
                     {s.status === "uploading" && (
                       <div style={{ marginTop: 4, height: 2, background: "var(--color-border)", borderRadius: 1, overflow: "hidden" }}>
-                        <div style={{ width: `${pct}%`, height: "100%", background: "var(--color-lime)", transition: "width 120ms linear" }} />
+                        <div style={{ width: "100%", height: "100%", background: "var(--color-lime)", transformOrigin: "left", transform: `scaleX(${pct / 100})`, transition: "transform 120ms linear" }} />
                       </div>
                     )}
                   </div>
