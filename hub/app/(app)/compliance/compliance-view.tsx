@@ -2807,7 +2807,7 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
               borderRadius: 12, padding: 32,
               textAlign: "center", color: "var(--color-text-faint)", fontSize: 14,
             }}>
-              No BG shoots for {new Date(date + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+              No shoots for {new Date(date + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
