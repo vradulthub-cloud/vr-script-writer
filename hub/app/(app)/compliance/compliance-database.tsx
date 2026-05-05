@@ -20,6 +20,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
+  AlertTriangle,
   Database,
   Download,
   DownloadCloud,
@@ -27,6 +28,7 @@ import {
   FileText,
   HardDrive,
   Loader2,
+  Pencil,
   RefreshCw,
   Search,
   X,
@@ -125,6 +127,14 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
 
   // Selection (modal open)
   const [editingId, setEditingId] = useState<number | null>(null)
+
+  // MEGA file rename modal — opens when an admin clicks the pencil icon
+  // on a MEGA row. Destructive (COPY + DELETE on the bucket), so there's
+  // an explicit confirmation step before the API call goes out.
+  const [renameTarget, setRenameTarget] = useState<MegaLegalFile | null>(null)
+  const [renameDraft,  setRenameDraft]  = useState("")
+  const [renaming,     setRenaming]     = useState(false)
+  const [renameError,  setRenameError]  = useState<string | null>(null)
 
   // Bulk MEGA → DB importer
   const [importOpen, setImportOpen]           = useState(false)
@@ -301,6 +311,47 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
     } catch (e) {
       // Surface inline rather than throw — admins can refresh and retry.
       setMegaError(e instanceof Error ? e.message : "Could not generate download URL")
+    }
+  }
+
+  function startRename(f: MegaLegalFile) {
+    setRenameTarget(f)
+    setRenameDraft(f.filename)
+    setRenameError(null)
+  }
+
+  async function commitRename() {
+    if (!renameTarget) return
+    const newName = renameDraft.trim()
+    if (!newName || newName === renameTarget.filename) {
+      setRenameTarget(null)
+      return
+    }
+    // Extension match enforced server-side, but the UX is friendlier if we
+    // catch it before the round-trip.
+    const oldExt = (renameTarget.filename.match(/\.[^.]+$/) || [""])[0].toLowerCase()
+    const newExt = (newName.match(/\.[^.]+$/) || [""])[0].toLowerCase()
+    if (oldExt !== newExt) {
+      setRenameError(`Extension must stay ${oldExt} (got ${newExt || "(none)"})`)
+      return
+    }
+    setRenaming(true)
+    setRenameError(null)
+    try {
+      await client.compliance.legalFileRename(
+        renameTarget.studio.toLowerCase(),
+        renameTarget.key,
+        newName,
+      )
+      setRenameTarget(null)
+      setRenameDraft("")
+      // Refresh both lists so the new filename appears.
+      void loadDb({ silent: true })
+      void loadMega(true)
+    } catch (e) {
+      setRenameError(e instanceof Error ? e.message : "Rename failed")
+    } finally {
+      setRenaming(false)
     }
   }
 
@@ -710,6 +761,7 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
                     zebra={idx % 2 === 1}
                     onOpenDb={(id) => setEditingId(id)}
                     onOpenMega={openMegaFile}
+                    onRenameMega={startRename}
                     pdfUrl={(id, asOf) => client.compliance.signaturePdfUrl(id, asOf ? { asOf } : undefined)}
                   />
                 ))}
@@ -718,6 +770,19 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
           </div>
         )}
       </div>
+
+      {/* ── Rename modal (MEGA file rename) ── */}
+      {renameTarget && (
+        <RenameDialog
+          target={renameTarget}
+          draft={renameDraft}
+          setDraft={setRenameDraft}
+          running={renaming}
+          error={renameError}
+          onCancel={() => { setRenameTarget(null); setRenameError(null) }}
+          onConfirm={commitRename}
+        />
+      )}
 
       {/* ── Edit modal (DB rows only) ── */}
       {editingId !== null && (
@@ -743,12 +808,13 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
 // ─── Row ─────────────────────────────────────────────────────────────────────
 
 function RowView({
-  row, zebra, onOpenDb, onOpenMega, pdfUrl,
+  row, zebra, onOpenDb, onOpenMega, onRenameMega, pdfUrl,
 }: {
   row: Row
   zebra: boolean
   onOpenDb: (id: number) => void
   onOpenMega: (f: MegaLegalFile) => void
+  onRenameMega: (f: MegaLegalFile) => void
   pdfUrl: (id: number, asOf?: string) => string
 }) {
   const cellStyle: React.CSSProperties = {
@@ -918,14 +984,25 @@ function RowView({
         </div>
       </td>
       <td style={{ ...cellStyle, textAlign: "right", whiteSpace: "nowrap" }}>
-        <button
-          type="button"
-          onClick={e => { e.stopPropagation(); onOpenMega(f) }}
-          style={btnTinyLink}
-          title="Generate a presigned download URL"
-        >
-          <Download size={11} /> Open
-        </button>
+        <div style={{ display: "inline-flex", gap: 4 }}>
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); onRenameMega(f) }}
+            style={btnTinyLink}
+            title="Rename this file on MEGA — COPY then DELETE, cannot be undone"
+            aria-label="Rename file"
+          >
+            <Pencil size={11} />
+          </button>
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); onOpenMega(f) }}
+            style={btnTinyLink}
+            title="Generate a presigned download URL"
+          >
+            <Download size={11} /> Open
+          </button>
+        </div>
       </td>
     </tr>
   )
@@ -996,6 +1073,173 @@ function classifyDocument(filename: string): string {
 }
 
 // ─── Tiny presentational helpers ─────────────────────────────────────────────
+
+// Modal dialog for renaming a MEGA legal file. Destructive operation —
+// the body explains COPY + DELETE so admins know there's no undo.
+function RenameDialog({
+  target, draft, setDraft, running, error, onCancel, onConfirm,
+}: {
+  target: MegaLegalFile
+  draft: string
+  setDraft: (s: string) => void
+  running: boolean
+  error: string | null
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const oldExt = (target.filename.match(/\.[^.]+$/) || [""])[0]
+  const newKey = target.key.replace(/[^/]+$/, draft.trim() || target.filename)
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="rename-title"
+      onClick={onCancel}
+      style={{
+        position: "fixed", inset: 0,
+        background: "rgba(0,0,0,0.6)", zIndex: 50,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "var(--color-surface)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 12,
+          padding: "20px 22px",
+          width: "min(560px, 100%)",
+          maxHeight: "90vh",
+          overflowY: "auto",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <Pencil size={14} color="var(--color-lime)" />
+          <h3
+            id="rename-title"
+            style={{
+              margin: 0, fontSize: 13, fontWeight: 700,
+              letterSpacing: "0.04em", textTransform: "uppercase",
+              color: "var(--color-text)",
+            }}
+          >
+            Rename MEGA file
+          </h3>
+        </div>
+        <p style={{
+          margin: "0 0 14px", fontSize: 11,
+          color: "var(--color-text-faint)", lineHeight: 1.55,
+        }}>
+          {target.studio} / {target.scene_id}
+        </p>
+
+        <label style={{ display: "block", fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 4 }}>
+          Current filename
+        </label>
+        <div style={{
+          fontFamily: "var(--font-mono, ui-monospace, monospace)",
+          fontSize: 12, color: "var(--color-text-muted)",
+          padding: "8px 10px",
+          background: "var(--color-bg)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 6, marginBottom: 12, wordBreak: "break-all",
+        }}>
+          {target.filename}
+        </div>
+
+        <label style={{ display: "block", fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--color-text-faint)", marginBottom: 4 }}>
+          New filename (must keep <code>{oldExt}</code>)
+        </label>
+        <input
+          type="text"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          autoFocus
+          spellCheck={false}
+          onKeyDown={e => {
+            if (e.key === "Enter") { e.preventDefault(); onConfirm() }
+            if (e.key === "Escape") { e.preventDefault(); onCancel() }
+          }}
+          style={{
+            width: "100%",
+            background: "var(--color-elevated)",
+            border: "1px solid var(--color-border)",
+            borderRadius: 6,
+            padding: "8px 10px",
+            fontSize: 13,
+            color: "var(--color-text)",
+            outline: "none",
+            boxSizing: "border-box",
+            fontFamily: "var(--font-mono, ui-monospace, monospace)",
+          }}
+        />
+
+        {/* Resulting MEGA key preview */}
+        <div style={{
+          fontSize: 10, color: "var(--color-text-faint)",
+          marginTop: 8, marginBottom: 14,
+          fontFamily: "var(--font-mono, ui-monospace, monospace)",
+          wordBreak: "break-all",
+        }}>
+          → {newKey}
+        </div>
+
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: 8,
+          background: "color-mix(in srgb, var(--color-warning, #f59e0b) 14%, transparent)",
+          border: "1px solid var(--color-warning, #f59e0b)",
+          borderRadius: 6, padding: "8px 10px", marginBottom: 14,
+        }}>
+          <AlertTriangle size={13} color="var(--color-warning, #f59e0b)" style={{ marginTop: 1, flexShrink: 0 }} />
+          <div style={{ fontSize: 11, color: "var(--color-text)", lineHeight: 1.5 }}>
+            This does a server-side <strong>COPY</strong> to the new key, then{" "}
+            <strong>DELETE</strong> on the old key. MEGA S4 has no versioning —
+            once the old key is deleted, it&apos;s gone. Any signature record
+            pointing at the old path is rewritten to the new one.
+          </div>
+        </div>
+
+        {error && (
+          <div style={{
+            marginBottom: 12, padding: "6px 10px",
+            background: "color-mix(in srgb, var(--color-danger) 12%, transparent)",
+            border: "1px solid var(--color-danger)", borderRadius: 6,
+            fontSize: 11, color: "var(--color-text)",
+          }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={running}
+            style={btnGhost}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={running || !draft.trim() || draft.trim() === target.filename}
+            style={{
+              ...btnGhost,
+              background: "color-mix(in srgb, var(--color-lime) 16%, transparent)",
+              color: "var(--color-lime)",
+              borderColor: "var(--color-lime)",
+            }}
+          >
+            {running ? <Loader2 size={13} className="spin" /> : <Pencil size={13} />}
+            Rename
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function Stat({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
   return (
