@@ -151,8 +151,10 @@ export function SignView({ shootId, talent, display, studio }: Props) {
               height: 4, background: "var(--color-elevated)", borderRadius: 2, overflow: "hidden",
             }}>
               <div style={{
-                height: "100%", width: `${readPct}%`, background: accent,
-                transition: "width 1s linear",
+                height: "100%", width: "100%", background: accent,
+                transformOrigin: "left",
+                transform: `scaleX(${readPct / 100})`,
+                transition: "transform 1s linear",
               }} />
             </div>
           </div>

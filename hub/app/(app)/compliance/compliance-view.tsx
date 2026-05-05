@@ -1747,7 +1747,7 @@ function CameraButton({
                 : <Camera size={22} color="var(--color-text-muted)" />
               }
             </div>
-            <span style={{ fontSize: 12, color: "var(--color-text-muted)", textAlign: "center", lineHeight: 1.3 }}>
+            <span style={{ fontSize: 12, color: "var(--color-text-muted)", textAlign: "center", lineHeight: 1.45 }}>
               {slot.display}
             </span>
             <div style={{ display: "flex", gap: 6 }}>
@@ -3343,12 +3343,14 @@ export function ComplianceView({ initialShoots, initialDate, idToken, loadError 
           }}>
             {/* Progress bar — only visible while uploading */}
             {uploading && uploadProgress && (
-              <div style={{ height: 3, background: "var(--color-elevated)" }}>
+              <div style={{ height: 3, background: "var(--color-elevated)", overflow: "hidden" }}>
                 <div style={{
                   height: "100%",
-                  width: `${Math.round((uploadProgress.done / uploadProgress.total) * 100)}%`,
+                  width: "100%",
                   background: "var(--color-lime)",
-                  transition: "width 0.3s ease",
+                  transformOrigin: "left",
+                  transform: `scaleX(${uploadProgress.done / Math.max(1, uploadProgress.total)})`,
+                  transition: "transform 300ms ease",
                 }} />
               </div>
             )}

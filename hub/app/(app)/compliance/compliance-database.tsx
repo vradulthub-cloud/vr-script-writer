@@ -2003,10 +2003,12 @@ function BulkRenameDialog({
                   borderRadius: 2, overflow: "hidden",
                 }}>
                   <div style={{
-                    width: `${(progress.done / Math.max(1, progress.total)) * 100}%`,
+                    width: "100%",
                     height: "100%",
                     background: "var(--color-lime)",
-                    transition: "width 200ms ease-out",
+                    transformOrigin: "left",
+                    transform: `scaleX(${progress.done / Math.max(1, progress.total)})`,
+                    transition: "transform 200ms ease-out",
                   }} />
                 </div>
               </div>

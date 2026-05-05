@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useTransition } from "react"
+import { useRouter } from "next/navigation"
 import { api, type UserProfile, type UserUpdate } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
@@ -28,6 +29,8 @@ interface UsersPanelProps {
 export function UsersPanel({ users: initialUsers, error, idToken: serverToken, currentEmail }: UsersPanelProps) {
   const idToken = useIdToken(serverToken)
   const client = useMemo(() => api(idToken ?? null), [idToken])
+  const router = useRouter()
+  const [, startTransition] = useTransition()
 
   const [users, setUsers] = useState<UserProfile[]>(initialUsers)
   const [editingEmail, setEditingEmail] = useState<string | null>(null)
@@ -199,7 +202,7 @@ export function UsersPanel({ users: initialUsers, error, idToken: serverToken, c
     }
   }
 
-  if (error) return <ErrorAlert>{error}</ErrorAlert>
+  if (error) return <ErrorAlert onRetry={() => startTransition(() => router.refresh())}>{error}</ErrorAlert>
 
   const admins = users.filter(u => u.role === "admin").length
 

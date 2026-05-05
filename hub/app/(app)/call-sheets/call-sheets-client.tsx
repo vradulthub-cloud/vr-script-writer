@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { api } from "@/lib/api"
 import { useIdToken } from "@/hooks/use-id-token"
 import { ErrorAlert } from "@/components/ui/error-alert"
@@ -146,18 +146,13 @@ function DateCard({ date, doorCode, idToken, tabName, batchResult }: DateCardPro
               style={{
                 padding: "10px 16px",
                 borderBottom: i < date.scenes.length - 1 ? "1px solid var(--color-border-subtle)" : "none",
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
+                background: sc.studio ? `color-mix(in srgb, ${color} 5%, transparent)` : undefined,
               }}
             >
-              <span style={{ width: 3, height: 28, background: color, flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text)" }}>
-                  {sc.female || "—"}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{secondary}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text)" }}>
+                {sc.female || "—"}
               </div>
+              <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{secondary}</div>
             </div>
           )
         })}
@@ -338,9 +333,9 @@ export function CallSheetsClient({
     setBatchCurrentDate(null)
   }
 
-  useEffect(() => {
-    if (tabs.length > 0 || tabsError) return
+  const loadTabs = useCallback(() => {
     setTabsLoading(true)
+    setTabsError(null)
     client.callSheets.tabs()
       .then(data => {
         setTabs(data)
@@ -351,9 +346,14 @@ export function CallSheetsClient({
         setTabsError(e instanceof Error ? e.message : "Could not load tabs")
         setTabsLoading(false)
       })
-  }, [tabs.length, tabsError, client])
+  }, [client])
 
   useEffect(() => {
+    if (tabs.length > 0 || tabsError) return
+    loadTabs()
+  }, [tabs.length, tabsError, loadTabs])
+
+  const loadDates = useCallback(() => {
     if (!activeTab) return
     setDatesLoading(true)
     setDatesError(null)
@@ -369,7 +369,11 @@ export function CallSheetsClient({
         setDatesError(e instanceof Error ? e.message : "Could not load shoot dates")
         setDatesLoading(false)
       })
-  }, [activeTab, client])
+  }, [client, activeTab])
+
+  useEffect(() => {
+    loadDates()
+  }, [loadDates])
 
   function handleTabChange(tab: string) {
     if (tab === activeTab) return
@@ -432,7 +436,11 @@ export function CallSheetsClient({
       />
 
       {tabsLoading && <CallSheetsSkeleton />}
-      {tabsError && <ErrorAlert className="mb-4">{tabsError}</ErrorAlert>}
+      {tabsError && (
+        <ErrorAlert className="mb-4" onRetry={loadTabs}>
+          {tabsError}
+        </ErrorAlert>
+      )}
 
       {/* Tab selector */}
       {tabs.length > 0 && (
@@ -487,9 +495,11 @@ export function CallSheetsClient({
                   <div
                     style={{
                       height: "100%",
-                      width: `${(batchProgress / batchTotal) * 100}%`,
+                      width: "100%",
                       background: "var(--color-lime)",
-                      transition: "width 300ms",
+                      transformOrigin: "left",
+                      transform: `scaleX(${batchProgress / Math.max(1, batchTotal)})`,
+                      transition: "transform 300ms ease",
                     }}
                   />
                 </div>
@@ -531,7 +541,11 @@ export function CallSheetsClient({
 
       {/* Loading / error */}
       {datesLoading && <CallSheetsSkeleton />}
-      {datesError && <ErrorAlert className="mb-4">{datesError}</ErrorAlert>}
+      {datesError && (
+        <ErrorAlert className="mb-4" onRetry={loadDates}>
+          {datesError}
+        </ErrorAlert>
+      )}
 
       {/* Empty state */}
       {!datesLoading && dates.length === 0 && activeTab && !datesError && (

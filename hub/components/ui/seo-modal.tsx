@@ -240,7 +240,7 @@ export function SeoModal({
                   border: "1px solid var(--color-border)",
                 }}
               >
-                <div style={{ fontSize: 15, color: "var(--color-text-muted)", lineHeight: 1.3, marginBottom: 2, fontWeight: 500 }}>
+                <div style={{ fontSize: 15, color: "var(--color-text-muted)", lineHeight: 1.5, marginBottom: 2, fontWeight: 500 }}>
                   {metaTitle || <span style={{ color: "var(--color-text-faint)" }}>Title preview…</span>}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--color-text-muted)", lineHeight: 1.5 }}>

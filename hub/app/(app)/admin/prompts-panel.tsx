@@ -126,7 +126,7 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
     }
   }
 
-  if (err) return <ErrorAlert>{err}</ErrorAlert>
+  if (err) return <ErrorAlert onRetry={() => { setErr(null); refresh() }}>{err}</ErrorAlert>
   if (!rows) return <div style={{ padding: 14, fontSize: 12, color: "var(--color-text-faint)" }}>Loading prompts…</div>
 
   return (

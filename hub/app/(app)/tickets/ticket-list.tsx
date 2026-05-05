@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useMemo, useEffect, useRef, useDeferredValue } from "react"
+import { useState, useMemo, useEffect, useRef, useDeferredValue, useTransition } from "react"
+import { useRouter } from "next/navigation"
 import { X, Search } from "lucide-react"
 import { ErrorAlert } from "@/components/ui/error-alert"
 import { PageHeader } from "@/components/ui/page-header"
@@ -78,6 +79,8 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
   const isAdmin = userRole.toLowerCase() === "admin"
   const idToken = useIdToken(serverIdToken)
   const client = useMemo(() => api(idToken ?? null), [idToken])
+  const router = useRouter()
+  const [, startTransition] = useTransition()
 
   const [tickets, setTickets] = useState<Ticket[]>(initialTickets)
   const [statusFilter, setStatusFilter] = useState(() => {
@@ -688,7 +691,10 @@ export function TicketList({ tickets: initialTickets, users, error, idToken: ser
 
       {/* Error state */}
       {error && (
-        <ErrorAlert className="p-4 text-sm mb-4">
+        <ErrorAlert
+          className="p-4 text-sm mb-4"
+          onRetry={() => startTransition(() => router.refresh())}
+        >
           {error}
           <p className="mt-1 text-xs opacity-70">
             Could not reach the API. Check that the backend service is running.

@@ -449,7 +449,7 @@ function PendingRow({
         display: "flex", alignItems: "center", justifyContent: "space-between",
         gap: 16, padding: "12px 16px",
         borderBottom: "1px solid var(--color-border-subtle)",
-        borderLeft: `3px solid ${tint}`,
+        background: studio ? `color-mix(in srgb, ${tint} 5%, transparent)` : undefined,
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -596,7 +596,7 @@ function ActiveRow({ row, onCancel }: { row: UploadRow; onCancel: () => void }) 
         display: "flex", alignItems: "center", gap: 16,
         padding: "12px 16px",
         borderBottom: "1px solid var(--color-border-subtle)",
-        borderLeft: `3px solid ${tint}`,
+        background: studio ? `color-mix(in srgb, ${tint} 5%, transparent)` : undefined,
         opacity: isQueued ? 0.6 : 1,
       }}
     >
@@ -613,8 +613,8 @@ function ActiveRow({ row, onCancel }: { row: UploadRow; onCancel: () => void }) 
             }
           </span>
         </div>
-        <div style={{ marginTop: 6, height: 4, background: "var(--color-base)" }}>
-          <div style={{ width: `${isQueued ? 0 : pct}%`, height: 4, background: "var(--color-lime)", transition: "width 120ms ease" }} />
+        <div style={{ marginTop: 6, height: 4, background: "var(--color-base)", overflow: "hidden" }}>
+          <div style={{ width: "100%", height: 4, background: "var(--color-lime)", transformOrigin: "left", transform: `scaleX(${(isQueued ? 0 : pct) / 100})`, transition: "transform 120ms ease" }} />
         </div>
         <div style={{ marginTop: 4, fontSize: 11, color: "var(--color-text-faint)", fontFamily: "var(--font-mono)" }}>
           {studio?.toLowerCase()} / {row.decision.scene_id} / {row.decision.subfolder} / {row.decision.filename}
@@ -647,7 +647,7 @@ function CompletedRow({ row, onDismiss, onRetry }: {
         display: "flex", alignItems: "center", gap: 16,
         padding: "10px 16px",
         borderBottom: "1px solid var(--color-border-subtle)",
-        borderLeft: `3px solid ${tint}`,
+        background: studio ? `color-mix(in srgb, ${tint} 5%, transparent)` : undefined,
         opacity: ok ? 1 : 0.85,
       }}
     >
@@ -713,7 +713,7 @@ function HistoryRow({ row, idToken }: { row: UploadHistoryRow; idToken: string }
         display: "flex", alignItems: "center", gap: 16,
         padding: "10px 16px",
         borderBottom: "1px solid var(--color-border-subtle)",
-        borderLeft: `3px solid ${tint}`,
+        background: studio ? `color-mix(in srgb, ${tint} 5%, transparent)` : undefined,
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
