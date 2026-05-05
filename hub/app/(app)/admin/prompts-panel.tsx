@@ -29,6 +29,7 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
   const [busy, setBusy] = useState(false)
   const [statusMsg, setStatusMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
   const [revertOpen, setRevertOpen] = useState(false)
+  const [viewingDefault, setViewingDefault] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
@@ -69,12 +70,14 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
 
   const selected = rows?.find(r => r.key === selectedKey) ?? null
   const isDirty = !!selected && draft !== selected.content
+  const overrideDiffersFromDefault = !!selected && selected.is_overridden && selected.content !== selected.default
 
   function selectRow(p: PromptEntry) {
     if (isDirty && !window.confirm("Discard unsaved changes?")) return
     setSelectedKey(p.key)
     setDraft(p.content)
     setStatusMsg(null)
+    setViewingDefault(false)
   }
 
   async function save() {
@@ -228,7 +231,20 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
                 </code>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {selected.is_overridden && (
+                {viewingDefault && (
+                  <span
+                    style={{
+                      fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase",
+                      padding: "2px 7px", borderRadius: 3,
+                      background: "color-mix(in srgb, var(--color-text-muted) 14%, transparent)",
+                      color: "var(--color-text-muted)",
+                      border: "1px solid color-mix(in srgb, var(--color-text-muted) 30%, transparent)",
+                    }}
+                  >
+                    Viewing bundled default · read-only
+                  </span>
+                )}
+                {!viewingDefault && selected.is_overridden && (
                   <span
                     style={{
                       fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase",
@@ -241,7 +257,7 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
                     Edited
                   </span>
                 )}
-                {selected.updated_at && (
+                {!viewingDefault && selected.updated_at && (
                   <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
                     {selected.updated_by} · {new Date(selected.updated_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </span>
@@ -250,16 +266,25 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
             </header>
 
             <textarea
-              value={draft}
+              value={viewingDefault ? selected.default : draft}
               onChange={e => setDraft(e.target.value)}
+              readOnly={viewingDefault}
               spellCheck={false}
               style={{
                 flex: 1,
                 minHeight: 480,
                 width: "100%",
-                background: "var(--color-elevated)",
-                color: "var(--color-text)",
-                border: `1px solid ${isDirty ? "color-mix(in srgb, var(--color-lime) 50%, var(--color-border))" : "var(--color-border)"}`,
+                background: viewingDefault
+                  ? "color-mix(in srgb, var(--color-text-muted) 6%, var(--color-elevated))"
+                  : "var(--color-elevated)",
+                color: viewingDefault ? "var(--color-text-muted)" : "var(--color-text)",
+                border: `1px solid ${
+                  viewingDefault
+                    ? "color-mix(in srgb, var(--color-text-muted) 35%, var(--color-border))"
+                    : isDirty
+                      ? "color-mix(in srgb, var(--color-lime) 50%, var(--color-border))"
+                      : "var(--color-border)"
+                }`,
                 borderRadius: 6,
                 padding: 14,
                 fontFamily: "var(--font-mono)",
@@ -268,13 +293,29 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
                 resize: "vertical",
                 outline: "none",
                 tabSize: 2,
+                cursor: viewingDefault ? "default" : "text",
               }}
             />
 
             <footer style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
               <div style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-                {draft.length.toLocaleString()} chars · {wordCount(draft).toLocaleString()} words
-                {isDirty && <span style={{ marginLeft: 8, color: "var(--color-lime)", fontWeight: 600 }}>● unsaved</span>}
+                {viewingDefault ? (
+                  <>
+                    {selected.default.length.toLocaleString()} chars · {wordCount(selected.default).toLocaleString()} words
+                    <span style={{ marginLeft: 8, color: "var(--color-text-muted)", fontWeight: 600 }}>● bundled default</span>
+                  </>
+                ) : (
+                  <>
+                    {draft.length.toLocaleString()} chars · {wordCount(draft).toLocaleString()} words
+                    {isDirty && <span style={{ marginLeft: 8, color: "var(--color-lime)", fontWeight: 600 }}>● unsaved</span>}
+                    {overrideDiffersFromDefault && !isDirty && (
+                      <span style={{ marginLeft: 8, color: "var(--color-text-muted)" }}>
+                        · {Math.abs(draft.length - selected.default.length).toLocaleString()} chars
+                        {draft.length > selected.default.length ? " longer than" : " shorter than"} default
+                      </span>
+                    )}
+                  </>
+                )}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 {statusMsg && (
@@ -290,8 +331,33 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
                 )}
                 <button
                   type="button"
+                  onClick={() => setViewingDefault(v => !v)}
+                  disabled={busy || !overrideDiffersFromDefault}
+                  title={
+                    overrideDiffersFromDefault
+                      ? "Compare your override to the bundled default that ships with the app"
+                      : "No override — already showing the bundled default"
+                  }
+                  style={{
+                    background: viewingDefault ? "color-mix(in srgb, var(--color-text-muted) 14%, transparent)" : "transparent",
+                    border: "1px solid var(--color-border)",
+                    color: "var(--color-text-muted)",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    padding: "6px 12px",
+                    borderRadius: 4,
+                    cursor: busy || !overrideDiffersFromDefault ? "not-allowed" : "pointer",
+                    opacity: busy || !overrideDiffersFromDefault ? 0.5 : 1,
+                  }}
+                >
+                  {viewingDefault ? "Back to override" : "View default"}
+                </button>
+                <button
+                  type="button"
                   onClick={revert}
-                  disabled={busy || !selected.is_overridden}
+                  disabled={busy || !selected.is_overridden || viewingDefault}
                   title={selected.is_overridden ? "Revert to bundled default" : "No override to revert"}
                   style={{
                     background: "transparent",
@@ -303,8 +369,8 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
                     textTransform: "uppercase",
                     padding: "6px 12px",
                     borderRadius: 4,
-                    cursor: busy || !selected.is_overridden ? "not-allowed" : "pointer",
-                    opacity: busy || !selected.is_overridden ? 0.5 : 1,
+                    cursor: busy || !selected.is_overridden || viewingDefault ? "not-allowed" : "pointer",
+                    opacity: busy || !selected.is_overridden || viewingDefault ? 0.5 : 1,
                   }}
                 >
                   Revert to default
@@ -312,18 +378,18 @@ export function PromptsPanel({ idToken: serverIdToken }: { idToken?: string }) {
                 <button
                   type="button"
                   onClick={save}
-                  disabled={busy || !isDirty}
+                  disabled={busy || !isDirty || viewingDefault}
                   style={{
-                    background: isDirty ? "var(--color-lime)" : "transparent",
-                    border: `1px solid ${isDirty ? "var(--color-lime)" : "var(--color-border)"}`,
-                    color: isDirty ? "var(--color-lime-ink, #0d0d0d)" : "var(--color-text-faint)",
+                    background: isDirty && !viewingDefault ? "var(--color-lime)" : "transparent",
+                    border: `1px solid ${isDirty && !viewingDefault ? "var(--color-lime)" : "var(--color-border)"}`,
+                    color: isDirty && !viewingDefault ? "var(--color-lime-ink, #0d0d0d)" : "var(--color-text-faint)",
                     fontSize: 11,
                     fontWeight: 700,
                     letterSpacing: "0.08em",
                     textTransform: "uppercase",
                     padding: "6px 14px",
                     borderRadius: 4,
-                    cursor: busy || !isDirty ? "not-allowed" : "pointer",
+                    cursor: busy || !isDirty || viewingDefault ? "not-allowed" : "pointer",
                     opacity: busy ? 0.6 : 1,
                   }}
                 >
