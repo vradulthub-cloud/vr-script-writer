@@ -242,26 +242,113 @@ def scrape_slr(page: Page, dry_run: bool) -> list[list[str]]:
                 "and cookies sync to Windows automatically. Lasts ~30 days."
             )
 
-    # TODO: this requires a real signed-in session to inspect. The URL the
-    # user gave us — /statistics/daily/studio/64/project/1 — implies:
-    #   - "studio/64" = a numeric studio ID (we'll need to discover the
-    #     full set: probably one per studio, e.g. 64=VRH, 65=VRA, 66=FPVR).
-    #   - "project/1" = a project filter (possibly studio sub-channel).
-    # Once we have a working session post-2Captcha, the next step is to
-    # eyeball this page, identify the table structure, and fill in the
-    # parsing — same shape as scrape_povr_daily / scrape_vrporn.
-    log.info("SLR: navigating to daily stats page...")
+    # Discover the dropdown's studio IDs by walking the studios menu
+    # element on /statistics/daily. The user has 5 studios per the live UI:
+    # VRHush, VRAllure, FuckPassVR, BlowJobNow, NaughtyJOI — each with
+    # its own numeric ID (studio/64 was confirmed = FuckPassVR).
+    log.info("SLR: discovering studio IDs from the picker dropdown...")
     today = date.today()
     d_from = (today - timedelta(days=60)).isoformat()
     page.goto(f"https://partners.sexlikereal.com/statistics/daily/studio/64/project/1?from={d_from}",
-              wait_until="domcontentloaded", timeout=30_000)
-    page.wait_for_load_state("networkidle", timeout=20_000)
+              wait_until="networkidle", timeout=30_000)
 
-    raise NotImplementedError(
-        "SLR daily-stats parsing not yet wired — need to inspect the live "
-        "page DOM after a successful 2Captcha-assisted login. Re-run once "
-        "TWOCAPTCHA_API_KEY is set + funded, then we'll fill in the table parser."
+    studios = _discover_slr_studios(page)
+    if not studios:
+        # Fallback: just scrape the studio we landed on
+        studios = [(64, "Studio 64")]
+    log.info(f"SLR: {len(studios)} studio(s) found: {[s[1] for s in studios]}")
+
+    out: list[list[str]] = []
+    seen_keys: set[tuple[str, str]] = set()  # (date, studio) — dedupe across loops
+    for sid, sname in studios:
+        url = f"https://partners.sexlikereal.com/statistics/daily/studio/{sid}/project/1?from={d_from}"
+        try:
+            page.goto(url, wait_until="networkidle", timeout=30_000)
+            page.wait_for_selector("table tbody tr", timeout=20_000)
+        except Exception as e:
+            log.warning(f"SLR: studio {sid} ({sname}) failed to load — {type(e).__name__}; skipping")
+            continue
+
+        raw_rows = page.eval_on_selector_all(
+            "table tbody tr",
+            "els => els.map(tr => [...tr.querySelectorAll('td')].map(td => (td.innerText||'').trim()))",
+        )
+        added = 0
+        for cells in raw_rows:
+            if len(cells) < 11:
+                continue
+            date_str = cells[0].strip()
+            if not date_str or date_str.lower().startswith("total"):
+                continue
+            try:
+                iso = datetime.strptime(date_str, "%b %d, %Y").strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+            key = (iso, sname)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            total_income = cells[10].replace("$", "").replace(",", "").strip() or "0"
+            out.append([iso, sname, total_income])
+            added += 1
+        log.info(f"SLR: {sname} (studio/{sid})  +{added} daily rows")
+
+    log.info(f"SLR: total daily rows across {len(studios)} studio(s): {len(out)}")
+    return out
+
+
+# Map raw dropdown labels → canonical studio codes the rest of the system uses.
+# The portal renders e.g. "VRHush (VR Straight)" — we strip the suffix and map.
+_SLR_STUDIO_NAMES: dict[str, str] = {
+    "vrhush":     "VRH",
+    "vrallure":   "VRA",
+    "fuckpassvr": "FPVR",
+    "blowjobnow": "BJN",
+    "naughtyjoi": "NJOI",
+}
+
+
+def _slr_canonicalize_studio(raw: str) -> str:
+    """Trim '(VR Straight)' / '(POV)' suffix, map to canonical 4-letter code."""
+    base = re.sub(r"\s*\(.*?\)\s*", "", raw or "").strip().lower()
+    return _SLR_STUDIO_NAMES.get(base, raw.strip())
+
+
+def _discover_slr_studios(page: Page) -> list[tuple[int, str]]:
+    """Read the studio dropdown on /statistics/daily/... and return
+    [(studio_id, canonical_name), ...] for every studio the user can see.
+
+    The page uses a Select2-enhanced <select class="js-m-select--studio">
+    with <option value="<id>"> children. The original <select> is hidden
+    by Select2 but still in the DOM, so we read its options directly —
+    no need to expand the visible UI dropdown.
+
+    Verified options on the live page:
+      value="64"  → VRHush (VR Straight)       → VRH
+      value="213" → VRAllure (VR Straight)     → VRA
+      value="352" → FuckPassVR (VR Straight)   → FPVR
+      value="489" → BlowJobNow (VR Straight)   → BJN
+      value="663" → NaughtyJOI (VR Straight)   → NJOI
+    """
+    raw = page.eval_on_selector_all(
+        "select.js-m-select--studio option, select[class*='studio'] option",
+        """els => els.map(e => ({
+            value: e.value,
+            text: (e.textContent || '').trim()
+        }))"""
     )
+    out: list[tuple[int, str]] = []
+    seen: set[int] = set()
+    for r in raw:
+        try:
+            sid = int(r["value"])
+        except (ValueError, TypeError):
+            continue
+        if sid in seen or not r["text"]:
+            continue
+        seen.add(sid)
+        out.append((sid, _slr_canonicalize_studio(r["text"])))
+    return out
 
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@ import {
   DownloadCloud,
   ExternalLink,
   FileText,
+  FolderInput,
   HardDrive,
   Loader2,
   Pencil,
@@ -135,6 +136,20 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
   const [renameDraft,  setRenameDraft]  = useState("")
   const [renaming,     setRenaming]     = useState(false)
   const [renameError,  setRenameError]  = useState<string | null>(null)
+
+  // MEGA folder (prefix) rename modal — bigger blast radius than file
+  // rename, so we always do a dry-run preview first and require an
+  // explicit confirm-the-plan step before execution.
+  type FolderPlan = { src: string; dst: string }
+  const [folderRenameOpen, setFolderRenameOpen] = useState(false)
+  const [folderStudio,     setFolderStudio]     = useState<string>("")  // 4-letter code
+  const [folderSrc,        setFolderSrc]        = useState("")          // e.g. "VRH00762/Legal/"
+  const [folderDst,        setFolderDst]        = useState("")          // e.g. "VRH0762/Legal/"
+  const [folderPlan,       setFolderPlan]       = useState<FolderPlan[] | null>(null)
+  const [folderConflicts,  setFolderConflicts]  = useState<string[]>([])
+  const [folderRunning,    setFolderRunning]    = useState(false)
+  const [folderError,      setFolderError]      = useState<string | null>(null)
+  const [folderDoneSummary, setFolderDoneSummary] = useState<{ moved: number; signatures_updated: number } | null>(null)
 
   // Bulk multi-select rename — checkbox column on MEGA rows. Operator
   // selects N files, opens a find/replace dialog, previews the renames,
@@ -337,6 +352,80 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
     }
   }
 
+  function openFolderRename() {
+    setFolderRenameOpen(true)
+    setFolderStudio(studio ? studioCode(studio) : "")
+    setFolderSrc("")
+    setFolderDst("")
+    setFolderPlan(null)
+    setFolderConflicts([])
+    setFolderError(null)
+    setFolderDoneSummary(null)
+  }
+
+  function closeFolderRename() {
+    setFolderRenameOpen(false)
+    setFolderPlan(null)
+    setFolderConflicts([])
+    setFolderError(null)
+  }
+
+  // Step 1: dry-run to preview the planned src→dst pairs.
+  async function previewFolderRename() {
+    setFolderRunning(true)
+    setFolderError(null)
+    setFolderConflicts([])
+    try {
+      const r = await client.compliance.legalFolderRename(
+        folderStudio.toLowerCase(),
+        folderSrc.trim(),
+        folderDst.trim(),
+        { dry_run: true },
+      )
+      if (!r.ok) {
+        setFolderConflicts(r.errors)
+        setFolderPlan(r.planned)
+      } else {
+        setFolderPlan(r.planned)
+      }
+    } catch (e) {
+      setFolderError(e instanceof Error ? e.message : "Preview failed")
+      setFolderPlan(null)
+    } finally {
+      setFolderRunning(false)
+    }
+  }
+
+  // Step 2: execute the rename for real after the operator confirms.
+  async function commitFolderRename() {
+    setFolderRunning(true)
+    setFolderError(null)
+    try {
+      const r = await client.compliance.legalFolderRename(
+        folderStudio.toLowerCase(),
+        folderSrc.trim(),
+        folderDst.trim(),
+      )
+      if (!r.ok) {
+        setFolderError(
+          r.errors[0] || `Failed — ${r.conflict_count} dst conflict(s)`,
+        )
+        return
+      }
+      setFolderDoneSummary({
+        moved: r.moved,
+        signatures_updated: r.signatures_updated,
+      })
+      setFolderPlan(null)
+      void loadDb({ silent: true })
+      void loadMega(true)
+    } catch (e) {
+      setFolderError(e instanceof Error ? e.message : "Rename failed")
+    } finally {
+      setFolderRunning(false)
+    }
+  }
+
   // Compute the planned src→dst pairs for the current find/replace pattern.
   const bulkPlan = useMemo<{ file: MegaLegalFile; newName: string }[]>(() => {
     if (selectedKeys.size === 0 || !bulkFind) return []
@@ -484,6 +573,15 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
           >
             <DownloadCloud size={13} />
             Import from MEGA
+          </button>
+          <button
+            type="button"
+            onClick={() => openFolderRename()}
+            style={btnGhost}
+            title="Rename a MEGA Legal/ folder prefix (e.g. fix a typo'd scene id)"
+          >
+            <FolderInput size={13} />
+            Rename folder
           </button>
           <button
             type="button"
@@ -909,6 +1007,27 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
           error={renameError}
           onCancel={() => { setRenameTarget(null); setRenameError(null) }}
           onConfirm={commitRename}
+        />
+      )}
+
+      {/* ── Folder rename modal (prefix → prefix) ── */}
+      {folderRenameOpen && (
+        <FolderRenameDialog
+          studio={folderStudio}
+          setStudio={setFolderStudio}
+          src={folderSrc}
+          setSrc={setFolderSrc}
+          dst={folderDst}
+          setDst={setFolderDst}
+          plan={folderPlan}
+          conflicts={folderConflicts}
+          running={folderRunning}
+          error={folderError}
+          done={folderDoneSummary}
+          onPreview={previewFolderRename}
+          onConfirm={commitFolderRename}
+          onCancel={closeFolderRename}
+          onResetPlan={() => { setFolderPlan(null); setFolderConflicts([]); setFolderError(null) }}
         />
       )}
 
@@ -1416,6 +1535,287 @@ function RenameDialog({
     </div>
   )
 }
+
+// Modal for renaming a MEGA prefix (e.g. typo'd scene-id Legal/ folder).
+// Two-step: first PREVIEW (dry-run) shows the planned src→dst pairs +
+// any conflicts; then CONFIRM commits the COPY+DELETE for each.
+function FolderRenameDialog({
+  studio, setStudio,
+  src, setSrc,
+  dst, setDst,
+  plan, conflicts,
+  running, error, done,
+  onPreview, onConfirm, onCancel, onResetPlan,
+}: {
+  studio: string
+  setStudio: (s: string) => void
+  src: string
+  setSrc: (s: string) => void
+  dst: string
+  setDst: (s: string) => void
+  plan: { src: string; dst: string }[] | null
+  conflicts: string[]
+  running: boolean
+  error: string | null
+  done: { moved: number; signatures_updated: number } | null
+  onPreview: () => void
+  onConfirm: () => void
+  onCancel: () => void
+  onResetPlan: () => void
+}) {
+  const previewable = !!studio && !!src.trim() && !!dst.trim() && src.trim() !== dst.trim()
+  const STUDIO_CODES = ["FPVR", "VRH", "VRA", "NJOI"] as const
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="folder-rename-title"
+      onClick={onCancel}
+      style={{
+        position: "fixed", inset: 0,
+        background: "rgba(0,0,0,0.6)", zIndex: 50,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "var(--color-surface)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 12,
+          padding: "20px 22px",
+          width: "min(720px, 100%)",
+          maxHeight: "90vh", overflowY: "auto",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <FolderInput size={14} color="var(--color-lime)" />
+          <h3
+            id="folder-rename-title"
+            style={{
+              margin: 0, fontSize: 13, fontWeight: 700,
+              letterSpacing: "0.04em", textTransform: "uppercase",
+              color: "var(--color-text)",
+            }}
+          >
+            Rename MEGA folder prefix
+          </h3>
+        </div>
+        <p style={{
+          margin: "0 0 14px", fontSize: 11,
+          color: "var(--color-text-faint)", lineHeight: 1.55,
+        }}>
+          Move every file under one prefix to another. Both prefixes must
+          contain <code>/Legal/</code> — keeps this scoped to compliance.
+          Step 1 previews the plan; step 2 executes COPY then DELETE per file.
+        </p>
+
+        {done ? (
+          <div style={{
+            padding: "12px 14px", marginBottom: 14,
+            background: "color-mix(in srgb, var(--color-lime) 14%, transparent)",
+            border: "1px solid var(--color-lime)", borderRadius: 8,
+            fontSize: 12, color: "var(--color-text)",
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>
+              Renamed {done.moved} files
+            </div>
+            <div style={{ color: "var(--color-text-faint)", fontSize: 11 }}>
+              {done.signatures_updated > 0
+                ? `${done.signatures_updated} signature record(s) had their pdf_mega_path rewritten.`
+                : "No signature records pointed at this prefix."}
+            </div>
+          </div>
+        ) : null}
+
+        <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, marginBottom: 10 }}>
+          <FilterField label="Studio">
+            <select
+              value={studio}
+              onChange={e => setStudio(e.target.value)}
+              style={inputCompact}
+              disabled={!!plan || !!done}
+            >
+              <option value="">—</option>
+              {STUDIO_CODES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </FilterField>
+          <div />
+          <label style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+            From
+          </label>
+          <input
+            type="text"
+            placeholder="VRH00762/Legal/"
+            value={src}
+            onChange={e => setSrc(e.target.value)}
+            style={{
+              ...inputCompact,
+              fontFamily: "var(--font-mono, ui-monospace, monospace)",
+            }}
+            disabled={!!plan || !!done}
+          />
+          <label style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+            To
+          </label>
+          <input
+            type="text"
+            placeholder="VRH0762/Legal/"
+            value={dst}
+            onChange={e => setDst(e.target.value)}
+            style={{
+              ...inputCompact,
+              fontFamily: "var(--font-mono, ui-monospace, monospace)",
+            }}
+            disabled={!!plan || !!done}
+          />
+        </div>
+
+        {plan && plan.length > 0 && (
+          <div style={{
+            background: "var(--color-bg)",
+            border: "1px solid var(--color-border)",
+            borderRadius: 8,
+            marginBottom: 12,
+            maxHeight: 240,
+            overflowY: "auto",
+          }}>
+            <div style={{
+              padding: "6px 10px", fontSize: 10, color: "var(--color-text-faint)",
+              textTransform: "uppercase", letterSpacing: "0.06em",
+              borderBottom: "1px solid var(--color-border)",
+              background: "var(--color-elevated)",
+            }}>
+              Plan ({plan.length} file{plan.length === 1 ? "" : "s"})
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10, fontFamily: "var(--font-mono, ui-monospace, monospace)" }}>
+              <tbody>
+                {plan.slice(0, 100).map((p, i) => (
+                  <tr key={i} style={{ borderBottom: "1px solid var(--color-border)" }}>
+                    <td style={{ padding: "4px 10px", color: "var(--color-text-faint)", wordBreak: "break-all" }}>
+                      {p.src}
+                    </td>
+                    <td style={{ padding: "4px 6px", color: "var(--color-lime)", fontSize: 12 }}>→</td>
+                    <td style={{ padding: "4px 10px", color: "var(--color-text)", wordBreak: "break-all" }}>
+                      {p.dst}
+                    </td>
+                  </tr>
+                ))}
+                {plan.length > 100 && (
+                  <tr><td colSpan={3} style={{ padding: "6px 10px", color: "var(--color-text-faint)", fontSize: 10 }}>
+                    … and {plan.length - 100} more
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {plan && plan.length === 0 && !done && (
+          <div style={{
+            padding: "10px 12px", marginBottom: 12,
+            background: "var(--color-elevated)",
+            border: "1px solid var(--color-border)", borderRadius: 6,
+            fontSize: 11, color: "var(--color-text-faint)",
+          }}>
+            No files matched <code>{src}</code>. Double-check the prefix.
+          </div>
+        )}
+
+        {conflicts.length > 0 && (
+          <div style={{
+            marginBottom: 12, padding: "8px 10px",
+            background: "color-mix(in srgb, var(--color-danger) 12%, transparent)",
+            border: "1px solid var(--color-danger)", borderRadius: 6,
+            fontSize: 11, color: "var(--color-text)",
+          }}>
+            <strong>{conflicts.length} destination key(s) already exist.</strong>
+            {" "}Refusing to clobber. Move or rename them first, or pick a different
+            destination prefix.
+            <ul style={{ margin: "6px 0 0", paddingLeft: 20, fontSize: 10, fontFamily: "var(--font-mono, ui-monospace, monospace)" }}>
+              {conflicts.slice(0, 5).map((c, i) => <li key={i}>{c}</li>)}
+              {conflicts.length > 5 && <li>… and {conflicts.length - 5} more</li>}
+            </ul>
+          </div>
+        )}
+
+        {plan && plan.length > 0 && !done && (
+          <div style={{
+            display: "flex", alignItems: "flex-start", gap: 8,
+            background: "color-mix(in srgb, var(--color-warning, #f59e0b) 14%, transparent)",
+            border: "1px solid var(--color-warning, #f59e0b)",
+            borderRadius: 6, padding: "8px 10px", marginBottom: 14,
+          }}>
+            <AlertTriangle size={13} color="var(--color-warning, #f59e0b)" style={{ marginTop: 1, flexShrink: 0 }} />
+            <div style={{ fontSize: 11, color: "var(--color-text)", lineHeight: 1.5 }}>
+              Confirming will COPY then DELETE each file above. MEGA S4 has
+              no versioning — the source keys will be permanently gone.
+              Any signature record pointing at the old prefix is rewritten.
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div style={{
+            marginBottom: 12, padding: "6px 10px",
+            background: "color-mix(in srgb, var(--color-danger) 12%, transparent)",
+            border: "1px solid var(--color-danger)", borderRadius: 6,
+            fontSize: 11, color: "var(--color-text)",
+          }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button type="button" onClick={onCancel} disabled={running} style={btnGhost}>
+            {done ? "Close" : "Cancel"}
+          </button>
+          {!done && plan && (
+            <button
+              type="button"
+              onClick={onResetPlan}
+              disabled={running}
+              style={btnGhost}
+            >
+              Edit prefixes
+            </button>
+          )}
+          {!done && !plan && (
+            <button
+              type="button"
+              onClick={onPreview}
+              disabled={running || !previewable}
+              style={btnGhost}
+              title="Dry-run: list the src→dst pairs without executing"
+            >
+              {running ? <Loader2 size={13} className="spin" /> : <FolderInput size={13} />}
+              Preview plan
+            </button>
+          )}
+          {!done && plan && plan.length > 0 && conflicts.length === 0 && (
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={running}
+              style={{
+                ...btnGhost,
+                background: "color-mix(in srgb, var(--color-lime) 16%, transparent)",
+                color: "var(--color-lime)",
+                borderColor: "var(--color-lime)",
+              }}
+            >
+              {running ? <Loader2 size={13} className="spin" /> : <FolderInput size={13} />}
+              Confirm rename ({plan.length})
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 // Bulk rename — find/replace pattern applied across N selected MEGA files.
 // Each rename runs sequentially through legalFileRename so a partial-failure

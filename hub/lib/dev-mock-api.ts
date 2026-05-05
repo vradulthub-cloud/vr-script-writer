@@ -825,6 +825,29 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
     } as unknown as T)
   }
 
+  // Rename a MEGA legal-folder prefix. Mock builds plausible plan rows
+  // by listing the fixture MEGA files that share the src_prefix.
+  if (base === "/compliance/admin/legal-folders/rename" && init?.method === "POST") {
+    const body = JSON.parse(typeof init.body === "string" ? init.body : "{}") as {
+      studio?: string; src_prefix?: string; dst_prefix?: string; dry_run?: boolean
+    }
+    const studio = (body.studio ?? "").toUpperCase()
+    const src = body.src_prefix ?? ""
+    const dst = body.dst_prefix ?? ""
+    const matches = MOCK_MEGA_LEGAL_FILES
+      .filter(f => f.studio === studio && f.key.startsWith(src))
+      .map(f => ({ src: f.key, dst: dst + f.key.slice(src.length) }))
+    return wait({
+      ok: true,
+      moved: body.dry_run ? 0 : matches.length,
+      planned: matches,
+      errors: [],
+      conflict_count: 0,
+      signatures_updated: 0,
+      dry_run: !!body.dry_run,
+    } as unknown as T)
+  }
+
   if (base === "/compliance/admin/bulk-import-from-drive" && init?.method === "POST") {
     return wait({
       folders_seen: 18,

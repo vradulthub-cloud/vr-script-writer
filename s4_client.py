@@ -354,6 +354,103 @@ def rename_object(studio: str, src_key: str, dst_key: str) -> dict:
     return new_head
 
 
+def rename_prefix(studio: str, src_prefix: str, dst_prefix: str,
+                  *, dry_run: bool = False,
+                  on_progress=None) -> dict:
+    """Move every object under ``src_prefix`` to the same path under ``dst_prefix``.
+
+    Useful for fixing typo'd folder names (e.g. ``VRH00762/Legal/`` →
+    ``VRH0762/Legal/``). For each src key, computes the dst by replacing
+    the src_prefix with dst_prefix, then COPY + DELETE the source.
+
+    Refuses to run if any dst key already exists — that would clobber
+    paperwork in the destination folder. Returns a summary with
+    per-key results so the caller can surface progress and errors.
+
+    ``on_progress(done, total, current_key)`` if provided is called after
+    each successful move. ``dry_run=True`` lists the planned moves without
+    executing them.
+    """
+    if not src_prefix or not dst_prefix:
+        raise ValueError("src_prefix and dst_prefix must be non-empty")
+    if src_prefix == dst_prefix:
+        raise ValueError("src_prefix == dst_prefix")
+    if not src_prefix.endswith("/"):
+        src_prefix = src_prefix + "/"
+    if not dst_prefix.endswith("/"):
+        dst_prefix = dst_prefix + "/"
+
+    src_keys = [obj["key"] for obj in list_objects(studio, src_prefix)]
+    if not src_keys:
+        return {"ok": True, "moved": 0, "planned": [], "errors": [], "dry_run": dry_run}
+
+    # Pre-flight: refuse to run if any destination already has paperwork.
+    # Doing this up-front means a partial run can't accidentally clobber
+    # files that happen to exist under dst_prefix.
+    plan: list[tuple[str, str]] = []
+    conflicts: list[str] = []
+    for src_key in src_keys:
+        if not src_key.startswith(src_prefix):
+            continue  # defensive — list_objects with a prefix should always match
+        suffix = src_key[len(src_prefix):]
+        dst_key = dst_prefix + suffix
+        if head_object(studio, dst_key) is not None:
+            conflicts.append(dst_key)
+        plan.append((src_key, dst_key))
+
+    if conflicts:
+        return {
+            "ok": False,
+            "moved": 0,
+            "planned": [{"src": s, "dst": d} for s, d in plan],
+            "errors": [f"dst conflict: {k!r}" for k in conflicts[:25]],
+            "conflict_count": len(conflicts),
+            "dry_run": dry_run,
+        }
+
+    if dry_run:
+        return {
+            "ok": True,
+            "moved": 0,
+            "planned": [{"src": s, "dst": d} for s, d in plan],
+            "errors": [],
+            "dry_run": True,
+        }
+
+    moved = 0
+    errors: list[str] = []
+    prior = os.environ.get("S4_ALLOW_DESTRUCTIVE")
+    os.environ["S4_ALLOW_DESTRUCTIVE"] = "1"
+    try:
+        for src_key, dst_key in plan:
+            try:
+                copy_object(studio, src_key, dst_key)
+                delete_object(studio, src_key)
+                moved += 1
+                if on_progress:
+                    try:
+                        on_progress(moved, len(plan), src_key)
+                    except Exception:
+                        pass
+            except Exception as exc:
+                errors.append(f"{src_key}: {exc}")
+                # Continue with remaining objects — partial success is
+                # better than aborting and leaving even more weirdness.
+    finally:
+        if prior is None:
+            os.environ.pop("S4_ALLOW_DESTRUCTIVE", None)
+        else:
+            os.environ["S4_ALLOW_DESTRUCTIVE"] = prior
+
+    return {
+        "ok": not errors,
+        "moved": moved,
+        "planned": [{"src": s, "dst": d} for s, d in plan],
+        "errors": errors,
+        "dry_run": False,
+    }
+
+
 def delete_object(studio: str, key: str) -> None:
     """Delete one object from S4. Guarded by the boto3 hook on ``_client()``;
     this convenience wrapper just raises a friendlier error message.
