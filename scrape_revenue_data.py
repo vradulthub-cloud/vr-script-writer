@@ -91,6 +91,9 @@ OUT_POVR   = DOCUMENTS / "povr_video_data.csv"
 # Per-video data lives elsewhere in the partner portal (TBD); for now the
 # daily file feeds the dashboard's "yesterday" + "this-month-daily" cards.
 OUT_VRPORN = DOCUMENTS / "vrporn_daily.csv"
+# Daily-totals files (one per platform, all merge into _DailyData on upload).
+OUT_POVR_DAILY = DOCUMENTS / "povr_daily.csv"
+OUT_SLR_DAILY  = DOCUMENTS / "slr_daily.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +328,92 @@ def scrape_povr(page: Page, dry_run: bool) -> list[list[str]]:
     return out
 
 
+def scrape_povr_daily(page: Page, dry_run: bool, lookback_days: int = 60) -> list[list[str]]:
+    """Scrape POVR daily revenue (last `lookback_days`).
+
+    Output schema (matches the _DailyData tab on the sheet):
+      Date (YYYY-MM-DD), Studio (always 'All' for now), Total Earnings $
+
+    Uses /stats?gr=day&pp=100&d1=<date>&d2=<today>. With gr=day, each row
+    is one calendar day's total across all studios. POVR returns the
+    table sorted desc by date. We don't paginate by default — 60 days
+    fits in a single 100-row page.
+    """
+    import re
+    from datetime import date, timedelta
+
+    user = os.environ.get("POVR_USER")
+    pw   = os.environ.get("POVR_PASS")
+    if not user or not pw:
+        raise RuntimeError("POVR_USER / POVR_PASS env vars not set")
+
+    log.info("POVR daily: opening partners portal...")
+    page.goto("https://partners.povr.com/", wait_until="domcontentloaded", timeout=30_000)
+
+    # Same login dance as the per-video scraper — the form lives behind a
+    # collapsed accordion on the marketing landing.
+    if page.locator('input[name="username"]:visible').count() == 0:
+        link = page.locator('a:has-text("Login"), button:has-text("Login")').first
+        if link.count() > 0:
+            link.click(timeout=10_000)
+            page.wait_for_selector('input[name="username"]:visible', state="visible", timeout=10_000)
+    if page.locator('input[name="username"]:visible').count() > 0:
+        page.fill('input[name="username"]', user)
+        page.fill('input[name="password"]', pw)
+        page.click('button[type="submit"], input[type="submit"]')
+        try:
+            page.wait_for_url(lambda u: "stats" in u or "content" in u, timeout=20_000)
+        except PWTimeout:
+            pass
+
+    today = date.today()
+    d1 = (today - timedelta(days=lookback_days)).isoformat()
+    d2 = today.isoformat()
+    url = f"https://partners.povr.com/stats?gr=day&pp=100&d1={d1}&d2={d2}"
+    log.info(f"POVR daily: loading {url}")
+
+    last_exc: Exception | None = None
+    for attempt in (1, 2, 3):
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+            page.wait_for_load_state("networkidle", timeout=45_000)
+            page.wait_for_selector("table tbody tr", timeout=30_000)
+            last_exc = None
+            break
+        except Exception as e:
+            last_exc = e
+            log.warning(f"POVR daily: attempt {attempt}/3 failed ({type(e).__name__}); retrying...")
+            page.wait_for_timeout(2_500)
+    if last_exc is not None:
+        raise last_exc
+
+    cells_per_row = page.eval_on_selector_all(
+        "table tbody tr",
+        "els => els.map(tr => [...tr.querySelectorAll('td')].map(td => (td.innerText||'').trim()))",
+    )
+
+    out: list[list[str]] = []
+    # POVR's daily TD[0] is a date string like "2026-04-30" (already ISO),
+    # TD[4] is "$X,XXX.XX" Member Share. Skip the trailing "Total (N rows)".
+    iso_date = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    for cells in cells_per_row:
+        if len(cells) < 5:
+            continue
+        first = cells[0].strip()
+        if first.lower().startswith("total") or not iso_date.match(first):
+            continue
+        share = cells[4].replace("$", "").replace(",", "").strip()
+        out.append([
+            first,        # Date (already ISO)
+            "All",        # Studio (POVR's daily view aggregates across studios)
+            share,        # Total Earnings $ (raw)
+        ])
+
+    log.info(f"POVR daily: {len(out)} daily rows captured ({d1} → {d2})")
+    return out
+
+
+
 # ---------------------------------------------------------------------------
 # VRPorn — admin.vrporn.com (or wherever the ODS portal lives)
 # ---------------------------------------------------------------------------
@@ -448,6 +537,11 @@ PLATFORMS: dict[str, dict] = {
         "header": ["Year", "POVR_ID", "Title", "Premium Views",
                    "Time Streamed", "Downloads", "Member Share $"],
     },
+    "povr-daily": {
+        "fn": scrape_povr_daily,
+        "out": OUT_POVR_DAILY,
+        "header": ["Date", "Studio", "Total Earnings $"],
+    },
     "vrporn": {
         "fn": scrape_vrporn,
         "out": OUT_VRPORN,
@@ -461,25 +555,31 @@ PLATFORMS: dict[str, dict] = {
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--all",    action="store_true", help="Scrape all three platforms")
-    ap.add_argument("--slr",    action="store_true")
-    ap.add_argument("--povr",   action="store_true")
-    ap.add_argument("--vrporn", action="store_true")
-    ap.add_argument("--headed",  action="store_true",
+    ap.add_argument("--all",        action="store_true", help="Scrape all three platforms (per-video where available + daily)")
+    ap.add_argument("--daily",      action="store_true", help="Scrape only daily-totals across all platforms (much faster than full per-video)")
+    ap.add_argument("--slr",        action="store_true")
+    ap.add_argument("--povr",       action="store_true", help="POVR per-video (full catalog, ~3 min)")
+    ap.add_argument("--povr-daily", action="store_true", dest="povr_daily", help="POVR daily totals (last 60 days, ~10s)")
+    ap.add_argument("--vrporn",     action="store_true")
+    ap.add_argument("--headed",     action="store_true",
                     help="Show the browser (use for first-run 2FA / captcha)")
-    ap.add_argument("--dry-run", action="store_true",
+    ap.add_argument("--dry-run",    action="store_true",
                     help="Log in + navigate but don't write CSVs")
     args = ap.parse_args()
 
     targets: list[str] = []
     if args.all:
-        targets = list(PLATFORMS.keys())
+        targets = ["slr", "povr", "vrporn"]  # full per-video scrape (drops daily)
+    elif args.daily:
+        targets = ["povr-daily", "vrporn"]   # SLR daily TBD
     else:
         for p in PLATFORMS:
-            if getattr(args, p):
+            # argparse converts hyphens to underscores for attribute names
+            attr = p.replace("-", "_")
+            if getattr(args, attr, False):
                 targets.append(p)
     if not targets:
-        ap.error("Pass --all or one of --slr / --povr / --vrporn")
+        ap.error("Pass --all, --daily, or one of --slr / --povr / --povr-daily / --vrporn")
 
     failed: list[str] = []
     with sync_playwright() as p:
