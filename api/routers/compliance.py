@@ -3669,6 +3669,140 @@ async def presign_mega_legal_file(
     return {"url": url, "studio": studio.upper(), "key": key}
 
 
+# ─── Legal-file rename (TKT-0182) ─────────────────────────────────────────────
+
+class LegalFileRenameRequest(BaseModel):
+    """Rename a single file inside a MEGA `{SCENE_ID}/Legal/` folder.
+
+    The new filename keeps the same parent path; only the leaf changes.
+    Server enforces:
+      - src key must include `/legal/` (case-insensitive)
+      - extension must be preserved (no .pdf → .jpg shenanigans)
+      - dst must not already exist (no silent overwrite of paperwork)
+
+    Audit: a new row is written to compliance_signatures_history if any
+    compliance_signatures.pdf_mega_path pointed at the old key.
+    """
+    studio: str                # canonical 4-letter code: FPVR / VRH / VRA / NJOI
+    src_key: str               # full key being renamed
+    new_filename: str          # leaf only, e.g. "MikeMancini-040526.pdf"
+
+
+class LegalFileRenameResult(BaseModel):
+    ok: bool
+    new_key: str
+    signatures_updated: int    # how many compliance_signatures.pdf_mega_path rows we rewrote
+
+
+def _parent_prefix(key: str) -> str:
+    """Return the parent prefix including trailing slash, or '' for root keys."""
+    if "/" not in key:
+        return ""
+    return key.rsplit("/", 1)[0] + "/"
+
+
+def _ext_lower(name: str) -> str:
+    if "." not in name:
+        return ""
+    return "." + name.rsplit(".", 1)[-1].lower()
+
+
+@router.post("/admin/legal-files/rename", response_model=LegalFileRenameResult)
+async def rename_legal_file(
+    body: LegalFileRenameRequest,
+    request: Request,
+    _admin: dict = Depends(require_admin),
+):
+    """Rename one paperwork file in a MEGA Legal/ folder. COPY then DELETE.
+
+    Updates the compliance_legal_files index, and rewrites pdf_mega_path on
+    any compliance_signatures row pointing at the old key (the trigger
+    snapshots the prior state to compliance_signatures_history so the audit
+    trail captures the rename).
+    """
+    import s4_client
+
+    studio = (body.studio or "").lower()
+    src_key = body.src_key or ""
+    new_name = (body.new_filename or "").strip()
+
+    if not src_key or "/legal/" not in src_key.lower():
+        raise HTTPException(status_code=400, detail="src_key must be inside a Legal/ folder")
+    if not new_name or "/" in new_name or new_name in (".", ".."):
+        raise HTTPException(status_code=400, detail="new_filename must be a single path segment")
+    src_ext = _ext_lower(src_key.rsplit("/", 1)[-1])
+    dst_ext = _ext_lower(new_name)
+    if src_ext != dst_ext:
+        raise HTTPException(
+            status_code=400,
+            detail=f"extension mismatch: src {src_ext!r} != dst {dst_ext!r}",
+        )
+
+    dst_key = _parent_prefix(src_key) + new_name
+    if dst_key == src_key:
+        return LegalFileRenameResult(ok=True, new_key=dst_key, signatures_updated=0)
+
+    try:
+        await asyncio.to_thread(s4_client.rename_object, studio, src_key, dst_key)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        _log.exception("legal-file rename failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"rename failed: {exc}")
+
+    # 1. Update the index: replace the row's key + filename. The PK is
+    #    (studio, key) so we can't UPDATE in place — INSERT new + DELETE old.
+    studio_upper = studio.upper()
+    sigs_updated = 0
+    audit_user = (request.client.host if request.client else "?") + ":legal-file-rename"
+    with get_db() as conn:
+        old_row = conn.execute(
+            "SELECT * FROM compliance_legal_files WHERE studio=? AND key=?",
+            (studio_upper, src_key),
+        ).fetchone()
+        if old_row:
+            d = dict(old_row)
+            d["key"] = dst_key
+            d["filename"] = new_name
+            d["indexed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%fZ")
+            conn.execute(
+                """INSERT INTO compliance_legal_files
+                       (studio, scene_id, key, filename, size, last_modified,
+                        guessed_talent, doc_kind, imported_signature_id, indexed_at)
+                   VALUES (:studio, :scene_id, :key, :filename, :size, :last_modified,
+                           :guessed_talent, :doc_kind, :imported_signature_id, :indexed_at)
+                   ON CONFLICT(studio, key) DO UPDATE SET
+                       scene_id=excluded.scene_id, filename=excluded.filename,
+                       size=excluded.size, last_modified=excluded.last_modified,
+                       guessed_talent=excluded.guessed_talent, doc_kind=excluded.doc_kind,
+                       imported_signature_id=excluded.imported_signature_id,
+                       indexed_at=excluded.indexed_at""",
+                d,
+            )
+            conn.execute(
+                "DELETE FROM compliance_legal_files WHERE studio=? AND key=?",
+                (studio_upper, src_key),
+            )
+
+        # 2. Rewrite compliance_signatures.pdf_mega_path that pointed at this key.
+        #    Match on suffix (the stored path is "s3://{bucket}/{key}").
+        cur = conn.execute(
+            """UPDATE compliance_signatures
+                  SET pdf_mega_path = REPLACE(pdf_mega_path, ?, ?),
+                      signed_by_user = COALESCE(NULLIF(signed_by_user, ''), '') || ' | ' || ?
+                WHERE pdf_mega_path LIKE '%' || ?""",
+            (src_key, dst_key, audit_user, src_key),
+        )
+        sigs_updated = cur.rowcount or 0
+        conn.commit()
+
+    return LegalFileRenameResult(
+        ok=True,
+        new_key=dst_key,
+        signatures_updated=sigs_updated,
+    )
+
+
 class SignatureSearchHitOut(BaseModel):
     """Wire format for a single search hit. TIN is masked to last-4 only —
     the full TIN is loaded on demand when an admin opens the edit modal."""

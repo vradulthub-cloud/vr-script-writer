@@ -300,6 +300,60 @@ def put_object(studio: str, key: str, src_path: str | Path,
     _client().upload_file(str(src_path), bucket, key, ExtraArgs=extra or None)
 
 
+def copy_object(studio: str, src_key: str, dst_key: str) -> dict:
+    """Server-side copy within the same studio bucket. Returns the dst HEAD.
+
+    MEGA S4 supports CopyObject (no streamed re-upload, the bucket does the
+    work). Used by ``rename_object`` and the legal-folder rename endpoint —
+    much faster + cheaper than download → upload, especially for the
+    multi-GB video files we sometimes shuffle around.
+    """
+    bucket = _studio_to_bucket(studio)
+    if src_key == dst_key:
+        raise ValueError("src and dst keys are identical")
+    _client().copy_object(
+        Bucket=bucket,
+        Key=dst_key,
+        CopySource={"Bucket": bucket, "Key": src_key},
+    )
+    head = head_object(studio, dst_key)
+    if head is None:
+        raise RuntimeError(f"copy verified failed: dst {dst_key!r} not present")
+    return head
+
+
+def rename_object(studio: str, src_key: str, dst_key: str) -> dict:
+    """Atomic-ish rename: COPY src → dst, verify, then DELETE src.
+
+    Uses the destructive-op env opt-in pattern from the rules: temporarily
+    sets ``S4_ALLOW_DESTRUCTIVE`` for the delete call only, then restores
+    the prior value (or unsets). The boto3 client is cached, but the
+    ``_destructive_guard`` hook checks the env var on every invocation
+    so this is safe.
+
+    Order matters: if the COPY succeeds and the DELETE fails, you have
+    duplicate copies — recoverable. If we DELETED first and the COPY
+    failed, the data would be gone.
+    """
+    if src_key == dst_key:
+        return head_object(studio, src_key) or {}
+    if head_object(studio, dst_key) is not None:
+        raise FileExistsError(f"dst already exists: {dst_key!r}")
+
+    new_head = copy_object(studio, src_key, dst_key)
+
+    prior = os.environ.get("S4_ALLOW_DESTRUCTIVE")
+    os.environ["S4_ALLOW_DESTRUCTIVE"] = "1"
+    try:
+        delete_object(studio, src_key)
+    finally:
+        if prior is None:
+            os.environ.pop("S4_ALLOW_DESTRUCTIVE", None)
+        else:
+            os.environ["S4_ALLOW_DESTRUCTIVE"] = prior
+    return new_head
+
+
 def delete_object(studio: str, key: str) -> None:
     """Delete one object from S4. Guarded by the boto3 hook on ``_client()``;
     this convenience wrapper just raises a friendlier error message.

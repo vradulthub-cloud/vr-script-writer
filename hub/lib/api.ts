@@ -1864,6 +1864,17 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
           `/compliance/admin/legal-folders/presign?studio=${encodeURIComponent(studio)}&key=${encodeURIComponent(key)}`,
         ),
 
+      // Rename one file inside a MEGA Legal/ folder. Server does
+      // COPY → DELETE on the bucket, then rewrites compliance_legal_files
+      // and compliance_signatures.pdf_mega_path to point at the new key.
+      // Server enforces matching extensions and refuses overwrites.
+      // Destructive — confirm in the UI before calling.
+      legalFileRename: (studio: string, src_key: string, new_filename: string) =>
+        post<{ ok: boolean; new_key: string; signatures_updated: number }>(
+          "/compliance/admin/legal-files/rename",
+          { studio, src_key, new_filename },
+        ),
+
       // Bulk-import MEGA legal-folder PDFs into compliance_signatures.
       // Walks every shoot in the date window, lists its {SCENE_ID}/Legal/
       // folder, downloads each matched PDF, extracts AcroForm fields, and

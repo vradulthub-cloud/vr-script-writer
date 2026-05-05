@@ -807,6 +807,24 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
     } as unknown as T)
   }
 
+  // Rename a MEGA legal file. Mock just echoes the new key — the real
+  // backend does COPY → DELETE on the bucket and rewrites the index.
+  if (base === "/compliance/admin/legal-files/rename" && init?.method === "POST") {
+    const body = JSON.parse(typeof init.body === "string" ? init.body : "{}") as {
+      studio?: string; src_key?: string; new_filename?: string
+    }
+    const src_key = body.src_key ?? ""
+    const new_filename = body.new_filename ?? ""
+    const new_key = src_key.includes("/")
+      ? src_key.replace(/[^/]+$/, new_filename)
+      : new_filename
+    return wait({
+      ok: true,
+      new_key,
+      signatures_updated: 0,
+    } as unknown as T)
+  }
+
   if (base === "/compliance/admin/bulk-import-from-drive" && init?.method === "POST") {
     return wait({
       folders_seen: 18,
