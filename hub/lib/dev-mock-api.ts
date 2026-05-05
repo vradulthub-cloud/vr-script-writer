@@ -776,6 +776,27 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
       truncated: false,
     } as unknown as T)
   }
+  // Bulk-import MEGA legal-folder PDFs (mock summary)
+  if (base === "/compliance/admin/import-from-mega-legal" && init?.method === "POST") {
+    const seen = MOCK_MEGA_LEGAL_FILES.length
+    const imported = Math.max(0, seen - 2)
+    return wait({
+      shoots_seen: seen,
+      shoots_processed: seen - 1,
+      total_imported: imported,
+      shoots: MOCK_MEGA_LEGAL_FILES.slice(0, 4).map(f => ({
+        shoot_id: `mock-${f.scene_id}`,
+        shoot_date: (f.last_modified || "").slice(0, 10) || "2026-01-01",
+        scene_id: f.scene_id,
+        studio: f.studio,
+        talents_imported: 1,
+        talents_skipped: 0,
+        skipped_reason: "",
+      })),
+      errors: [],
+    } as unknown as T)
+  }
+
   if (base === "/compliance/admin/legal-folders/presign") {
     const studio = params.get("studio") ?? ""
     const key    = params.get("key") ?? ""

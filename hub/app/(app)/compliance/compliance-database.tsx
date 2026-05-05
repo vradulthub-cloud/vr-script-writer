@@ -22,6 +22,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Database,
   Download,
+  DownloadCloud,
   ExternalLink,
   FileText,
   HardDrive,
@@ -32,6 +33,7 @@ import {
 } from "lucide-react"
 import {
   api,
+  type MegaImportResult,
   type MegaLegalFile,
   type SignatureSearchHit,
 } from "@/lib/api"
@@ -123,6 +125,18 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
 
   // Selection (modal open)
   const [editingId, setEditingId] = useState<number | null>(null)
+
+  // Bulk MEGA → DB importer
+  const [importOpen, setImportOpen]           = useState(false)
+  const [importRunning, setImportRunning]     = useState(false)
+  const [importResult, setImportResult]       = useState<MegaImportResult | null>(null)
+  const [importError, setImportError]         = useState<string | null>(null)
+  const ytdFrom = `${new Date().getUTCFullYear()}-01-01`
+  const todayUtc = new Date().toISOString().slice(0, 10)
+  const [importFrom, setImportFrom]           = useState(ytdFrom)
+  const [importTo, setImportTo]               = useState(todayUtc)
+  const [importStudio, setImportStudio]       = useState<string>("")
+  const [importOverwrite, setImportOverwrite] = useState(false)
 
   // Debounced query — re-fetch DB results as the user types.
   const queryDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -289,6 +303,30 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
     }
   }
 
+  async function runImport() {
+    setImportRunning(true)
+    setImportError(null)
+    setImportResult(null)
+    try {
+      const r = await client.compliance.importFromMegaLegal({
+        date_from: importFrom,
+        date_to: importTo,
+        studio: importStudio || undefined,
+        overwrite_existing: importOverwrite,
+        imported_from_label: `db-view-${todayUtc}`,
+      })
+      setImportResult(r)
+      // Refresh both lists so newly imported rows appear and MEGA-only
+      // rows that just got imported flip to "Records" rows.
+      void loadDb({ silent: true })
+      void loadMega(true)
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : "Import failed")
+    } finally {
+      setImportRunning(false)
+    }
+  }
+
   function clearFilters() {
     setQuery("")
     setDateFrom("")
@@ -319,6 +357,17 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             type="button"
+            onClick={() => setImportOpen(v => !v)}
+            style={importOpen
+              ? { ...btnGhost, color: "var(--color-lime)", borderColor: "var(--color-lime)" }
+              : btnGhost}
+            title="Bulk-import MEGA Legal/ folder PDFs into the records DB"
+          >
+            <DownloadCloud size={13} />
+            Import from MEGA
+          </button>
+          <button
+            type="button"
             onClick={() => { void loadDb(); void loadMega(true) }}
             disabled={loadingDb || loadingMega}
             style={btnGhost}
@@ -339,6 +388,121 @@ export function ComplianceDatabase({ idToken }: { idToken: string | undefined })
           </button>
         </div>
       </div>
+
+      {/* ── Import-from-MEGA panel (collapsible) ── */}
+      {importOpen && (
+        <div style={{
+          background: "var(--color-elevated)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 10,
+          padding: "14px 16px",
+          marginBottom: 12,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <DownloadCloud size={14} color="var(--color-lime)" />
+            <h3 style={{
+              margin: 0, fontSize: 12, fontWeight: 700,
+              letterSpacing: "0.04em", textTransform: "uppercase",
+              color: "var(--color-text)",
+            }}>
+              Import MEGA paperwork into records
+            </h3>
+            <button
+              type="button"
+              onClick={() => setImportOpen(false)}
+              aria-label="Close import panel"
+              style={{
+                marginLeft: "auto", background: "transparent", border: "none",
+                color: "var(--color-text-faint)", cursor: "pointer",
+                display: "flex", alignItems: "center", padding: 0,
+              }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <p style={{
+            margin: "0 0 12px", fontSize: 11, color: "var(--color-text-faint)", lineHeight: 1.5,
+          }}>
+            Walks each shoot in the date range, downloads every <code style={{
+              background: "var(--color-surface)", padding: "0 4px", borderRadius: 3,
+            }}>{"{SCENE_ID}/Legal/*.pdf"}</code>{" "}
+            file, parses the AcroForm fields, and creates a structured record per
+            matched talent. Skips shoots that already have records unless
+            <em> Overwrite existing</em> is on.
+          </p>
+          <div style={{
+            display: "grid", gridTemplateColumns: "auto auto auto auto 1fr auto", gap: 10, alignItems: "end",
+          }}>
+            <FilterField label="From">
+              <input type="date" value={importFrom} onChange={e => setImportFrom(e.target.value)} style={inputCompact} />
+            </FilterField>
+            <FilterField label="To">
+              <input type="date" value={importTo} onChange={e => setImportTo(e.target.value)} style={inputCompact} />
+            </FilterField>
+            <FilterField label="Studio">
+              <select value={importStudio} onChange={e => setImportStudio(e.target.value)} style={inputCompact}>
+                {STUDIO_OPTIONS.map(s => <option key={s || "all"} value={s}>{s || "All"}</option>)}
+              </select>
+            </FilterField>
+            <label style={{
+              display: "flex", alignItems: "center", gap: 6, fontSize: 11,
+              color: "var(--color-text-faint)",
+            }}>
+              <input
+                type="checkbox"
+                checked={importOverwrite}
+                onChange={e => setImportOverwrite(e.target.checked)}
+              />
+              Overwrite existing
+            </label>
+            <div />
+            <button
+              type="button"
+              onClick={runImport}
+              disabled={importRunning || !importFrom || !importTo}
+              style={{
+                ...btnGhost,
+                background: "color-mix(in srgb, var(--color-lime) 16%, transparent)",
+                color: "var(--color-lime)",
+                borderColor: "var(--color-lime)",
+              }}
+            >
+              {importRunning ? <Loader2 size={13} className="spin" /> : <DownloadCloud size={13} />}
+              Run import
+            </button>
+          </div>
+          {importError && (
+            <div style={{
+              marginTop: 10, padding: "6px 10px",
+              background: "color-mix(in srgb, var(--color-danger) 12%, transparent)",
+              border: "1px solid var(--color-danger)", borderRadius: 6,
+              fontSize: 11, color: "var(--color-text)",
+            }}>
+              {importError}
+            </div>
+          )}
+          {importResult && (
+            <div style={{
+              marginTop: 10, padding: "8px 12px",
+              background: "var(--color-surface)",
+              border: "1px solid var(--color-border)", borderRadius: 6,
+              fontSize: 11, color: "var(--color-text)",
+              display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8,
+            }}>
+              <Stat label="Shoots seen" value={importResult.shoots_seen} />
+              <Stat label="Shoots processed" value={importResult.shoots_processed} />
+              <Stat label="Talents imported" value={importResult.total_imported} highlight />
+              {importResult.errors.length > 0 && (
+                <div style={{
+                  gridColumn: "1 / -1", color: "var(--color-danger)", fontSize: 10,
+                }}>
+                  {importResult.errors.length} errors — first: {importResult.errors[0]}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Search + filter row ── */}
       <div style={{
@@ -809,6 +973,25 @@ function classifyDocument(filename: string): string {
 }
 
 // ─── Tiny presentational helpers ─────────────────────────────────────────────
+
+function Stat({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
+  return (
+    <div>
+      <div style={{
+        fontSize: 9, textTransform: "uppercase", letterSpacing: "0.06em",
+        color: "var(--color-text-faint)",
+      }}>
+        {label}
+      </div>
+      <div style={{
+        fontSize: 16, fontWeight: 700,
+        color: highlight ? "var(--color-lime)" : "var(--color-text)",
+      }}>
+        {value.toLocaleString()}
+      </div>
+    </div>
+  )
+}
 
 function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
