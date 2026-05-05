@@ -934,25 +934,47 @@ function RowView({
 
 /**
  * Best-effort extract a talent display name from a MEGA legal-folder
- * filename. The convention from the prepare flow is `{TalentSlug}-{date}.pdf`
- * and historical files mostly follow `{TalentName}-{kind}.{ext}` (e.g.
- * `JadaSnow-IDFront.jpg`, `MissyDee-Front.jpg`). Returns null when the
- * leading segment doesn't look like a CamelCase person name.
+ * filename. Handles three observed conventions:
+ *
+ *   1. CamelCase from the prepare flow: `JadaSnow-061220.pdf` → "Jada Snow"
+ *   2. Two-word lowercase/mixed: `mike mancini oct 5 2019.pdf` → "Mike Mancini"
+ *   3. Two-word with date suffix: `Marilyn Johnson 121822.pdf` → "Marilyn Johnson"
+ *
+ * Returns null when no name can be confidently extracted (e.g. raw
+ * timestamp filenames like `20190707_101817.jpg`).
  */
 function guessTalentFromFilename(filename: string): string | null {
   const stem = filename.replace(/\.[^.]+$/, "")        // drop extension
-  const head = stem.split(/[-_ ]/, 1)[0] || ""         // first segment
-  // Must look like CamelCase: ≥2 capitalized chunks, e.g. "JadaSnow"
-  if (!/^[A-Z][a-z]+([A-Z][a-z]+)+$/.test(head)) return null
-  // Skip generic words that happen to match (avoid false positives like
-  // "SignedRelease", "MaleAgreement").
-  const NON_NAMES = new Set([
-    "SignedAgreement", "SignedRelease", "ReleaseOriginal", "ModelRelease",
-    "Disclosure", "Performer", "Custom", "Original", "Document", "Photo",
-  ])
-  if (NON_NAMES.has(head)) return null
-  // Insert a space between adjacent CamelCase chunks: JadaSnow → Jada Snow
-  return head.replace(/([a-z])([A-Z])/g, "$1 $2")
+
+  // Pattern 1: CamelCase head (e.g. "JadaSnow-061220" → "JadaSnow")
+  const head = stem.split(/[-_ ]/, 1)[0] || ""
+  if (/^[A-Z][a-z]+([A-Z][a-z]+)+$/.test(head)) {
+    const NON_NAMES = new Set([
+      "SignedAgreement", "SignedRelease", "ReleaseOriginal", "ModelRelease",
+      "Disclosure", "Performer", "Custom", "Original", "Document", "Photo",
+    ])
+    if (!NON_NAMES.has(head)) {
+      return head.replace(/([a-z])([A-Z])/g, "$1 $2")
+    }
+  }
+
+  // Pattern 2/3: leading word(s) before a date / number / known suffix.
+  // Take up to the first occurrence of: a digit, a month abbreviation, or
+  // a parenthesized chunk. Then keep the first 2 alpha words as the name.
+  const stop = stem.search(/\b(\d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i)
+  const lead = (stop > 0 ? stem.slice(0, stop) : stem).trim()
+  // Words separated by spaces / underscores / hyphens, alpha only
+  const words = lead.split(/[\s_\-]+/).filter(w => /^[a-zA-Z'\.]+$/.test(w))
+  if (words.length < 2) return null
+  const name = words.slice(0, 2)
+    .map(w => w[0].toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ")
+  // Reject obvious non-names
+  const REJECT = /^(Signed|Agreement|Release|Disclosure|W ?9|2257|Mike Manicini|Custom Field|Test File)$/i
+  if (REJECT.test(name)) return null
+  // First word must look like a real first name (≥3 letters, not all-caps acronym)
+  if (words[0].length < 2) return null
+  return name
 }
 
 /**
