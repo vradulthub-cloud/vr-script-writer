@@ -3212,17 +3212,55 @@ _MEGA_LEGAL_TTL = 60 * 60   # 1 hour
 _MEGA_LEGAL_MAX = 50_000    # safety cap on total files returned
 
 
+# Extensions we accept as plausible paperwork artifacts. Everything else
+# (mp4, mov, ini, ds_store, docx writeups, raw camera files, etc.) is filtered
+# out — Legal/ folders historically accumulated everything from BTS videos
+# to desktop.ini, and surfacing 10k+ junk rows in the Database view defeated
+# the purpose. PDF + the four common ID-photo formats are the real signal.
+_PAPERWORK_EXTS = (".pdf", ".jpg", ".jpeg", ".png", ".heic", ".webp")
+
+# Filename patterns that indicate cruft in a Legal/ folder. Skipped
+# unconditionally even if the extension matches.
+_PAPERWORK_NAME_DENY = (
+    "desktop.ini", "thumbs.db", ".ds_store", "icon\r",
+)
+_PAPERWORK_NAME_DENY_PREFIXES = (
+    "copy of ",        # duplicate cruft like "Copy of Copy of foo.jpg"
+    "dsc_", "dsc-",    # default camera names
+    "img_", "img-",    # generic phone/camera defaults
+    "photo ",          # macOS Photos app exports
+    "._",              # macOS resource forks
+)
+
+
+def _is_paperwork_filename(filename: str) -> bool:
+    """True if this name looks like an actual paperwork artifact rather than
+    BTS / desktop / camera junk. The compliance Database view relies on this
+    to keep noise out of the merged list."""
+    low = filename.lower().strip()
+    if not low or low in _PAPERWORK_NAME_DENY:
+        return False
+    if any(low.startswith(p) for p in _PAPERWORK_NAME_DENY_PREFIXES):
+        return False
+    if not any(low.endswith(ext) for ext in _PAPERWORK_EXTS):
+        return False
+    return True
+
+
 def _scan_mega_legal_folders(
     studios: tuple[str, ...],
     *,
     max_files: int = _MEGA_LEGAL_MAX,
 ) -> tuple[list[MegaLegalFile], bool]:
     """Walk each studio bucket and yield every key whose path contains
-    ``/Legal/``. Returns ``(files, truncated)``.
+    ``/Legal/`` AND whose filename looks like a real paperwork artifact.
 
     We can't filter server-side (S3 has no contains-style prefix), so we
     paginate the whole bucket and filter in memory. With ~10k objects per
     studio this completes in seconds; the result is cached for an hour.
+
+    Filename filter: PDFs + the four common ID-photo formats only, with
+    obvious cruft (Copy of …, DSC_…, desktop.ini, .DS_Store, etc.) excluded.
     """
     import s4_client
 
@@ -3239,12 +3277,15 @@ def _scan_mega_legal_folders(
                 # Skip "directory placeholder" keys ending in / with size 0.
                 if key.endswith("/"):
                     continue
+                filename = key.rsplit("/", 1)[-1]
+                # Drop BTS videos, desktop.ini, "Copy of …" cruft, etc.
+                if not _is_paperwork_filename(filename):
+                    continue
                 head, _, _ = key.partition("/")
                 try:
                     scene_id = s4_client.normalize_scene_id(head)
                 except ValueError:
                     scene_id = head  # non-canonical prefix; surface as-is
-                filename = key.rsplit("/", 1)[-1]
                 lm = obj.get("last_modified")
                 lm_str = ""
                 if lm is not None:
