@@ -28,7 +28,6 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       />
       <Topbar session={session} idToken={idToken} userRole={userProfile.role} disablePolling={skipAuth} />
       <main
-        className="overflow-y-auto"
         style={{
           marginLeft: "var(--spacing-sidebar)",
           paddingTop: "var(--spacing-topbar)",
