@@ -96,6 +96,24 @@ class CrossPlatformRow(BaseModel):
     povr_id: str = ""
 
 
+class DailyRow(BaseModel):
+    """One row of daily revenue per (date, platform, studio)."""
+    date: str       # ISO YYYY-MM-DD
+    platform: str   # "vrporn" / "povr" / "slr"
+    studio: str     # "All" or specific studio
+    revenue: float
+
+
+class DailySummary(BaseModel):
+    """Pre-computed snapshot for the dashboard's daily cards."""
+    yesterday: list[DailyRow]            # all rows for the most recent date
+    yesterday_date: str                  # ISO date of "yesterday" (most recent)
+    yesterday_total: float               # summed across platforms
+    this_month: list[DailyRow]           # daily rows from start-of-month → yesterday
+    this_month_total: float
+    refreshed_at: str
+
+
 # ---------------------------------------------------------------------------
 # Cache layer — single in-memory snapshot of the (small-ish) sheet data
 # ---------------------------------------------------------------------------
@@ -145,6 +163,29 @@ def _normalize_platform(raw: str) -> str:
     if r in {"vrporn", "vrp"}:
         return "vrporn"
     return r
+
+
+def _read_daily_rows(sh) -> list[DailyRow]:
+    """Read the _DailyData tab. Returns [] if the tab doesn't exist yet."""
+    try:
+        ws = sh.worksheet("_DailyData")
+    except Exception:
+        return []
+    rows = with_retry(lambda: ws.get_all_values())
+    out: list[DailyRow] = []
+    for r in rows[1:]:
+        if len(r) < 4 or not r[0].strip():
+            continue
+        try:
+            out.append(DailyRow(
+                date=r[0].strip(),
+                platform=r[1].strip().lower(),
+                studio=r[2].strip(),
+                revenue=_parse_money(r[3]),
+            ))
+        except Exception:
+            continue
+    return out
 
 
 def _build_cache() -> dict:
@@ -284,9 +325,12 @@ def _build_cache() -> dict:
     grand_total = sum(p.all_time for p in platforms)
     ytd_total   = sum(p.ytd      for p in platforms)
 
+    daily = _read_daily_rows(sh)
+
     return {
         "scenes": scenes,
         "cross":  cross,
+        "daily":  daily,
         "dashboard": RevenueDashboard(
             grand_total=round(grand_total, 2),
             ytd_total=round(ytd_total, 2),
@@ -375,3 +419,42 @@ async def lookup_scene_revenue(
         out = [s for s in out if s.studio.lower() == studio.lower()]
     out.sort(key=lambda s: s.revenue, reverse=True)
     return out[:50]
+
+
+@router.get("/daily", response_model=DailySummary)
+async def get_daily_summary(_admin: dict = Depends(require_admin)):
+    """Daily-granularity snapshot for the dashboard:
+       - yesterday: rows for the most recent date in _DailyData
+       - this_month: rows from start-of-current-month to yesterday
+
+    Source: the _DailyData tab. Currently populated by VRPorn only;
+    POVR/SLR daily wiring is in flight."""
+    cache = _get_cache()
+    daily: list[DailyRow] = cache.get("daily", [])
+
+    if not daily:
+        return DailySummary(
+            yesterday=[], yesterday_date="", yesterday_total=0.0,
+            this_month=[], this_month_total=0.0,
+            refreshed_at=cache["dashboard"].refreshed_at,
+        )
+
+    # Yesterday = most-recent date in the data
+    most_recent = max(d.date for d in daily)
+    y_rows = [d for d in daily if d.date == most_recent]
+    y_total = round(sum(d.revenue for d in y_rows), 2)
+
+    # This month = same year-month prefix as most_recent
+    ym_prefix = most_recent[:7]  # "YYYY-MM"
+    month_rows = [d for d in daily if d.date.startswith(ym_prefix)]
+    month_total = round(sum(d.revenue for d in month_rows), 2)
+    month_rows_sorted = sorted(month_rows, key=lambda d: d.date)
+
+    return DailySummary(
+        yesterday=y_rows,
+        yesterday_date=most_recent,
+        yesterday_total=y_total,
+        this_month=month_rows_sorted,
+        this_month_total=month_total,
+        refreshed_at=cache["dashboard"].refreshed_at,
+    )

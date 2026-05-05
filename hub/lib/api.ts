@@ -554,6 +554,22 @@ export interface CrossPlatformRevenueRow {
   povr_id: string
 }
 
+export interface DailyRevenueRow {
+  date: string         // ISO YYYY-MM-DD
+  platform: string     // "vrporn" / "povr" / "slr"
+  studio: string       // "All" or specific
+  revenue: number
+}
+
+export interface DailyRevenueSummary {
+  yesterday: DailyRevenueRow[]
+  yesterday_date: string
+  yesterday_total: number
+  this_month: DailyRevenueRow[]
+  this_month_total: number
+  refreshed_at: string
+}
+
 export type AssetStatus = "not_present" | "available" | "validated" | "stuck"
 
 export interface SceneAssetState {
@@ -1871,6 +1887,7 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         if (opts.studio) q.set("studio", opts.studio)
         return get<SceneRevenueRow[]>(`/revenue/scene/lookup?${q}`)
       },
+      daily: () => get<DailyRevenueSummary>(`/revenue/daily`),
     },
   }
 }
