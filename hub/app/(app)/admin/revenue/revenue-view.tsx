@@ -115,6 +115,26 @@ export function RevenueView({
     }
   })()
 
+  // ── Filtering wired across every filter-aware section ─────────────────────
+  // Conventions:
+  //   - Range filter: shrinks the date window for daily-grain sections only.
+  //     Lifetime sections (platform-comparison table, 12-month trend) stay
+  //     reference data — that's the whole point of having them.
+  //   - Platform filter: drops rows from other platforms in any section.
+  //   - Studio filter: drops rows from other studios in any section.
+  //                    Cross-platform daily rows often carry studio="All",
+  //                    so we keep those when a studio is selected (otherwise
+  //                    the chart would empty out for POVR/VRPorn).
+
+  const cutoffDate = useMemo(() => {
+    if (dateRange === "all" || dateRange === "month") return null
+    const days = dateRange === "yesterday" ? 1 : (dateRange === "7d" ? 7 : 30)
+    const d = new Date()
+    d.setUTCHours(0, 0, 0, 0)
+    d.setUTCDate(d.getUTCDate() - days)
+    return d.toISOString().slice(0, 10)
+  }, [dateRange])
+
   const filteredTopScenes = useMemo(() => {
     let out = topScenes
     if (platformFilter) out = out.filter(s => s.platform === platformFilter)
@@ -123,37 +143,40 @@ export function RevenueView({
   }, [topScenes, platformFilter, studioFilter])
 
   const filteredCrossPlatform = useMemo(() => {
-    if (!studioFilter) return crossPlatform
-    return crossPlatform.filter(r => r.studio.toUpperCase() === studioFilter.toUpperCase())
-  }, [crossPlatform, studioFilter])
+    let out = crossPlatform
+    if (studioFilter)   out = out.filter(r => r.studio.toUpperCase() === studioFilter.toUpperCase())
+    if (platformFilter) {
+      // For cross-platform rows, "platform filter = SLR" means: only show
+      // scenes that earned on SLR (i.e. slr_total > 0). Otherwise filtering
+      // to a single platform makes the section meaningless (it's literally
+      // about cross-platform overlap).
+      out = out.filter(r => {
+        if (platformFilter === "slr")    return r.slr_total > 0
+        if (platformFilter === "povr")   return r.povr_total > 0
+        if (platformFilter === "vrporn") return r.vrporn_total > 0
+        return true
+      })
+    }
+    return out
+  }, [crossPlatform, studioFilter, platformFilter])
 
-  // Apply date-range + platform filter to the daily payload. The API
-  // already sliced "yesterday" + "this month"; for "Last 7"/"Last 30"/
-  // "All" we re-derive from `daily.this_month` (today = ~20 most-recent
-  // rows). Studio filter is intentionally NOT applied because daily rows
-  // currently always carry studio="All" — once per-studio scrape lands
-  // we can extend this.
   const filteredDaily = useMemo(() => {
     if (!daily) return null
     let yesterdayRows = daily.yesterday
     let monthRows = daily.this_month
 
-    // Date-range filter — shrink monthRows to the window
-    if (dateRange === "7d" || dateRange === "30d") {
-      const days = dateRange === "7d" ? 7 : 30
-      const cutoff = (() => {
-        const d = new Date()
-        d.setUTCHours(0, 0, 0, 0)
-        d.setUTCDate(d.getUTCDate() - days)
-        return d.toISOString().slice(0, 10)
-      })()
-      monthRows = monthRows.filter(r => r.date >= cutoff)
-    }
+    if (cutoffDate) monthRows = monthRows.filter(r => r.date >= cutoffDate)
 
-    // Platform filter — when set, drop rows from other platforms
     if (platformFilter) {
       yesterdayRows = yesterdayRows.filter(r => r.platform === platformFilter)
       monthRows     = monthRows.filter(r => r.platform === platformFilter)
+    }
+    if (studioFilter) {
+      // Daily rows where studio == "All" are platform-aggregates that we
+      // CAN'T disaggregate by studio (POVR/VRPorn data). Hide them when
+      // a specific studio is requested — only SLR has real per-studio rows.
+      yesterdayRows = yesterdayRows.filter(r => r.studio.toUpperCase() === studioFilter.toUpperCase())
+      monthRows     = monthRows.filter(r => r.studio.toUpperCase() === studioFilter.toUpperCase())
     }
 
     return {
@@ -163,7 +186,47 @@ export function RevenueView({
       this_month: monthRows,
       this_month_total: monthRows.reduce((acc, r) => acc + r.revenue, 0),
     }
-  }, [daily, dateRange, platformFilter])
+  }, [daily, cutoffDate, platformFilter, studioFilter])
+
+  // Filter the totals strip — needs platform breakdown when "All" is selected
+  // or just one platform's totals when filtered.
+  const filteredTotals = useMemo(() => {
+    const platforms = platformFilter
+      ? dashboard.platforms.filter(p => p.platform === platformFilter)
+      : dashboard.platforms
+    const grand = platforms.reduce((acc, p) => acc + p.all_time, 0)
+    const ytd   = platforms.reduce((acc, p) => acc + p.ytd, 0)
+    return { platforms, grand, ytd }
+  }, [dashboard.platforms, platformFilter])
+
+  // Filter the platform comparison: when a platform is selected, collapse to
+  // just that row + total. Studio filter is N/A here (table is platform-grain).
+  const filteredPlatforms = useMemo(() => {
+    if (!platformFilter) return dashboard.platforms
+    return dashboard.platforms.filter(p => p.platform === platformFilter)
+  }, [dashboard.platforms, platformFilter])
+
+  // Filter the 12-month trend: when a platform is selected, zero out the
+  // other platforms' contribution so the bars only show the selected one.
+  const filteredMonthly = useMemo(() => {
+    if (!platformFilter) return dashboard.monthly_trend
+    return dashboard.monthly_trend.map(p => ({
+      month: p.month,
+      slr:    platformFilter === "slr"    ? p.slr    : 0,
+      povr:   platformFilter === "povr"   ? p.povr   : 0,
+      vrporn: platformFilter === "vrporn" ? p.vrporn : 0,
+      total:  platformFilter === "slr" ? p.slr : platformFilter === "povr" ? p.povr : p.vrporn,
+      mom_pct: p.mom_pct,
+    }))
+  }, [dashboard.monthly_trend, platformFilter])
+
+  // Are any filters active? Used by the "Clear all" button.
+  const filtersActive = !!(platformFilter || studioFilter || dateRange !== "month")
+  function clearAllFilters() {
+    setPlatformFilter(null)
+    setStudioFilter(null)
+    setDateRange("month")
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
@@ -194,8 +257,7 @@ export function RevenueView({
       </div>
 
       {/* Sticky filter bar — single source of truth for date range, studio,
-          platform across all sections. Sticks under the topbar so
-          adjustments stay visible while you scroll the dense tables below. */}
+          platform across all sections. */}
       <FilterBar
         dateRange={dateRange}
         setDateRange={setDateRange}
@@ -203,21 +265,28 @@ export function RevenueView({
         setStudio={setStudioFilter}
         platform={platformFilter}
         setPlatform={setPlatformFilter}
+        active={filtersActive}
+        onClear={clearAllFilters}
       />
 
-      {/* Totals strip */}
-      <TotalsStrip dashboard={dashboard} />
+      {/* Totals — collapses to single platform when filtered. */}
+      <TotalsStrip
+        totals={filteredTotals}
+        platformFilter={platformFilter}
+      />
 
-      {/* Daily snapshot — only renders when _DailyData has data. */}
-      {filteredDaily && filteredDaily.yesterday.length > 0 && (
-        <DailySnapshot daily={filteredDaily} dateRange={dateRange} />
+      {/* Daily snapshot — driven by all three filters. */}
+      {filteredDaily && (filteredDaily.yesterday.length > 0 || filteredDaily.this_month.length > 0) && (
+        <DailySnapshot daily={filteredDaily} dateRange={dateRange}
+                       platformFilter={platformFilter} studioFilter={studioFilter} />
       )}
 
-      {/* Per-platform comparison */}
-      <PlatformComparison dashboard={dashboard} />
+      {/* Per-platform comparison — collapses to selected platform when filtered. */}
+      <PlatformComparison platforms={filteredPlatforms}
+                          platformFilter={platformFilter} />
 
-      {/* 12-month trend */}
-      <MonthlyTrend points={dashboard.monthly_trend} />
+      {/* 12-month trend — zeroes out non-selected platforms when filtered. */}
+      <MonthlyTrend points={filteredMonthly} platformFilter={platformFilter} />
 
       {/* Section toggle: Top scenes vs Cross-platform */}
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
@@ -247,6 +316,7 @@ export function RevenueView({
 // ---------------------------------------------------------------------------
 function FilterBar({
   dateRange, setDateRange, studio, setStudio, platform, setPlatform,
+  active, onClear,
 }: {
   dateRange: DateRange
   setDateRange: (v: DateRange) => void
@@ -254,6 +324,8 @@ function FilterBar({
   setStudio: (v: StudioFilter) => void
   platform: string | null
   setPlatform: (v: string | null) => void
+  active: boolean
+  onClear: () => void
 }) {
   const ranges: DateRange[] = ["yesterday", "7d", "30d", "month", "all"]
   return (
@@ -346,7 +418,7 @@ function FilterBar({
         </span>
         <div style={{ display: "flex", gap: 0 }}>
           {[null, ...STUDIOS].map(opt => {
-            const active = studio === opt
+            const isActive = studio === opt
             return (
               <button
                 key={opt ?? "all"}
@@ -354,9 +426,9 @@ function FilterBar({
                 onClick={() => setStudio(opt as StudioFilter)}
                 style={{
                   padding: "4px 10px", fontSize: 11, fontWeight: 600,
-                  background: active ? "var(--color-base)" : "transparent",
-                  color: active ? "var(--color-text)" : "var(--color-text-muted)",
-                  border: `1px solid ${active ? "var(--color-border)" : "transparent"}`,
+                  background: isActive ? "var(--color-base)" : "transparent",
+                  color: isActive ? "var(--color-text)" : "var(--color-text-muted)",
+                  border: `1px solid ${isActive ? "var(--color-border)" : "transparent"}`,
                   cursor: "pointer",
                   fontFamily: opt ? "var(--font-mono)" : "inherit",
                 }}
@@ -367,6 +439,28 @@ function FilterBar({
           })}
         </div>
       </div>
+
+      {/* Clear all (only renders when any filter is non-default) */}
+      {active && (
+        <>
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={onClear}
+            style={{
+              padding: "4px 10px", fontSize: 11, fontWeight: 600,
+              background: "transparent",
+              color: "var(--color-lime)",
+              border: "1px solid var(--color-lime)",
+              cursor: "pointer",
+              letterSpacing: "0.04em",
+            }}
+            title="Reset all filters to defaults"
+          >
+            Clear filters
+          </button>
+        </>
+      )}
     </div>
   )
 }
@@ -374,19 +468,39 @@ function FilterBar({
 // ---------------------------------------------------------------------------
 // Top totals strip — 4 huge $$$ tiles
 // ---------------------------------------------------------------------------
-function TotalsStrip({ dashboard }: { dashboard: RevenueDashboard }) {
-  const tiles = [
-    { label: "Grand Total",  value: dashboard.grand_total, sub: "all platforms · all time" },
-    { label: "2026 YTD",     value: dashboard.ytd_total,    sub: "Jan – present" },
-    ...dashboard.platforms.slice(0, 2).map(p => ({
-      label: PLATFORM_LABEL[p.platform] ?? p.platform,
-      value: p.all_time,
-      sub: `2026 YTD ${fmtMoney(p.ytd, true)}`,
-    })),
-  ]
+function TotalsStrip({
+  totals, platformFilter,
+}: {
+  totals: { platforms: { platform: string; all_time: number; ytd: number }[]; grand: number; ytd: number }
+  platformFilter: string | null
+}) {
+  // When unfiltered: show Grand + YTD + top 2 platforms.
+  // When filtered: show that platform's all-time + YTD + top years.
+  const tiles = platformFilter
+    ? [
+        {
+          label: PLATFORM_LABEL[platformFilter] ?? platformFilter,
+          value: totals.grand,
+          sub: "all-time",
+        },
+        { label: "2026 YTD", value: totals.ytd, sub: "Jan – present" },
+      ]
+    : [
+        { label: "Grand Total", value: totals.grand, sub: "all platforms · all time" },
+        { label: "2026 YTD",    value: totals.ytd,   sub: "Jan – present" },
+        ...totals.platforms.slice(0, 2).map(p => ({
+          label: PLATFORM_LABEL[p.platform] ?? p.platform,
+          value: p.all_time,
+          sub: `2026 YTD ${fmtMoney(p.ytd, true)}`,
+        })),
+      ]
   return (
     <div style={{
-      display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 1,
+      display: "grid",
+      // Adapt grid to actual tile count so a filtered-down strip doesn't
+      // leave hollow space. 2 tiles → 2 cols, 4 tiles → 4 cols.
+      gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))`,
+      gap: 1,
       background: "var(--color-border-subtle)",
       border: "1px solid var(--color-border-subtle)",
     }}>
@@ -413,7 +527,14 @@ function TotalsStrip({ dashboard }: { dashboard: RevenueDashboard }) {
 // ---------------------------------------------------------------------------
 // Daily snapshot — yesterday's $ + this-month-daily mini chart
 // ---------------------------------------------------------------------------
-function DailySnapshot({ daily, dateRange }: { daily: DailyRevenueSummary; dateRange: DateRange }) {
+function DailySnapshot({
+  daily, dateRange, platformFilter, studioFilter,
+}: {
+  daily: DailyRevenueSummary
+  dateRange: DateRange
+  platformFilter: string | null
+  studioFilter: StudioFilter
+}) {
   // Group daily rows by date so the mini-chart x-axis is one bar per day,
   // even when multiple platforms contribute (currently only VRPorn).
   const byDate = new Map<string, { date: string; total: number; rows: DailyRevenueRow[] }>()
@@ -527,13 +648,18 @@ function prettyDate(iso: string): string {
 // ---------------------------------------------------------------------------
 // Per-platform comparison: all-time, YTD, and YoY across all years
 // ---------------------------------------------------------------------------
-function PlatformComparison({ dashboard }: { dashboard: RevenueDashboard }) {
-  // Years across all platforms, sorted ascending
+function PlatformComparison({
+  platforms, platformFilter,
+}: {
+  platforms: RevenueDashboard["platforms"]
+  platformFilter: string | null
+}) {
+  // Years across all rendered platforms, sorted ascending
   const years = useMemo(() => {
     const s = new Set<string>()
-    for (const p of dashboard.platforms) for (const y of Object.keys(p.yearly)) s.add(y)
+    for (const p of platforms) for (const y of Object.keys(p.yearly)) s.add(y)
     return [...s].sort()
-  }, [dashboard.platforms])
+  }, [platforms])
 
   return (
     <Section title="Platform comparison" subtitle="Year-over-year revenue per platform · totals row at bottom">
@@ -549,7 +675,7 @@ function PlatformComparison({ dashboard }: { dashboard: RevenueDashboard }) {
             </tr>
           </thead>
           <tbody>
-            {dashboard.platforms.map(p => (
+            {platforms.map(p => (
               <tr key={p.platform} style={{ borderBottom: "1px solid var(--color-border-subtle)" }}>
                 <td style={{ ...tdStyle, fontWeight: 600 }}>
                   <span style={{
@@ -573,25 +699,27 @@ function PlatformComparison({ dashboard }: { dashboard: RevenueDashboard }) {
                 })}
               </tr>
             ))}
-            {/* Totals row */}
-            <tr style={{ borderTop: "2px solid var(--color-border)", background: "var(--color-base)" }}>
-              <td style={{ ...tdStyle, fontWeight: 700, textTransform: "uppercase",
-                            letterSpacing: "0.08em", fontSize: 11 }}>
-                Total
-              </td>
-              <td style={{ ...tdStyle, textAlign: "right", fontWeight: 700, fontFamily: "var(--font-mono)" }}>
-                {fmtMoneyFull(dashboard.grand_total)}
-              </td>
-              {years.map(y => {
-                const total = dashboard.platforms.reduce((acc, p) => acc + (p.yearly[y] ?? 0), 0)
-                return (
-                  <td key={y} style={{ ...tdStyle, textAlign: "right", fontWeight: 600,
-                                        fontFamily: "var(--font-mono)" }}>
-                    {fmtMoney(total, true)}
-                  </td>
-                )
-              })}
-            </tr>
+            {/* Totals row — only renders for the unfiltered (multi-platform) view */}
+            {!platformFilter && platforms.length > 1 && (
+              <tr style={{ borderTop: "2px solid var(--color-border)", background: "var(--color-base)" }}>
+                <td style={{ ...tdStyle, fontWeight: 700, textTransform: "uppercase",
+                              letterSpacing: "0.08em", fontSize: 11 }}>
+                  Total
+                </td>
+                <td style={{ ...tdStyle, textAlign: "right", fontWeight: 700, fontFamily: "var(--font-mono)" }}>
+                  {fmtMoneyFull(platforms.reduce((acc, p) => acc + p.all_time, 0))}
+                </td>
+                {years.map(y => {
+                  const total = platforms.reduce((acc, p) => acc + (p.yearly[y] ?? 0), 0)
+                  return (
+                    <td key={y} style={{ ...tdStyle, textAlign: "right", fontWeight: 600,
+                                          fontFamily: "var(--font-mono)" }}>
+                      {fmtMoney(total, true)}
+                    </td>
+                  )
+                })}
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -602,10 +730,31 @@ function PlatformComparison({ dashboard }: { dashboard: RevenueDashboard }) {
 // ---------------------------------------------------------------------------
 // 12-month rolling trend — stacked bars + MoM delta
 // ---------------------------------------------------------------------------
-function MonthlyTrend({ points }: { points: RevenueMonthlyPoint[] }) {
-  const max = Math.max(1, ...points.map(p => p.total))
+function MonthlyTrend({
+  points, platformFilter,
+}: {
+  points: RevenueMonthlyPoint[]
+  platformFilter: string | null
+}) {
+  // When filtered to a single platform that didn't exist in the earlier
+  // months of the trend (e.g. VRPorn launched Sep 2025), trim leading
+  // months whose total is 0 so the chart focuses on the platform's
+  // actual lifetime instead of months of empty bars.
+  const trimmed = useMemo(() => {
+    if (!platformFilter) return points
+    let i = 0
+    while (i < points.length && points[i].total === 0) i++
+    return points.slice(i)
+  }, [points, platformFilter])
+
+  const max = Math.max(1, ...trimmed.map(p => p.total))
+  const subtitle = platformFilter
+    ? `${PLATFORM_LABEL[platformFilter] ?? platformFilter} only · MoM delta below each bar`
+    : "Stacked monthly revenue · MoM delta below each bar"
+  // Use the trimmed series for rendering
+  points = trimmed
   return (
-    <Section title="12-month trend" subtitle="Stacked monthly revenue · MoM delta below each bar">
+    <Section title="12-month trend" subtitle={subtitle}>
       <div style={{
         display: "grid",
         gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))`,
