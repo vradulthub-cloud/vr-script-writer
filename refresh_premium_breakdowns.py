@@ -82,6 +82,12 @@ VRPORN_HEADER = [
     "Game Hits", "Game Earnings $",
 ]
 
+# Daily-totals schema for VRPorn (and eventually POVR/SLR daily exports).
+# Lives in a separate "_DailyData" tab so the existing per-video tabs
+# stay untouched.
+DAILY_HEADER = ["Date", "Platform", "Studio", "Total Earnings $"]
+DAILY_TAB    = "_DailyData"
+
 PLATFORM_SPECS = {
     "slr":    {"tab": "SLR Videos",    "header": SLR_HEADER},
     "povr":   {"tab": "POVR Videos",   "header": POVR_HEADER},
@@ -294,6 +300,93 @@ def rebuild_data_tab(sh: gspread.Spreadsheet,
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+def normalize_vrporn_date(s: str) -> str:
+    """Convert 'Apr 30, 2026' → '2026-04-30' (ISO) for downstream filtering."""
+    s = s.strip()
+    if not s:
+        return ""
+    try:
+        return datetime.strptime(s, "%b %d, %Y").strftime("%Y-%m-%d")
+    except ValueError:
+        return s
+
+
+def push_daily_data(sh: gspread.Spreadsheet, vrporn_daily_csv: Path | None) -> int:
+    """Read the VRPorn daily CSV and write/append to the _DailyData tab.
+
+    Tab schema: Date | Platform | Studio | Total Earnings $
+    - Date in ISO (YYYY-MM-DD) so filtering by month/yesterday is trivial
+    - Platform = "vrporn" / "povr" / "slr" (lowercased canonical)
+    - Studio  = "All" until per-studio scrape lands; else specific studio name
+    - Earnings as raw float (no $ or comma)
+
+    Existing rows in _DailyData for the same (date, platform, studio) tuple
+    are overwritten — newer scrape wins. New rows are appended.
+    """
+    if not vrporn_daily_csv or not vrporn_daily_csv.exists():
+        log.info("Daily push: no vrporn_daily.csv found — skipping")
+        return 0
+
+    # Read incoming
+    incoming: list[list[str]] = []
+    with vrporn_daily_csv.open("r", encoding="utf-8-sig", newline="") as f:
+        r = csv.reader(f)
+        rows = [row for row in r if any(c.strip() for c in row)]
+    if not rows:
+        return 0
+    header = [c.strip().lower() for c in rows[0]]
+    # Expected: Date, Studio, Total Earnings $
+    if "date" not in header or "studio" not in header:
+        log.error(f"Daily push: vrporn_daily.csv header unexpected: {rows[0]}")
+        return 0
+    di = header.index("date")
+    si = header.index("studio")
+    ei = next((i for i, h in enumerate(header) if "earning" in h), None)
+    if ei is None:
+        log.error("Daily push: no earnings column in vrporn_daily.csv")
+        return 0
+
+    for row in rows[1:]:
+        if len(row) <= max(di, si, ei):
+            continue
+        iso = normalize_vrporn_date(row[di])
+        if not iso:
+            continue
+        incoming.append([iso, "vrporn", row[si] or "All", row[ei]])
+
+    log.info(f"Daily push: prepared {len(incoming)} VRPorn rows")
+    if not incoming:
+        return 0
+
+    # Open or create the _DailyData tab
+    try:
+        ws = sh.worksheet(DAILY_TAB)
+    except gspread.WorksheetNotFound:
+        log.info(f"Creating new tab: {DAILY_TAB}")
+        ws = sh.add_worksheet(title=DAILY_TAB, rows=1000, cols=8)
+        ws.update(values=[DAILY_HEADER], range_name="A1")
+
+    # Read existing → keyed dict
+    existing = ws.get_all_values()
+    by_key: dict[tuple, list[str]] = {}
+    if existing and existing[0]:
+        for r in existing[1:]:
+            if len(r) >= 4:
+                by_key[(r[0], r[1], r[2])] = r[:4]
+
+    # Merge: incoming overwrites
+    for r in incoming:
+        by_key[(r[0], r[1], r[2])] = r
+
+    # Sort by date desc → write back
+    final_rows = sorted(by_key.values(), key=lambda x: x[0], reverse=True)
+    ws.resize(rows=len(final_rows) + 50, cols=max(ws.col_count, 8))
+    ws.clear()
+    ws.update(values=[DAILY_HEADER] + final_rows, range_name="A1")
+    log.info(f"Daily push: wrote {len(final_rows)} rows to '{DAILY_TAB}'")
+    return len(final_rows)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--slr", type=Path, default=None,
@@ -301,7 +394,9 @@ def main() -> int:
     ap.add_argument("--povr", type=Path, default=None,
                     help="POVR CSV (auto-discovered if omitted)")
     ap.add_argument("--vrporn", type=Path, default=None,
-                    help="VRPorn CSV (auto-discovered if omitted)")
+                    help="VRPorn per-video CSV (auto-discovered if omitted)")
+    ap.add_argument("--vrporn-daily", type=Path, default=None,
+                    help="VRPorn daily-totals CSV (default: ~/Documents/vrporn_daily.csv)")
     ap.add_argument("--dry-run", action="store_true",
                     help="Validate CSVs only — don't touch the sheet")
     args = ap.parse_args()
@@ -359,6 +454,14 @@ def main() -> int:
         by_platform.get("povr", []),
         by_platform.get("vrporn", []),
     )
+
+    # Daily totals (separate from per-video tabs). VRPorn is the only
+    # platform we currently scrape daily — POVR/SLR daily wiring is TODO.
+    daily_csv = args.vrporn_daily or (Path.home() / "Documents" / "vrporn_daily.csv")
+    if daily_csv.exists():
+        push_daily_data(sh, daily_csv)
+    else:
+        log.info(f"Daily push: {daily_csv} not found — skipping")
 
     stamp_dashboard_updated(sh)
 

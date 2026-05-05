@@ -8,6 +8,8 @@ import type {
   SceneRevenueRow,
   CrossPlatformRevenueRow,
   RevenueMonthlyPoint,
+  DailyRevenueSummary,
+  DailyRevenueRow,
 } from "@/lib/api"
 
 // Studio identity colors — the brand spec keeps these as contextual anchors.
@@ -53,11 +55,13 @@ export function RevenueView({
   dashboard,
   topScenes,
   crossPlatform,
+  daily,
   error,
 }: {
   dashboard: RevenueDashboard | null
   topScenes: SceneRevenueRow[]
   crossPlatform: CrossPlatformRevenueRow[]
+  daily: DailyRevenueSummary | null
   error: string | null
 }) {
   const [activeSection, setActiveSection] = useState<"top" | "cross">("top")
@@ -130,6 +134,9 @@ export function RevenueView({
       {/* Totals strip */}
       <TotalsStrip dashboard={dashboard} />
 
+      {/* Daily snapshot — only renders when _DailyData has data. */}
+      {daily && daily.yesterday.length > 0 && <DailySnapshot daily={daily} />}
+
       {/* Per-platform comparison */}
       <PlatformComparison dashboard={dashboard} />
 
@@ -200,6 +207,115 @@ function TotalsStrip({ dashboard }: { dashboard: RevenueDashboard }) {
       ))}
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Daily snapshot — yesterday's $ + this-month-daily mini chart
+// ---------------------------------------------------------------------------
+function DailySnapshot({ daily }: { daily: DailyRevenueSummary }) {
+  // Group daily rows by date so the mini-chart x-axis is one bar per day,
+  // even when multiple platforms contribute (currently only VRPorn).
+  const byDate = new Map<string, { date: string; total: number; rows: DailyRevenueRow[] }>()
+  for (const r of daily.this_month) {
+    const e = byDate.get(r.date) ?? { date: r.date, total: 0, rows: [] }
+    e.total += r.revenue
+    e.rows.push(r)
+    byDate.set(r.date, e)
+  }
+  const days = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
+  const max = Math.max(1, ...days.map(d => d.total))
+
+  // Yesterday's per-platform breakdown (could be one row "All / vrporn" today
+  // and grow to three rows once POVR + SLR daily land in _DailyData).
+  const ySorted = [...daily.yesterday].sort((a, b) => b.revenue - a.revenue)
+
+  return (
+    <Section
+      title="Daily snapshot"
+      subtitle={`Yesterday · ${prettyDate(daily.yesterday_date)}`}
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(160px, 220px) 1fr", gap: 24, alignItems: "center" }}>
+        {/* Yesterday tile — big number + per-platform breakdown */}
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
+                        textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+            Yesterday
+          </div>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 600,
+                        letterSpacing: "-0.015em", color: "var(--color-text)", marginTop: 4 }}>
+            {fmtMoneyFull(daily.yesterday_total)}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 6 }}>
+            {ySorted.map((r, i) => (
+              <div key={`${r.platform}-${r.studio}-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <span>
+                  <span style={{
+                    display: "inline-block", width: 6, height: 6, borderRadius: 1,
+                    background: PLATFORM_COLOR[r.platform] ?? "var(--color-text-faint)",
+                    marginRight: 6, verticalAlign: "middle",
+                  }} />
+                  {PLATFORM_LABEL[r.platform] ?? r.platform}
+                  {r.studio && r.studio !== "All" && <span style={{ color: "var(--color-text-faint)" }}> / {r.studio}</span>}
+                </span>
+                <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>{fmtMoneyFull(r.revenue)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* This-month daily bar chart */}
+        <div style={{ borderLeft: "1px solid var(--color-border-subtle)", paddingLeft: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
+                          textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+              This month · {fmtMonth(daily.yesterday_date.slice(0, 7))}
+            </div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600 }}>
+              {fmtMoneyFull(daily.this_month_total)}
+            </div>
+          </div>
+          {days.length === 0 ? (
+            <Empty>No daily rows yet for this month.</Empty>
+          ) : (
+            <div style={{
+              display: "grid", gap: 3,
+              gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`,
+              alignItems: "end", height: 80,
+            }}>
+              {days.map(d => {
+                const h = (d.total / max) * 76
+                return (
+                  <div key={d.date}
+                    title={`${prettyDate(d.date)} · ${fmtMoneyFull(d.total)}`}
+                    style={{
+                      height: Math.max(2, h),
+                      background: PLATFORM_COLOR.vrporn,
+                      opacity: 0.85,
+                      transition: "opacity 120ms ease",
+                    }}
+                  />
+                )
+              })}
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4,
+                        fontSize: 10, color: "var(--color-text-faint)", fontFamily: "var(--font-mono)" }}>
+            <span>{days.length > 0 ? prettyDate(days[0].date) : ""}</span>
+            <span>{days.length > 0 ? prettyDate(days[days.length - 1].date) : ""}</span>
+          </div>
+        </div>
+      </div>
+    </Section>
+  )
+}
+
+function prettyDate(iso: string): string {
+  // "2026-04-30" → "Apr 30"
+  if (!iso || iso.length < 10) return iso
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+  const [y, m, d] = iso.split("-")
+  void y
+  return `${months[parseInt(m, 10) - 1]} ${parseInt(d, 10)}`
 }
 
 // ---------------------------------------------------------------------------

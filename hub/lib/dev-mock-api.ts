@@ -1016,6 +1016,34 @@ export async function mockApi<T>(path: string, init: RequestInit): Promise<T> {
       { title: "Watch and Play - Octavia Red",                            studio: "VRH", platforms: ["POVR","VRPorn"],       lifetime_total: 4_582.10, slr_total: 0,     povr_total:   219.20, vrporn_total: 4_362.90, povr_views:  410, slr_id: "",        povr_id: "5821111" },
     ] as unknown as T)
   }
+  if (base === "/revenue/daily") {
+    // Build a 25-day stretch of fake VRPorn daily rows ending yesterday.
+    const today = new Date()
+    today.setUTCHours(0, 0, 0, 0)
+    const rows: { date: string; platform: string; studio: string; revenue: number }[] = []
+    for (let i = 25; i >= 1; i--) {
+      const d = new Date(today.getTime() - i * 86_400_000)
+      const iso = d.toISOString().slice(0, 10)
+      // Pseudo-random but stable amounts per day (seeded by date)
+      const hash = [...iso].reduce((a, c) => a + c.charCodeAt(0), 0)
+      const rev = 450 + (hash % 350)
+      rows.push({ date: iso, platform: "vrporn", studio: "All", revenue: rev })
+    }
+    const yesterdayDate = rows[rows.length - 1].date
+    const yesterdayRows = rows.filter(r => r.date === yesterdayDate)
+    const yesterdayTotal = yesterdayRows.reduce((acc, r) => acc + r.revenue, 0)
+    const monthPrefix = yesterdayDate.slice(0, 7)
+    const monthRows = rows.filter(r => r.date.startsWith(monthPrefix))
+    const monthTotal = monthRows.reduce((acc, r) => acc + r.revenue, 0)
+    return wait({
+      yesterday: yesterdayRows,
+      yesterday_date: yesterdayDate,
+      yesterday_total: Math.round(yesterdayTotal * 100) / 100,
+      this_month: monthRows,
+      this_month_total: Math.round(monthTotal * 100) / 100,
+      refreshed_at: new Date().toISOString(),
+    } as unknown as T)
+  }
   if (base === "/revenue/scene/lookup") {
     return wait([
       { platform: "slr",    studio: "VRH",  video_id: "23600",   title: "From the Vault: Are You Recording Me?", year: "2021", views: 102, revenue: 3.40 },
