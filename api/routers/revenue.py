@@ -117,7 +117,12 @@ class DailySummary(BaseModel):
 # ---------------------------------------------------------------------------
 # Cache layer — single in-memory snapshot of the (small-ish) sheet data
 # ---------------------------------------------------------------------------
-_CACHE_TTL = 3600  # 1 hour
+# 15 min TTL: the daily Windows scheduled task pushes fresh CSVs into the
+# sheet every morning. With a 1h cache the dashboard would lag by up to an
+# hour after the refresh; 15min gets new data visible quickly without
+# hammering Sheets API on every page load. Manual ?refresh=true bust still
+# works for "show me the absolute latest".
+_CACHE_TTL = 900
 
 _lock = threading.Lock()
 _cache: dict | None = None
