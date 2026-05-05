@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { ArrowLeft, TrendingDown, TrendingUp } from "lucide-react"
+import { ArrowLeft, TrendingDown, TrendingUp, Calendar, Filter } from "lucide-react"
 import type {
   RevenueDashboard,
   SceneRevenueRow,
@@ -11,6 +11,21 @@ import type {
   DailyRevenueSummary,
   DailyRevenueRow,
 } from "@/lib/api"
+
+// Date-range presets for the daily view. Values are ISO offsets from "today";
+// "all" means: don't filter, show whatever the API returned.
+type DateRange = "yesterday" | "7d" | "30d" | "month" | "all"
+
+const DATE_RANGE_LABELS: Record<DateRange, string> = {
+  yesterday: "Yesterday",
+  "7d":      "Last 7 days",
+  "30d":     "Last 30 days",
+  month:     "This month",
+  all:       "All time",
+}
+
+type StudioFilter = string | null
+const STUDIOS = ["FPVR", "VRH", "VRA", "NJOI"]
 
 // Studio identity colors — the brand spec keeps these as contextual anchors.
 // Platform tints reuse the studio palette: SLR ≈ lime (default), POVR purple,
@@ -66,6 +81,8 @@ export function RevenueView({
 }) {
   const [activeSection, setActiveSection] = useState<"top" | "cross">("top")
   const [platformFilter, setPlatformFilter] = useState<string | null>(null)
+  const [studioFilter, setStudioFilter] = useState<StudioFilter>(null)
+  const [dateRange, setDateRange] = useState<DateRange>("month")
 
   if (error) {
     return (
@@ -99,9 +116,54 @@ export function RevenueView({
   })()
 
   const filteredTopScenes = useMemo(() => {
-    if (!platformFilter) return topScenes
-    return topScenes.filter(s => s.platform === platformFilter)
-  }, [topScenes, platformFilter])
+    let out = topScenes
+    if (platformFilter) out = out.filter(s => s.platform === platformFilter)
+    if (studioFilter)   out = out.filter(s => s.studio.toUpperCase() === studioFilter.toUpperCase())
+    return out
+  }, [topScenes, platformFilter, studioFilter])
+
+  const filteredCrossPlatform = useMemo(() => {
+    if (!studioFilter) return crossPlatform
+    return crossPlatform.filter(r => r.studio.toUpperCase() === studioFilter.toUpperCase())
+  }, [crossPlatform, studioFilter])
+
+  // Apply date-range + platform filter to the daily payload. The API
+  // already sliced "yesterday" + "this month"; for "Last 7"/"Last 30"/
+  // "All" we re-derive from `daily.this_month` (today = ~20 most-recent
+  // rows). Studio filter is intentionally NOT applied because daily rows
+  // currently always carry studio="All" — once per-studio scrape lands
+  // we can extend this.
+  const filteredDaily = useMemo(() => {
+    if (!daily) return null
+    let yesterdayRows = daily.yesterday
+    let monthRows = daily.this_month
+
+    // Date-range filter — shrink monthRows to the window
+    if (dateRange === "7d" || dateRange === "30d") {
+      const days = dateRange === "7d" ? 7 : 30
+      const cutoff = (() => {
+        const d = new Date()
+        d.setUTCHours(0, 0, 0, 0)
+        d.setUTCDate(d.getUTCDate() - days)
+        return d.toISOString().slice(0, 10)
+      })()
+      monthRows = monthRows.filter(r => r.date >= cutoff)
+    }
+
+    // Platform filter — when set, drop rows from other platforms
+    if (platformFilter) {
+      yesterdayRows = yesterdayRows.filter(r => r.platform === platformFilter)
+      monthRows     = monthRows.filter(r => r.platform === platformFilter)
+    }
+
+    return {
+      ...daily,
+      yesterday: yesterdayRows,
+      yesterday_total: yesterdayRows.reduce((acc, r) => acc + r.revenue, 0),
+      this_month: monthRows,
+      this_month_total: monthRows.reduce((acc, r) => acc + r.revenue, 0),
+    }
+  }, [daily, dateRange, platformFilter])
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
@@ -131,11 +193,25 @@ export function RevenueView({
         </div>
       </div>
 
+      {/* Sticky filter bar — single source of truth for date range, studio,
+          platform across all sections. Sticks under the topbar so
+          adjustments stay visible while you scroll the dense tables below. */}
+      <FilterBar
+        dateRange={dateRange}
+        setDateRange={setDateRange}
+        studio={studioFilter}
+        setStudio={setStudioFilter}
+        platform={platformFilter}
+        setPlatform={setPlatformFilter}
+      />
+
       {/* Totals strip */}
       <TotalsStrip dashboard={dashboard} />
 
       {/* Daily snapshot — only renders when _DailyData has data. */}
-      {daily && daily.yesterday.length > 0 && <DailySnapshot daily={daily} />}
+      {filteredDaily && filteredDaily.yesterday.length > 0 && (
+        <DailySnapshot daily={filteredDaily} dateRange={dateRange} />
+      )}
 
       {/* Per-platform comparison */}
       <PlatformComparison dashboard={dashboard} />
@@ -155,17 +231,142 @@ export function RevenueView({
           active={activeSection === "cross"}
           onClick={() => setActiveSection("cross")}
           label="Cross-platform matches"
-          count={crossPlatform.length}
+          count={filteredCrossPlatform.length}
         />
-        <div style={{ flex: 1 }} />
-        {activeSection === "top" && (
-          <PlatformFilter value={platformFilter} onChange={setPlatformFilter} />
-        )}
       </div>
 
       {activeSection === "top"
         ? <TopScenesTable scenes={filteredTopScenes} />
-        : <CrossPlatformTable rows={crossPlatform} />}
+        : <CrossPlatformTable rows={filteredCrossPlatform} />}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Filter bar — sticky under topbar, drives every section's data
+// ---------------------------------------------------------------------------
+function FilterBar({
+  dateRange, setDateRange, studio, setStudio, platform, setPlatform,
+}: {
+  dateRange: DateRange
+  setDateRange: (v: DateRange) => void
+  studio: StudioFilter
+  setStudio: (v: StudioFilter) => void
+  platform: string | null
+  setPlatform: (v: string | null) => void
+}) {
+  const ranges: DateRange[] = ["yesterday", "7d", "30d", "month", "all"]
+  return (
+    <div style={{
+      position: "sticky", top: "var(--spacing-topbar)",
+      zIndex: 10,
+      background: "var(--color-surface)",
+      border: "1px solid var(--color-border-subtle)",
+      padding: "10px 14px",
+      display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap",
+    }}>
+      {/* Date range */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Calendar size={11} style={{ color: "var(--color-text-faint)" }} />
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+                       textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+          Range
+        </span>
+        <div style={{ display: "flex", gap: 0 }}>
+          {ranges.map(r => {
+            const active = dateRange === r
+            return (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setDateRange(r)}
+                style={{
+                  padding: "4px 10px", fontSize: 11, fontWeight: 600,
+                  background: active ? "var(--color-base)" : "transparent",
+                  color: active ? "var(--color-text)" : "var(--color-text-muted)",
+                  border: `1px solid ${active ? "var(--color-border)" : "transparent"}`,
+                  cursor: "pointer",
+                }}
+              >
+                {DATE_RANGE_LABELS[r]}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div style={{ height: 16, width: 1, background: "var(--color-border-subtle)" }} />
+
+      {/* Platform */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Filter size={11} style={{ color: "var(--color-text-faint)" }} />
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+                       textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+          Platform
+        </span>
+        <div style={{ display: "flex", gap: 0 }}>
+          {([null, "slr", "povr", "vrporn"] as (string | null)[]).map(opt => {
+            const active = platform === opt
+            return (
+              <button
+                key={opt ?? "all"}
+                type="button"
+                onClick={() => setPlatform(opt)}
+                style={{
+                  padding: "4px 10px", fontSize: 11, fontWeight: 600,
+                  background: active ? "var(--color-base)" : "transparent",
+                  color: active ? "var(--color-text)" : "var(--color-text-muted)",
+                  border: `1px solid ${active ? "var(--color-border)" : "transparent"}`,
+                  cursor: "pointer",
+                }}
+              >
+                {opt
+                  ? <>
+                      <span style={{
+                        display: "inline-block", width: 6, height: 6, borderRadius: 1,
+                        background: PLATFORM_COLOR[opt],
+                        marginRight: 6, verticalAlign: "middle",
+                      }} />
+                      {PLATFORM_LABEL[opt]}
+                    </>
+                  : "All"}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div style={{ height: 16, width: 1, background: "var(--color-border-subtle)" }} />
+
+      {/* Studio */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+                       textTransform: "uppercase", color: "var(--color-text-faint)" }}>
+          Studio
+        </span>
+        <div style={{ display: "flex", gap: 0 }}>
+          {[null, ...STUDIOS].map(opt => {
+            const active = studio === opt
+            return (
+              <button
+                key={opt ?? "all"}
+                type="button"
+                onClick={() => setStudio(opt as StudioFilter)}
+                style={{
+                  padding: "4px 10px", fontSize: 11, fontWeight: 600,
+                  background: active ? "var(--color-base)" : "transparent",
+                  color: active ? "var(--color-text)" : "var(--color-text-muted)",
+                  border: `1px solid ${active ? "var(--color-border)" : "transparent"}`,
+                  cursor: "pointer",
+                  fontFamily: opt ? "var(--font-mono)" : "inherit",
+                }}
+              >
+                {opt ?? "All"}
+              </button>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
@@ -212,7 +413,7 @@ function TotalsStrip({ dashboard }: { dashboard: RevenueDashboard }) {
 // ---------------------------------------------------------------------------
 // Daily snapshot — yesterday's $ + this-month-daily mini chart
 // ---------------------------------------------------------------------------
-function DailySnapshot({ daily }: { daily: DailyRevenueSummary }) {
+function DailySnapshot({ daily, dateRange }: { daily: DailyRevenueSummary; dateRange: DateRange }) {
   // Group daily rows by date so the mini-chart x-axis is one bar per day,
   // even when multiple platforms contribute (currently only VRPorn).
   const byDate = new Map<string, { date: string; total: number; rows: DailyRevenueRow[] }>()
@@ -268,7 +469,12 @@ function DailySnapshot({ daily }: { daily: DailyRevenueSummary }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
                           textTransform: "uppercase", color: "var(--color-text-faint)" }}>
-              This month · {fmtMonth(daily.yesterday_date.slice(0, 7))}
+              {dateRange === "month"
+                ? `This month · ${fmtMonth(daily.yesterday_date.slice(0, 7))}`
+                : DATE_RANGE_LABELS[dateRange]}
+              <span style={{ marginLeft: 8, color: "var(--color-text-faint)", fontWeight: 500, letterSpacing: 0 }}>
+                · {days.length} days
+              </span>
             </div>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600 }}>
               {fmtMoneyFull(daily.this_month_total)}
@@ -609,35 +815,6 @@ function SectionTab({ active, onClick, label, count }: {
   )
 }
 
-function PlatformFilter({ value, onChange }: {
-  value: string | null; onChange: (v: string | null) => void
-}) {
-  const options: (string | null)[] = [null, "slr", "povr", "vrporn"]
-  return (
-    <div style={{ display: "flex", gap: 4 }}>
-      {options.map(opt => {
-        const active = value === opt
-        return (
-          <button
-            key={opt ?? "all"}
-            type="button"
-            onClick={() => onChange(opt)}
-            style={{
-              padding: "4px 10px", fontSize: 11, fontWeight: 600,
-              textTransform: "uppercase", letterSpacing: "0.05em",
-              background: active ? "var(--color-surface)" : "transparent",
-              color: active ? "var(--color-text)" : "var(--color-text-muted)",
-              border: `1px solid ${active ? "var(--color-border)" : "var(--color-border-subtle)"}`,
-              cursor: "pointer",
-            }}
-          >
-            {opt ? PLATFORM_LABEL[opt] : "All"}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
 
 function Empty({ children }: { children: React.ReactNode }) {
   return (

@@ -218,3 +218,29 @@ async def require_user_manager(user: CurrentUser) -> dict:
             detail="User management access required",
         )
     return user
+
+
+# Top-tier admins who can see revenue ($$$) data. Stricter than `require_admin`
+# because financial data is sensitive even within the company. Mirror this
+# list in hub/lib/access.ts — both must agree, or the nav link will appear
+# without working endpoints (or vice versa).
+REVENUE_VIEWERS = {
+    "andrewrowe72@gmail.com",
+    "dev@eclatech.test",  # dev:mock harness — never exists in prod
+}
+
+
+async def require_revenue_viewer(user: CurrentUser) -> dict:
+    """Ensure the current user is on the revenue-viewer allowlist."""
+    if user["role"] != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    email = (user.get("email") or "").lower()
+    if email not in REVENUE_VIEWERS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Revenue access not granted",
+        )
+    return user
