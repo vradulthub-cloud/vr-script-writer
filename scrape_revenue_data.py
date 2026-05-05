@@ -248,8 +248,15 @@ def scrape_slr(page: Page, dry_run: bool) -> list[list[str]]:
     # its own numeric ID (studio/64 was confirmed = FuckPassVR).
     log.info("SLR: discovering studio IDs from the picker dropdown...")
     today = date.today()
-    d_from = (today - timedelta(days=60)).isoformat()
-    page.goto(f"https://partners.sexlikereal.com/statistics/daily/studio/64/project/1?from={d_from}",
+    # Loop window: how far back we want to capture. SLR's daily-stats table
+    # caps output at ~30 rows from the `?from=` anchor (returns the FIRST
+    # 30 days from that point, NOT the most recent), so a single fetch with
+    # from=today-60d only yields the OLDEST 30 days. Fix: loop month-by-month
+    # from the start window forward, fetching each month separately and
+    # stitching results.
+    days_back = int(os.environ.get("SLR_DAYS_BACK", "75"))
+    start_anchor = (today.replace(day=1) - timedelta(days=days_back)).replace(day=1)
+    page.goto(f"https://partners.sexlikereal.com/statistics/daily/studio/64/project/1?from={start_anchor.isoformat()}",
               wait_until="networkidle", timeout=30_000)
 
     studios = _discover_slr_studios(page)
@@ -258,40 +265,60 @@ def scrape_slr(page: Page, dry_run: bool) -> list[list[str]]:
         studios = [(64, "Studio 64")]
     log.info(f"SLR: {len(studios)} studio(s) found: {[s[1] for s in studios]}")
 
+    # Build the list of month-anchor `from=` values to walk. SLR's table
+    # returns at most ~30 rows from each anchor (the OLDEST 30 days from
+    # `from`, not the most recent), so we iterate month-by-month from the
+    # start anchor forward to today, then fetch each studio per anchor.
+    anchors: list[date] = []
+    cur = start_anchor
+    while cur <= today:
+        anchors.append(cur)
+        # Step to the first of the next month
+        if cur.month == 12:
+            cur = cur.replace(year=cur.year + 1, month=1, day=1)
+        else:
+            cur = cur.replace(month=cur.month + 1, day=1)
+    log.info(f"SLR: walking {len(anchors)} monthly anchor(s) from {anchors[0].isoformat()} → today")
+
     out: list[list[str]] = []
     seen_keys: set[tuple[str, str]] = set()  # (date, studio) — dedupe across loops
     for sid, sname in studios:
-        url = f"https://partners.sexlikereal.com/statistics/daily/studio/{sid}/project/1?from={d_from}"
-        try:
-            page.goto(url, wait_until="networkidle", timeout=30_000)
-            page.wait_for_selector("table tbody tr", timeout=20_000)
-        except Exception as e:
-            log.warning(f"SLR: studio {sid} ({sname}) failed to load — {type(e).__name__}; skipping")
-            continue
-
-        raw_rows = page.eval_on_selector_all(
-            "table tbody tr",
-            "els => els.map(tr => [...tr.querySelectorAll('td')].map(td => (td.innerText||'').trim()))",
-        )
-        added = 0
-        for cells in raw_rows:
-            if len(cells) < 11:
-                continue
-            date_str = cells[0].strip()
-            if not date_str or date_str.lower().startswith("total"):
-                continue
+        added_total = 0
+        for anchor in anchors:
+            url = (f"https://partners.sexlikereal.com/statistics/daily/"
+                   f"studio/{sid}/project/1?from={anchor.isoformat()}")
             try:
-                iso = datetime.strptime(date_str, "%b %d, %Y").strftime("%Y-%m-%d")
-            except ValueError:
+                page.goto(url, wait_until="networkidle", timeout=30_000)
+                page.wait_for_selector("table tbody tr", timeout=20_000)
+            except Exception as e:
+                log.warning(f"SLR: studio {sid} ({sname}) anchor={anchor.isoformat()} "
+                            f"failed — {type(e).__name__}; skipping this window")
                 continue
-            key = (iso, sname)
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-            total_income = cells[10].replace("$", "").replace(",", "").strip() or "0"
-            out.append([iso, sname, total_income])
-            added += 1
-        log.info(f"SLR: {sname} (studio/{sid})  +{added} daily rows")
+
+            raw_rows = page.eval_on_selector_all(
+                "table tbody tr",
+                "els => els.map(tr => [...tr.querySelectorAll('td')].map(td => (td.innerText||'').trim()))",
+            )
+            added = 0
+            for cells in raw_rows:
+                if len(cells) < 11:
+                    continue
+                date_str = cells[0].strip()
+                if not date_str or date_str.lower().startswith("total"):
+                    continue
+                try:
+                    iso = datetime.strptime(date_str, "%b %d, %Y").strftime("%Y-%m-%d")
+                except ValueError:
+                    continue
+                key = (iso, sname)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                total_income = cells[10].replace("$", "").replace(",", "").strip() or "0"
+                out.append([iso, sname, total_income])
+                added += 1
+            added_total += added
+        log.info(f"SLR: {sname} (studio/{sid})  +{added_total} daily rows across {len(anchors)} window(s)")
 
     log.info(f"SLR: total daily rows across {len(studios)} studio(s): {len(out)}")
     return out
@@ -630,42 +657,79 @@ def scrape_vrporn(page: Page, dry_run: bool) -> list[list[str]]:
     if "/login" in page.url:
         raise RuntimeError("VRPorn login failed — still on /login/ after submit")
 
-    # ── Scrape /account/earnings/ ────────────────────────────────────────────
-    # Default view is "last 30-or-so days" with no date filter. For lifetime
-    # capture we'd need to step back month-by-month; for the user's immediate
-    # ask ("this month daily + yesterday") the default 20-row view is enough.
-    # We loop pagination while the page has rows.
-    log.info("VRPorn: loading /account/earnings/...")
+    # ── Use the proxy-statistics API directly ─────────────────────────────
+    # The /account/earnings/ UI is just a thin client over an internal API:
+    #   GET /proxy-statistics/api/v1/report/total
+    #     ?date=YYYY-MM-DD       (range start, inclusive)
+    #     &dateEnd=YYYY-MM-DD    (range end, inclusive)
+    #     &page=N&limit=20
+    # Once authenticated, the same session cookies that load /account/earnings/
+    # work for the API. Hitting it directly bypasses the 20-row UI cap by
+    # paginating via `page=` and walking arbitrary date ranges via `dateEnd=`.
+    log.info("VRPorn: loading /account/earnings/ to warm session cookies...")
     page.goto("https://vrporn.com/account/earnings/", wait_until="networkidle", timeout=30_000)
 
-    # Studio dropdown values seen on the live page:
-    STUDIOS = ["All", "FuckPassVR", "XPlayVR", "BlowJobNow", "VRHush", "VRAllure", "NaughtyJOI"]
-    # We only scrape "All" for now — the per-studio split is summable from
-    # POVR/SLR which DO give us studio-level data, and VRPorn's "All" total
-    # is what the user's existing dashboard surfaces.
-    # TODO: per-studio loop once we confirm the URL param name (likely ?studio=<name>).
+    from datetime import date, timedelta
+    today = date.today()
+    days_back = int(os.environ.get("VRPORN_DAYS_BACK", "120"))
+    range_start = today - timedelta(days=days_back)
+    log.info(f"VRPorn: querying proxy-statistics API for "
+             f"{range_start.isoformat()} → {today.isoformat()}")
 
-    # Page 1 of /account/earnings/ shows the most recent ~20 days. The
-    # `?page=N` param in the URL doesn't actually paginate — it returns
-    # the same content. The visible "1, 2" page links use JS navigation
-    # that we haven't mapped yet. For the user's immediate need ("this
-    # month daily + yesterday") the default 20-day window is enough; the
-    # historical backfill can come later via a different endpoint.
     out: list[list[str]] = []
-    pattern = re.compile(r'([A-Z][a-z]{2}\s+\d+,\s+\d{4})\s*\n\s*\$([\d,]+(?:\.\d+)?)')
-    body = page.evaluate("document.body.innerText")
-    matches = pattern.findall(body)
     seen_dates: set[str] = set()
-    for date_str, amount in matches:
-        if date_str in seen_dates:
-            continue
-        seen_dates.add(date_str)
-        out.append([
-            date_str,                            # Date (e.g. "Apr 30, 2026")
-            "All",                               # Studio (TODO: per-studio loop)
-            amount.replace(",", ""),             # Total Earnings $ (raw)
-        ])
-    log.info(f"VRPorn: {len(out)} unique daily rows captured (default last-20-day view)")
+    api_url = "https://vrporn.com/proxy-statistics/api/v1/report/total"
+    MAX_PAGES = 30   # 30 pages × 20 rows = 600 days, plenty
+    for page_n in range(1, MAX_PAGES + 1):
+        params = {
+            "date":    range_start.isoformat(),
+            "dateEnd": today.isoformat(),
+            "page":    str(page_n),
+            "limit":   "20",
+        }
+        try:
+            resp = page.request.get(api_url, params=params, timeout=20_000)
+        except Exception as e:
+            log.warning(f"VRPorn: API page {page_n} request failed: {type(e).__name__}; stopping")
+            break
+        if not resp.ok:
+            log.warning(f"VRPorn: API page {page_n} returned {resp.status}; stopping")
+            break
+        try:
+            payload = resp.json()
+        except Exception:
+            log.warning(f"VRPorn: API page {page_n} returned non-JSON; stopping")
+            break
+        # Payload shape (verified): {"data": {"items": [{"earnings": N, "createdDate": "YYYY-MM-DD"}, ...], "pageCount": N, ...}}
+        data_obj = payload.get("data") if isinstance(payload, dict) else None
+        items = data_obj.get("items") if isinstance(data_obj, dict) else None
+        if not isinstance(items, list) or not items:
+            log.info(f"VRPorn: API page {page_n} returned 0 items — done")
+            break
+        added = 0
+        for item in items:
+            iso = (item.get("createdDate") or item.get("date") or "")[:10]
+            if not iso or iso in seen_dates:
+                continue
+            seen_dates.add(iso)
+            amt = item.get("earnings") or 0
+            try:
+                amt_f = float(str(amt).replace("$", "").replace(",", ""))
+            except (ValueError, TypeError):
+                amt_f = 0.0
+            # Output uses "Apr 30, 2026" — the format the uploader expects
+            try:
+                from datetime import datetime as _dt
+                pretty = _dt.strptime(iso, "%Y-%m-%d").strftime("%b %d, %Y")
+            except ValueError:
+                pretty = iso
+            out.append([pretty, "All", f"{amt_f:.2f}"])
+            added += 1
+        page_count = data_obj.get("pageCount", page_n) if isinstance(data_obj, dict) else page_n
+        log.info(f"VRPorn: API page {page_n}/{page_count}  +{added} rows (total {len(out)})")
+        if added == 0 or page_n >= page_count:
+            break
+    log.info(f"VRPorn: {len(out)} unique daily rows captured via API")
     return out
 
 
