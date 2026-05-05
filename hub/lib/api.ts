@@ -1319,7 +1319,7 @@ export function api(idTokenOrSession: string | { idToken?: string } | null) {
         return get<Script[]>(`/scripts/${qs ? `?${qs}` : ""}`)
       },
       tabs: () => get<string[]>("/scripts/tabs"),
-      save: (body: { script_id?: number; tab_name: string; sheet_row: number; theme: string; plot: string; wardrobe_f?: string; wardrobe_m?: string; shoot_location?: string; props?: string }) =>
+      save: (body: { script_id?: number; tab_name: string; sheet_row: number; theme: string; plot: string; wardrobe_f?: string; wardrobe_m?: string; shoot_location?: string; props?: string; generation_id?: number }) =>
         post<{ id: number; status: string }>("/scripts/save", body),
       validate: (body: { theme: string; plot: string; wardrobe_f: string; wardrobe_m?: string; shoot_location: string; female?: string; male?: string }) =>
         post<{ violations: string[]; passed: boolean }>("/scripts/validate", body),

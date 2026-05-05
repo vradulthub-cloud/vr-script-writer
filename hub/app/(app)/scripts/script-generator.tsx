@@ -227,6 +227,7 @@ export function ScriptGenerator({ tabs, tabsError, idToken: serverIdToken, userR
         wardrobe_m: sections["WARDROBE - MALE"] ?? "",
         shoot_location: sections["SHOOT LOCATION"] ?? "",
         props: sections["PROPS"] ?? "",
+        generation_id: stream.generationId ?? undefined,
       })
       // The dashboard's "Scripts queued" feed reads from /scripts?needs_script=true.
       // A successful save flips that flag, so bust the cache.

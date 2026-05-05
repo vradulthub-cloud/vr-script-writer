@@ -215,6 +215,48 @@ CREATE INDEX IF NOT EXISTS idx_scripts_studio ON scripts(studio);
 CREATE INDEX IF NOT EXISTS idx_scripts_tab ON scripts(tab_name);
 CREATE INDEX IF NOT EXISTS idx_scripts_female ON scripts(female COLLATE NOCASE);
 
+-- Script generations — one row per /api/scripts/generate call so we can
+-- correlate the model's raw output with whatever the editor eventually
+-- approved (or rejected). Critical for fine-tuning: training pairs need
+-- both (input prompt, raw model output) and (raw model output, edited
+-- final). Without this table, we'd only ever see the final saved version
+-- and lose the diff.
+--
+-- Lifecycle:
+--   INSERT at /generate start (with prompt input + empty raw_output)
+--   UPDATE at /generate stream end (raw_output filled in)
+--   UPDATE at /save when gen_id is passed (edited_to + script_id + status)
+--   UPDATE at approval decision (approval_id + decided_at + decision_notes)
+CREATE TABLE IF NOT EXISTS script_generations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    generated_at TEXT NOT NULL,
+    generated_by TEXT DEFAULT '',          -- email of the user who clicked Generate
+    -- Prompt input (mirrors ScriptGenRequest)
+    studio TEXT NOT NULL DEFAULT '',
+    scene_type TEXT DEFAULT '',
+    female TEXT DEFAULT '',
+    male TEXT DEFAULT '',
+    destination TEXT DEFAULT '',
+    director_note TEXT DEFAULT '',
+    -- Reproducibility
+    model_id TEXT DEFAULT '',              -- e.g. 'vr-scriptwriter:latest' or static-njoi
+    seed INTEGER DEFAULT 0,
+    temperature REAL DEFAULT 0.0,
+    -- Output and lifecycle
+    raw_output TEXT DEFAULT '',            -- streamed text, accumulated server-side
+    status TEXT DEFAULT 'pending',         -- pending | discarded | edited | approved-asis | rejected
+    edited_to TEXT DEFAULT '',             -- final saved plot/sections JSON when status='edited'
+    -- Linkage to downstream rows
+    script_id INTEGER DEFAULT 0,           -- scripts.id when saved
+    approval_id TEXT DEFAULT '',           -- approvals.approval_id when submitted for approval
+    decided_at TEXT DEFAULT '',
+    decision_notes TEXT DEFAULT ''         -- freeform reason from approver, when rejected
+);
+CREATE INDEX IF NOT EXISTS idx_gen_studio ON script_generations(studio);
+CREATE INDEX IF NOT EXISTS idx_gen_generated_at ON script_generations(generated_at);
+CREATE INDEX IF NOT EXISTS idx_gen_status ON script_generations(status);
+CREATE INDEX IF NOT EXISTS idx_gen_script_id ON script_generations(script_id);
+
 -- Budget rates per (shoot_date, female_talent). Source: Budgets sheet.
 -- Mirrored here so /api/shoots/ doesn't pay a Sheets read on every request.
 -- Keys are lowercase to match the in-router cache contract.

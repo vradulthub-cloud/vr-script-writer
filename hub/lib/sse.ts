@@ -8,6 +8,12 @@ interface StreamState {
   error: string | null
   reconnecting: boolean
   attempts: number
+  // Set when a backend that supports generation tracking emits a
+  // {type: "generation_id"} event before any text deltas. Caller passes
+  // it back on save so the post-edit version links to the source
+  // generation row in script_generations. null when not applicable
+  // (older backends, non-tracking endpoints).
+  generationId: number | null
 }
 
 const MAX_RECONNECT_ATTEMPTS = 3
@@ -26,7 +32,7 @@ const MAX_RECONNECT_ATTEMPTS = 3
  */
 export function useStream() {
   const [state, setState] = useState<StreamState>({
-    output: "", streaming: false, error: null, reconnecting: false, attempts: 0,
+    output: "", streaming: false, error: null, reconnecting: false, attempts: 0, generationId: null,
   })
   const abortRef = useRef<AbortController | null>(null)
   const lastArgsRef = useRef<{ url: string; token: string | undefined; body: unknown } | null>(null)
@@ -50,6 +56,8 @@ export function useStream() {
       error: null,
       reconnecting: false,
       attempts: attempt,
+      // Reset on retry — a new attempt means a new server-side generation row
+      generationId: attempt === 0 ? s.generationId : null,
     }))
 
     let hadAnyOutput = false
@@ -86,6 +94,8 @@ export function useStream() {
             if (msg.type === "text") {
               hadAnyOutput = true
               setState(s => ({ ...s, output: s.output + msg.text }))
+            } else if (msg.type === "generation_id") {
+              setState(s => ({ ...s, generationId: typeof msg.id === "number" ? msg.id : null }))
             } else if (msg.type === "error") {
               setState(s => ({ ...s, error: msg.error }))
             }
@@ -120,7 +130,7 @@ export function useStream() {
   const start = useCallback(async (url: string, token: string | undefined, body: unknown) => {
     clearRetry()
     lastArgsRef.current = { url, token, body }
-    setState({ output: "", streaming: true, error: null, reconnecting: false, attempts: 0 })
+    setState({ output: "", streaming: true, error: null, reconnecting: false, attempts: 0, generationId: null })
     await runOnce(url, token, body, 0)
   }, [clearRetry, runOnce])
 
@@ -141,7 +151,7 @@ export function useStream() {
   const reset = useCallback(() => {
     clearRetry()
     lastArgsRef.current = null
-    setState({ output: "", streaming: false, error: null, reconnecting: false, attempts: 0 })
+    setState({ output: "", streaming: false, error: null, reconnecting: false, attempts: 0, generationId: null })
   }, [clearRetry])
 
   return { ...state, start, stop, resume, reset }

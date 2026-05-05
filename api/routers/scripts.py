@@ -78,6 +78,9 @@ class ScriptSaveBody(BaseModel):
     shoot_location: str = ""
     set_design: str = ""
     props: str = ""
+    # Optional — when present, links this save back to a /generate call so we
+    # can track raw model output → edited final version diff for fine-tuning.
+    generation_id: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -142,25 +145,89 @@ async def list_scripts(
     return [_row_to_script(dict(r)) for r in rows]
 
 
+SCRIPT_MODEL_ID = "vr-scriptwriter:latest"
+SCRIPT_TEMPERATURE = 0.8
+SCRIPT_MAX_TOKENS = 4096
+
+
+def _create_generation_row(
+    *, body: ScriptGenRequest, user_email: str,
+    model_id: str, seed: int, temperature: float,
+) -> int:
+    """Insert a script_generations row at /generate start; return the row id.
+
+    Empty raw_output at this point — gets filled in via _finalize_generation
+    once the stream completes (or stays empty if it errors mid-stream).
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as conn:
+        cur = conn.execute(
+            """INSERT INTO script_generations
+               (generated_at, generated_by, studio, scene_type, female, male,
+                destination, director_note, model_id, seed, temperature,
+                raw_output, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
+            (
+                now, user_email,
+                body.studio, body.scene_type, body.female, body.male,
+                body.destination or "", body.director_note or "",
+                model_id, seed, temperature,
+                "",
+            ),
+        )
+        return cur.lastrowid
+
+
+def _finalize_generation(gen_id: int, raw_output: str) -> None:
+    """Update the script_generations row with the accumulated stream output."""
+    if not gen_id:
+        return
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE script_generations SET raw_output=? WHERE id=?",
+                (raw_output, gen_id),
+            )
+    except Exception as exc:
+        _log.warning("Failed to finalize generation %d: %s", gen_id, exc)
+
+
 @router.post("/generate")
 async def generate_script(body: ScriptGenRequest, user: CurrentUser):
     """
-    Generate a VR production script via Claude.
+    Generate a VR production script via Ollama (streamed) or static plot for NJOI.
 
-    For NaughtyJOI: returns a static JSON response immediately (no AI).
-    For all other studios: streams via Server-Sent Events (SSE).
+    Every call creates a row in script_generations capturing the prompt input,
+    model parameters, and (after the stream completes) the raw model output —
+    so we can later correlate raw output with what got edited and approved.
+    For streaming responses, the client receives a `generation_id` SSE event
+    before any text deltas; that id should be passed back on /save so the
+    edited version is linked to the source generation.
     """
-    # NJOI uses a fixed plot — no AI needed
+    user_email = user.get("email", "")
+
+    # NJOI uses a fixed plot — no AI, but still log the call for completeness
     if body.studio == "NaughtyJOI":
+        gen_id = _create_generation_row(
+            body=body, user_email=user_email,
+            model_id="static-njoi", seed=0, temperature=0.0,
+        )
+        _finalize_generation(gen_id, NJOI_STATIC_PLOT)
         return {
             "plot": NJOI_STATIC_PLOT,
             "theme": "JOI Experience",
             "streaming": False,
+            "generation_id": gen_id,
         }
 
-    settings = get_settings()
+    seed = random.randint(0, 2**31 - 1)
+    gen_id = _create_generation_row(
+        body=body, user_email=user_email,
+        model_id=SCRIPT_MODEL_ID, seed=seed, temperature=SCRIPT_TEMPERATURE,
+    )
 
     def event_stream():
+        accumulated: list[str] = []
         try:
             from api.ollama_client import ollama_stream
             prompt = build_script_prompt(
@@ -172,18 +239,22 @@ async def generate_script(body: ScriptGenRequest, user: CurrentUser):
                 body.director_note,
             )
             sys_p = get_prompt("script.system", fallback=SYSTEM_PROMPT)
-            # Per-call random seed so back-to-back generations actually differ.
-            # Without this, the local model's dominant pattern wins every time.
-            seed = random.randint(0, 2**31 - 1)
+            # Send the generation_id first so the client can attach it to /save.
+            yield f"data: {json.dumps({'type': 'generation_id', 'id': gen_id})}\n\n"
             for delta in ollama_stream(
                 "script", prompt, system=sys_p,
-                max_tokens=4096, temperature=0.8, seed=seed,
+                max_tokens=SCRIPT_MAX_TOKENS, temperature=SCRIPT_TEMPERATURE, seed=seed,
             ):
+                accumulated.append(delta)
                 yield f"data: {json.dumps({'type': 'text', 'text': delta})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
             _log.error("Script generation failed: %s", exc, exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+        finally:
+            # Persist whatever we got — even partial output is useful training
+            # signal for "what made the model fail mid-script".
+            _finalize_generation(gen_id, "".join(accumulated))
 
     return StreamingResponse(
         event_stream(),
@@ -266,6 +337,13 @@ async def save_script(body: ScriptSaveBody, user: CurrentUser):
             )
             script_id = cursor.lastrowid
 
+    # Link this save back to the originating /generate call so we can later
+    # diff raw model output against the edited final version. Editor may have
+    # tweaked anything between the model's stream output and what they hit
+    # Save on — that diff is the highest-signal training data we get.
+    if body.generation_id:
+        _link_generation_to_save(body.generation_id, script_id, body)
+
     # Fire-and-forget Sheets write
     threading.Thread(
         target=_write_script_to_sheet,
@@ -274,6 +352,40 @@ async def save_script(body: ScriptSaveBody, user: CurrentUser):
     ).start()
 
     return {"id": script_id, "status": "saved"}
+
+
+def _link_generation_to_save(gen_id: int, script_id: int, body: ScriptSaveBody) -> None:
+    """Attach a saved script to its source generation, capturing the post-edit
+    version. status is 'edited' when the saved plot differs meaningfully from
+    raw_output, else 'approved-asis'."""
+    edited_to = json.dumps({
+        "theme":       body.theme,
+        "plot":        body.plot,
+        "wardrobe_f":  body.wardrobe_f,
+        "wardrobe_m":  body.wardrobe_m,
+        "location":    body.shoot_location,
+        "props":       body.props,
+    })
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT raw_output FROM script_generations WHERE id=?", (gen_id,)
+            ).fetchone()
+            if not row:
+                _log.warning("save linked to unknown generation_id=%d", gen_id)
+                return
+            raw = (dict(row).get("raw_output") or "").strip()
+            # Heuristic: if the saved plot text appears verbatim in raw_output,
+            # the editor approved without changes. Anything else is 'edited'.
+            new_status = "approved-asis" if (body.plot.strip() and body.plot.strip() in raw) else "edited"
+            conn.execute(
+                """UPDATE script_generations
+                   SET status=?, edited_to=?, script_id=?
+                   WHERE id=?""",
+                (new_status, edited_to, script_id, gen_id),
+            )
+    except Exception as exc:
+        _log.warning("Failed to link generation %d to script %d: %s", gen_id, script_id, exc)
 
 
 # ---------------------------------------------------------------------------

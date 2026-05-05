@@ -22,6 +22,9 @@ interface BatchResult {
   autoSaved?: boolean
   dryRun?: boolean
   error?: string
+  // The script_generations.id from the SSE stream — passed back to /save
+  // so the saved script links to its source generation row.
+  generationId?: number
 }
 
 type Decision = "accepted" | "rejected"
@@ -98,7 +101,7 @@ export function BatchPanel({ rows, idToken, isAdmin, onGenerated }: Props) {
       }
 
       try {
-        const text = await streamOnce(
+        const { text, generationId } = await streamOnce(
           `${API_BASE_URL}/api/scripts/generate`,
           idToken,
           {
@@ -131,6 +134,7 @@ export function BatchPanel({ rows, idToken, isAdmin, onGenerated }: Props) {
           rowId: row.id, tabName: row.tab_name, sheetRow: row.sheet_row,
           studio: row.studio, female: row.female, male: row.male,
           scene: sceneType, label, fullText: text, fields, violations,
+          generationId: generationId ?? undefined,
         })
       } catch (e) {
         collected.push({
@@ -165,6 +169,7 @@ export function BatchPanel({ rows, idToken, isAdmin, onGenerated }: Props) {
           wardrobe_m: r.fields["WARDROBE (M)"],
           shoot_location: r.fields["SHOOT LOCATION"],
           props: "",
+          generation_id: r.generationId,
         })
         void revalidateAfterWrite([TAG_SCRIPTS])
       } else {
@@ -574,7 +579,9 @@ function sceneTypeFor(studio: string, _title: string, _theme: string): string {
  * 4xx responses are re-thrown — no retry, since batch operations should
  * fail fast on the bad row and keep going for the rest.
  */
-async function streamOnce(url: string, token: string | undefined, body: unknown): Promise<string> {
+async function streamOnce(
+  url: string, token: string | undefined, body: unknown,
+): Promise<{ text: string; generationId: number | null }> {
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -591,6 +598,7 @@ async function streamOnce(url: string, token: string | undefined, body: unknown)
   const decoder = new TextDecoder()
   let buf = ""
   let out = ""
+  let generationId: number | null = null
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
@@ -602,13 +610,16 @@ async function streamOnce(url: string, token: string | undefined, body: unknown)
       try {
         const msg = JSON.parse(line.slice(6))
         if (msg.type === "text") out += msg.text
+        else if (msg.type === "generation_id") {
+          if (typeof msg.id === "number") generationId = msg.id
+        }
         else if (msg.type === "error") throw new Error(msg.error)
       } catch (e) {
         if (e instanceof Error && !e.message.includes("JSON")) throw e
       }
     }
   }
-  return out
+  return { text: out, generationId }
 }
 
 function parseSections(text: string): Record<string, string> {
